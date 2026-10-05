@@ -9,8 +9,9 @@ impl State {
  pub fn encode(self)->[u8;32]{let mut b=[0;32];b[0..4].copy_from_slice(&self.action.to_le_bytes());b[4..8].copy_from_slice(&self.flags.to_le_bytes());b[8..16].copy_from_slice(&self.raw_action_bits.to_le_bytes());b[16..20].copy_from_slice(&self.animation_id.to_le_bytes());for(i,v)in[self.animation_time,self.animation_length,self.playback_rate].iter().enumerate(){b[20+i*4..24+i*4].copy_from_slice(&v.to_le_bytes());}b}
  pub fn decode(b:&[u8])->Self{Self{action:u32::from_le_bytes(b[0..4].try_into().unwrap()),flags:u32::from_le_bytes(b[4..8].try_into().unwrap()),raw_action_bits:u64::from_le_bytes(b[8..16].try_into().unwrap()),animation_id:i32::from_le_bytes(b[16..20].try_into().unwrap()),animation_time:f32::from_le_bytes(b[20..24].try_into().unwrap()),animation_length:f32::from_le_bytes(b[24..28].try_into().unwrap()),playback_rate:f32::from_le_bytes(b[28..32].try_into().unwrap())}}
 }
-pub fn observe(player:&PlayerIns)->State {
- let modules=&player.chr_ins.modules;let mut s=State{raw_action_bits:modules.action_request.action_requests.0,..Default::default()};
+pub fn observe(player:&PlayerIns)->State {observe_chr(&player.chr_ins)}
+pub fn observe_chr(chr:&eldenring::cs::ChrIns)->State {
+ let modules=&chr.modules;let mut s=State{raw_action_bits:modules.action_request.action_requests.0,..Default::default()};
  let tae=&modules.time_act;if let Some(anim)=tae.anim_queue.get(tae.read_idx as usize){
   if anim.anim_id>=0{s.animation_id=anim.anim_id;s.flags|=1;
    if anim.play_time.is_finite()&&anim.anim_length.is_finite()&&anim.play_time>=0.0&&anim.anim_length>0.0&&anim.play_time<=anim.anim_length+1.0{s.animation_time=anim.play_time;s.animation_length=anim.anim_length;s.flags|=2;}

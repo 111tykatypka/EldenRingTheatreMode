@@ -21,6 +21,8 @@ mod replay_runtime;
 mod local_input;
 mod player_action;
 mod locomotion_trace;
+mod character_capture;
+mod grounding;
 const STATE_WAITING:u32=0;const DLL_LOADED:u32=1;const PROFILE_VALIDATING:u32=2;const PROFILE_READY:u32=3;const TASK_SIGNATURE_SCAN:u32=10;const TASK_SIGNATURE_READY:u32=11;const TASK_RUNTIME_SEARCH:u32=12;const TASK_RUNTIME_READY:u32=13;const WORLDCHR_SEARCH:u32=20;const WORLDCHR_READY:u32=21;const PLAYER_SEARCH:u32=22;const PLAYER_FOUND:u32=23;const STATE_READY:u32=24;
 const ERR_TASK_TIMEOUT:u32=0x201;const ERR_INIT_PANIC:u32=0x202;const ERR_SAMPLER_THREAD:u32=0x203;const ERR_IPC_THREAD:u32=0x204;const ERR_TASK_SIGNATURE:u32=0x205;
 const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_CHECK_PRODUCT_VERSION:u32=0x0004;const TM_CHECK_ARCH:u32=0x0008;const TM_CHECK_SHA256:u32=0x0010;const TM_CHECK_IMAGE_BASE:u32=0x0020;
@@ -34,7 +36,11 @@ const _:()=assert!(std::mem::size_of::<WireMessage>()==104);
 #[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
 static SEQ:AtomicU64=AtomicU64::new(0);static TIME:AtomicU64=AtomicU64::new(0);static PRESENT:AtomicU32=AtomicU32::new(0);static PROFILE:AtomicU32=AtomicU32::new(STATE_WAITING);static INIT_STATE:AtomicU32=AtomicU32::new(STATE_WAITING);static VALUES:[AtomicU32;10]=[const{AtomicU32::new(0)};10];
 fn monotonic_ns()->u64 {let mut ticks=0;unsafe{QueryInterruptTimePrecise(&mut ticks)};ticks*100}
-fn log_game(message:&str){let path=std::env::temp_dir().join("TheaterModeGame.log");if let Ok(mut file)=OpenOptions::new().create(true).append(true).open(path){let _=writeln!(file,"{}",message);}}
+fn log_game(message:&str){
+ static QUEUE:std::sync::OnceLock<std::sync::mpsc::SyncSender<String>>=std::sync::OnceLock::new();
+ let sender=QUEUE.get_or_init(||{let(tx,rx)=std::sync::mpsc::sync_channel::<String>(1024);let _=std::thread::Builder::new().name("TheaterMode.Log".into()).spawn(move||{let path=std::env::temp_dir().join("TheaterModeGame.log");if let Ok(mut file)=OpenOptions::new().create(true).append(true).open(path){while let Ok(message)=rx.recv(){let _=writeln!(file,"{}",message);let _=file.flush();}}});tx});
+ let _=sender.try_send(message.to_owned());
+}
 fn set_state(state:u32,label:&str){let old=INIT_STATE.swap(state,Ordering::AcqRel);if old!=state{log_game(&format!("INIT_STATE={label} ({state})"));}}
 type RegisterTaskFn=unsafe extern "C" fn(&CSTaskImp,CSTaskGroupIndex,&RecurringTask<FD4TaskData>);
 const REGISTER_TASK_PATTERN:&[pelite::pattern::Atom]=pelite::pattern!("e8 ? ? ? ? 48 8b 0d ? ? ? ? 4c 8b c7 8b d3 e8 $ { ' }");
@@ -116,9 +122,16 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let mut probe=probe_runtime::GameProbe::default();
                 let mut replay=replay_runtime::GameReplay::default();
                 let mut trace=locomotion_trace::Capture::default();
+                let mut characters=character_capture::Capture::new();
+                let mut grounding=grounding::Capture::default();
+                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{local_input::early_tick(monotonic_ns());})));
+                unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PreBehaviorSafe,early);}
+                log_game("EXPERIMENTAL normalized input callback registered at ChrIns_PreBehaviorSafe; inactive unless replay owns local player");
                 let mut last_animation_id=-1i32;
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
+                    characters.tick(now);
+                    grounding.tick(now);
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||replay.tick(now))).is_err(){replay.fail();}
@@ -158,6 +171,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
             PROFILE.store(ERR_SAMPLER_THREAD,Ordering::Release);
         }
         if std::thread::Builder::new().name("TheaterMode.LocomotionTrace".into()).spawn(locomotion_trace::worker).is_err(){log_game("Locomotion trace worker unavailable");}
+        let _=std::thread::Builder::new().name("TheaterMode.Characters".into()).spawn(character_capture::worker);
         let ipc=std::thread::Builder::new().name("TheaterMode.IPC".into()).spawn(pipe_worker);
         if ipc.is_err() {
             log_game("IPC worker thread creation failed");

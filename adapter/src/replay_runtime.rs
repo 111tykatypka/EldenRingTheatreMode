@@ -26,6 +26,7 @@ pub fn stop(detail: u32) {
 }
 pub fn connection(connected: bool) { CONNECTED.store(connected,Ordering::Release); stop(0); }
 pub fn heartbeat(now_ns: u64) { HEARTBEAT_NS.store(now_ns,Ordering::Release); }
+pub fn input_owned(now:u64)->bool{active()&&transform_probe::lease_valid(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),now)}
 pub fn active() -> bool { PENDING.load(Ordering::Acquire) || matches!(status().0,replay::PLAYING|replay::PAUSED) }
 pub fn status() -> (u32,u32,u64,u64,u64) {
     // An in-flight callback may finish publishing just after STOP. Its old
