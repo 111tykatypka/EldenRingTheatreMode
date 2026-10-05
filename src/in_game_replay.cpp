@@ -15,7 +15,7 @@ void Controller::transition(Phase phase,const std::wstring& diagnostic){phase_=p
 void Controller::fail(const std::wstring& diagnostic){control_.emergency_stop();if(player_)player_->stop();transition(Phase::error,diagnostic);player_=nullptr;}
 game_control::Transform Controller::transform() const {const auto&s=player_->state();return {{s.position.x,s.position.y,s.position.z},{s.orientation.x,s.orientation.y,s.orientation.z,s.orientation.w}};}
 bool Controller::play(replay::Player& player,std::uint64_t requested_limit,replay::Player::Clock::time_point now){
-    if(phase_==Phase::paused&&player_==&player){player_->play(now);transition(Phase::playing,L"PLAYING — transform only");tick(now);return active();}
+    if(phase_==Phase::paused&&player_==&player){player_->play(now);transition(Phase::playing,animation_?L"PLAYING — transforms + EXPERIMENTAL animation requests":L"PLAYING — transform only");tick(now);return active();}
     if(active())return false;
     player_=&player;const auto remote=control_.state();const auto boot_ns=theater_clock::monotonic_ns();
     if(!remote.connected||!remote.ready||!remote.replay_supported){fail(L"ERROR: matching Phase5 DLL / Player FOUND required");return false;}
@@ -60,7 +60,7 @@ void Controller::tick(replay::Player::Clock::time_point now){
     }
     if(phase_==Phase::starting){
         if(remote.session==session_&&remote.replay_phase==game_control::playing&&remote.applied_sequence){
-            player_->play(now);transition(Phase::playing,L"PLAYING — transform only");
+            player_->play(now);transition(Phase::playing,animation_?L"PLAYING — transforms + EXPERIMENTAL animation requests":L"PLAYING — transform only");
             if(pause_on_start_){player_->pause(now);transition(Phase::paused,L"PAUSED — holding transform");}
         }else{if(now>=deadline_)fail(L"ERROR: first game-thread write was not acknowledged");return;}
     }
