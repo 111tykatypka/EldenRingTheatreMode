@@ -1,5 +1,22 @@
 # EldenRingTheatreMode
 
+## Modern rebuild checkpoint
+
+Branch `modern-theater-rebuild`: C++ Dear ImGui docking/Win32/DX11 editor over the
+existing Rust game adapter and independent replay worker. Player replay remains
+separate from the new read-only nearby-character capture and optional ERPLAY03
+character tracks. New capture and input behavior requires live user validation.
+
+Build matching Release x64 artifacts and run tests:
+`powershell -ExecutionPolicy Bypass -File scripts\Build-Modern.ps1`.
+Output: `C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Modern`.
+Golden Phase5 is preserved; do not run historical Phase5 packaging scripts from
+this branch. See [current status](notes/MODERN_REBUILD_STATUS.md),
+[manual checkpoint](notes/RUNTIME_TEST_PLAN.md) and
+[known limitations](notes/CURRENT_RUNTIME_LIMITATIONS.md).
+
+The sections below describe historical checkpoints.
+
 ## Phase 4B checkpoint
 
 Start the existing `EldenRingTheaterMode.exe` and click **START ELDEN RING** to launch the installed YAFSML with the `TheaterMode.dll` beside this EXE. **YAFSML...** selects the launcher if its location changes. The original loader configuration and game files are preserved; a separate launch configuration is generated in application data.
