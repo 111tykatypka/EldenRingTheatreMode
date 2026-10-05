@@ -68,3 +68,7 @@ captures/
 recordings/
 *.erplay
 .vendor-cache/
+
+# Python research utilities
+__pycache__/
+*.pyc

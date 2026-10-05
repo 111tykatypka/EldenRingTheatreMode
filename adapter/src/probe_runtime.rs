@@ -14,6 +14,7 @@ static PENDING:Mutex<Option<Request>>=Mutex::new(None);
 #[derive(Clone,Copy)] struct Request { sequence:u64, generation:u64, received_ns:u64, delta:[f32;3] }
 
 fn stop(detail:u32) {
+    crate::ownership_probe::stop();
     crate::replay_runtime::stop(detail);
     crate::locomotion_trace::stop();
     GENERATION.fetch_add(1,Ordering::AcqRel);
@@ -103,7 +104,7 @@ fn status(version:u16)->wire::Packet {
     let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
     wire::Packet {version,player_action:Default::default(),replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32}else{0}) }
+        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32|64}else{0}) }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;
@@ -122,12 +123,15 @@ pub fn pipe_worker() {
                 Ok(packet)=>packet,Err(e)=>{stop(8);crate::log_game(&format!("CONTROL_ERROR=MALFORMED_PACKET ({e}); PROBE_STATE=OFF"));break;}
             };
             last_sequence=packet.sequence;COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);HEARTBEAT_NS.store(now_ns,Ordering::Release);crate::replay_runtime::heartbeat(now_ns);
+            if packet.kind==wire::OWNERSHIP_PROBE && ready() && !crate::replay_runtime::active(){crate::grounding::start(now_ns);crate::ownership_probe::receive(packet);}
             if packet.kind==wire::ACTOR_APPLY && ready(){crate::actor_replay::receive(packet,now_ns);}
+            if packet.kind==wire::RUNTIME_TRACE_START&&ready(){crate::grounding::start(now_ns);crate::log_game("RUNTIME_TRACE_START window_s=10 read_only=true");}
+            if packet.kind==wire::RUNTIME_TRACE_STOP{crate::grounding::stop();crate::log_game("RUNTIME_TRACE_STOP");}
             if matches!(packet.kind,wire::TRACE_START|wire::TRACE_STOP|wire::TRACE_MARK){
                 if packet.kind==wire::TRACE_STOP || (ready() && !crate::replay_runtime::active() && !matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING)){crate::locomotion_trace::command(packet.kind,packet.position[0] as u32);}
                 else{crate::log_game("LOCOMOTION_TRACE_REJECTED=BUSY_OR_NOT_READY");}
             }
-            if packet.kind==wire::STOP {COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);stop(0);crate::log_game("PROBE_STOP; PROBE_STATE=OFF");}
+            if packet.kind==wire::STOP {crate::grounding::stop();COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);stop(0);crate::log_game("PROBE_STOP; PROBE_STATE=OFF");}
             if packet.kind==wire::PROBE_NUDGE {
                 COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);
                 if !ready(){stop(5);crate::log_game("PROBE_REJECTED=RUNTIME_NOT_READY");}

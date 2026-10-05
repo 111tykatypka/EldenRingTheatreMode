@@ -7,15 +7,17 @@ use std::sync::{Mutex,atomic::{AtomicU64,AtomicUsize,Ordering}};
 static BUDGET:AtomicUsize=AtomicUsize::new(1024);
 static QUEUE_DROPS:AtomicU64=AtomicU64::new(0);
 pub fn configure_budget(n:usize){BUDGET.store(n.clamp(1,16384),Ordering::Release);}
-const MASK:u32=(1<<3)|(1<<4)|(1<<5);
-const ACTION_MASK:u64=(1u64<<35)-1;
+// Native ownership not established; conflicting debug layout must not be written.
+const MASK:u32=0;
+const ACTION_MASK:u64=0;
 static GENERATION:AtomicU64=AtomicU64::new(1);
 static PENDING:Mutex<Vec<(Packet,u64,u64)>>=Mutex::new(Vec::new());
 static OWNED:Mutex<Vec<(Packet,usize,u64)>>=Mutex::new(Vec::new());
 pub fn stop(){GENERATION.fetch_add(1,Ordering::AcqRel);}
 pub fn receive(packet:Packet,now:u64){
+    crate::grounding::actor_event(now,"actor_ipc_received",None,packet);
     let (phase,_,session,_,_)=crate::replay_runtime::status();
-    if !matches!(phase,1|2)||packet.session!=session{return;}
+    if !matches!(phase,1|2)||packet.session!=session{crate::grounding::actor_event(now,"actor_session_rejected",None,packet);return;}
     if let Ok(mut pending)=PENDING.lock(){
         let generation=GENERATION.load(Ordering::Acquire);
         pending.retain(|r|r.2==generation);
@@ -33,8 +35,8 @@ impl Actors {
  fn restore(lease:&Lease,world:&mut WorldChrMan){
   if let Some(chr)=world.chr_ins_by_handle_mut(&handle(lease.packet.applied_sequence)){
    if matches(chr,lease.packet)&&chr as *mut _ as usize==lease.address{
-    chr.debug_flags.0=(chr.debug_flags.0&!MASK)|(lease.flags&MASK);
-    let bits=&mut chr.modules.action_request.disabled_action_inputs.0;*bits=(*bits&!ACTION_MASK)|(lease.actions&ACTION_MASK);
+    if MASK!=0{chr.debug_flags.0=(chr.debug_flags.0&!MASK)|(lease.flags&MASK);}
+    if ACTION_MASK!=0{let bits=&mut chr.modules.action_request.disabled_action_inputs.0;*bits=(*bits&!ACTION_MASK)|(lease.actions&ACTION_MASK);}
    }
   }
  }
@@ -45,16 +47,16 @@ impl Actors {
   let Ok(world)=(unsafe{WorldChrMan::instance_mut()})else{self.incoming.clear();stop();return;};
   let local=world.main_player.as_ref().map(|p|p.chr_ins.field_ins_handle);
   for (packet,received,g) in self.incoming.drain(..){
-   if !enabled||g!=generation||Some(handle(packet.applied_sequence))==local{continue;}
-   let Some(chr)=world.chr_ins_by_handle_mut(&handle(packet.applied_sequence))else{self.rejected+=1;continue;};
-   if !matches(chr,packet){self.rejected+=1;continue;}
+   if !enabled||g!=generation||Some(handle(packet.applied_sequence))==local{crate::grounding::actor_event(now,"actor_disabled_generation_or_local",None,packet);continue;}
+   let Some(chr)=world.chr_ins_by_handle_mut(&handle(packet.applied_sequence))else{crate::grounding::actor_event(now,"actor_lookup_failed",None,packet);self.rejected+=1;continue;};
+   if !matches(chr,packet){crate::grounding::actor_event(now,"actor_identity_mismatch",Some(chr),packet);self.rejected+=1;continue;}
    let physics=&chr.modules.physics;
    let live=Transform{position:[physics.position.0,physics.position.1,physics.position.2],quaternion:[physics.orientation.0,physics.orientation.1,physics.orientation.2,physics.orientation.3]};
-   if !live.valid(){self.rejected+=1;continue;}
+   if !live.valid(){crate::grounding::actor_event(now,"actor_invalid_live_transform",Some(chr),packet);self.rejected+=1;continue;}
    let target=Transform{position:packet.position,quaternion:packet.quaternion};
    let index=if let Some(index)=self.owned.iter().position(|r|r.packet.applied_sequence==packet.applied_sequence){index}else{
     // Prototype may only acquire matching existing actors near their recorded placement.
-    if self.owned.len()>=BUDGET.load(Ordering::Acquire) || crate::transform_probe::distance(live,target)>20.0{self.rejected+=1;continue;}
+    if self.owned.len()>=BUDGET.load(Ordering::Acquire) || crate::transform_probe::distance(live,target)>20.0{crate::grounding::actor_event(now,"actor_budget_or_start_distance_rejected",Some(chr),packet);self.rejected+=1;continue;}
     crate::log_game(&format!("ACTOR_ACQUIRE session={} handle={:016X} entity={} npc={} start_distance={:.3}; ownership EXPERIMENTAL",packet.session,packet.applied_sequence,packet.detail,packet.replay_detail as i32,crate::transform_probe::distance(live,target)));
     self.owned.push(Lease{packet,generation,address:chr as *mut _ as usize,flags:chr.debug_flags.0,actions:chr.modules.action_request.disabled_action_inputs.0,origin:packet.replay_timestamp_ns,playback:Playback::default()});self.owned.len()-1
    };
@@ -62,7 +64,7 @@ impl Actors {
    if lease.address!=chr as *mut _ as usize||lease.generation!=generation{self.rejected+=1;continue;}
    let action=if lease.playback.phase==0{Action::Begin}else{Action::Apply};
    let request=Request{player_action:packet.player_action,animation_enabled:false,action,session:packet.session,sequence:packet.sequence,generation,received_ns:packet.timestamp_ns.min(received),replay_ns:packet.replay_timestamp_ns.saturating_sub(lease.origin),paused:packet.replay_state==2,target};
-   if lease.playback.ingest(request,live).is_err(){lease.playback.cancel();self.rejected+=1;}else{lease.packet=packet;}
+   if lease.playback.ingest(request,live).is_err(){crate::grounding::actor_event(now,"actor_target_rejected",Some(chr),packet);lease.playback.cancel();self.rejected+=1;}else{lease.packet=packet;}
   }
   let mut i=0;
   while i<self.owned.len(){
@@ -76,30 +78,22 @@ impl Actors {
    let p=&chr.modules.physics;
    let actual=Transform{position:[p.position.0,p.position.1,p.position.2],quaternion:[p.orientation.0,p.orientation.1,p.orientation.2,p.orientation.3]};
    if !actual.valid(){crate::replay_runtime::stop(4);break;}
-   chr.debug_flags.0|=MASK;chr.modules.action_request.disabled_action_inputs.0|=ACTION_MASK;
+   // Transform-only diagnostic; do not claim ownership or write conflicting debug fields.
    self.max_correction=self.max_correction.max(crate::transform_probe::distance(actual,r.target));
+   let mut applied_packet=lease.packet;applied_packet.position=r.target.position;applied_packet.quaternion=r.target.quaternion;applied_packet.replay_timestamp_ns=r.replay_ns.saturating_add(lease.origin);
+   crate::grounding::actor_event(now,"actor_write_before",Some(chr),applied_packet);
    let p=&mut chr.modules.physics;
    p.position.0=r.target.position[0];p.position.1=r.target.position[1];p.position.2=r.target.position[2];
    p.orientation=Quaternion(r.target.quaternion[0],r.target.quaternion[1],r.target.quaternion[2],r.target.quaternion[3]);
+   crate::grounding::actor_event(now,"actor_write_after",Some(chr),applied_packet);
    self.applied+=1;i+=1;
   }
   if now>=self.next_log && (!self.owned.is_empty()||self.applied!=0||self.rejected!=0){
-   crate::log_game(&format!("ACTOR_REPLAY experimental active={} applied_callbacks={} rejected={} actor_budget={} queue_drops={} max_prewrite_correction={:.4}; normalized movement/actions masked, AI ownership UNVERIFIED; no spawn/health/inventory/animation writes",self.owned.len(),self.applied,self.rejected,BUDGET.load(Ordering::Acquire),QUEUE_DROPS.load(Ordering::Relaxed),self.max_correction));self.next_log=now+1_000_000_000;self.applied=0;self.rejected=0;self.max_correction=0.0;
+   crate::log_game(&format!("ACTOR_REPLAY experimental active={} applied_callbacks={} rejected={} actor_budget={} queue_drops={} max_prewrite_correction={:.4}; native input/AI ownership NOT APPLIED; debug layout conflict SDK_530_REFERENCE_538; no spawn/health/inventory/animation writes",self.owned.len(),self.applied,self.rejected,BUDGET.load(Ordering::Acquire),QUEUE_DROPS.load(Ordering::Relaxed),self.max_correction));self.next_log=now+1_000_000_000;self.applied=0;self.rejected=0;self.max_correction=0.0;
   }
   if let Ok(mut owned)=OWNED.try_lock(){owned.clear();for r in &self.owned{owned.push((r.packet,r.address,r.generation));}}
  }
 }
-pub fn early_tick(now:u64){
- if !crate::replay_runtime::input_owned(now){return;}
- let Ok(owned)=OWNED.try_lock()else{return;};if owned.is_empty(){return;}
- let Ok(world)=(unsafe{WorldChrMan::instance_mut()})else{return;};
- let generation=GENERATION.load(Ordering::Acquire);
- for (packet,address,g) in owned.iter(){
-  if *g!=generation||now<packet.timestamp_ns||now-packet.timestamp_ns>250_000_000{continue;}
-  if let Some(chr)=world.chr_ins_by_handle_mut(&handle(packet.applied_sequence)){
-   if matches(chr,*packet)&&chr as *mut _ as usize==*address{
-    if !crate::local_input::neutralize(chr){crate::replay_runtime::stop(6);return;}
-   }
-  }
- }
+pub fn early_tick(_now:u64){
+ // No NPC input writes until ownership/layout is verified on the exact target.
 }

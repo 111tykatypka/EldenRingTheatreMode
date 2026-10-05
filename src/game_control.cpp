@@ -20,7 +20,7 @@ bool transfer(HANDLE pipe,HANDLE event,void* data,DWORD bytes,bool writing) {
 bool exchange(HANDLE pipe,HANDLE event,Packet& command,Packet& reply) {
     if(!command.timestamp_ns)command.timestamp_ns=theater_clock::monotonic_ns();
     return transfer(pipe,event,&command,sizeof(command),true)&&transfer(pipe,event,&reply,sizeof(reply),false)&&
-        reply.magic_value==magic&&reply.version==3&&reply.kind==status&&reply.state<=error&&reply.flags<=63&&reply.sequence==command.sequence&&reply.replay_state<=replay_error&&reply.applied_sequence<=reply.sequence;
+        reply.magic_value==magic&&reply.version==3&&reply.kind==status&&reply.state<=error&&reply.flags<=127&&reply.sequence==command.sequence&&reply.replay_state<=replay_error&&reply.applied_sequence<=reply.sequence;
 }
 }
 Client::~Client(){close();}
@@ -37,18 +37,30 @@ bool Client::trace(std::uint16_t kind,std::uint32_t phase){
     Packet p;p.kind=kind;p.position[0]=kind==trace_mark?float(phase):0.f;if(kind==trace_start)state_.trace_requested=true;if(kind==trace_stop)state_.trace_requested=false;
     latest_request_=p;replay_pending_=true;state_.pending=true;wake_.notify_one();return true;
 }
-bool Client::begin_replay(std::uint64_t session,Transform t,erplay::ActionState a,bool animation){return queue_replay(replay_begin,session,0,t,false,a,animation);}
-bool Client::apply_replay(std::uint64_t session,std::uint64_t ns,Transform t,bool pause,erplay::ActionState a,bool animation){return queue_replay(replay_apply,session,ns,t,pause,a,animation);}
-bool Client::finish_replay(std::uint64_t session,std::uint64_t ns,Transform t,erplay::ActionState a,bool animation){return queue_replay(replay_finish,session,ns,t,false,a,animation);}
-bool Client::queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t ns,Transform t,bool pause,erplay::ActionState a,bool animation){
-    if(!a.valid())return false;
+bool Client::runtime_trace(bool start){
+    std::lock_guard lock(mutex_);
+    if(!state_.connected||!state_.nightly_supported||pending_.load()||latest_request_)return false;
+    Packet p;p.kind=start?runtime_trace_start:runtime_trace_stop;latest_request_=p;replay_pending_=true;wake_.notify_one();return true;
+}
+bool Client::probe_actor(const erplay::CharacterRecord& a,std::uint32_t mode){
+    if(mode<1||mode>5||!a.id||(std::uint32_t(a.native_handle)>>28)!=1)return false;
+    std::lock_guard lock(mutex_);if(!state_.nightly_supported||!state_.ready||!state_.connected||active_session_||pending_.load()||latest_request_)return false;
+    Packet p;p.kind=ownership_probe;p.session=a.id;p.applied_sequence=a.native_handle;p.state=a.character_type;p.detail=a.entity_id;p.replay_detail=std::bit_cast<std::uint32_t>(a.npc_param);p.flags=mode;
+    latest_request_=p;replay_pending_=true;wake_.notify_one();return true;
+}
+bool Client::begin_replay(std::uint64_t session,Transform t,erplay::ActionState a,bool animation,bool actor_only){return queue_replay(replay_begin,session,0,t,false,a,animation,actor_only);}
+bool Client::apply_replay(std::uint64_t session,std::uint64_t ns,Transform t,bool pause,erplay::ActionState a,bool animation,bool actor_only){return queue_replay(replay_apply,session,ns,t,pause,a,animation,actor_only);}
+bool Client::finish_replay(std::uint64_t session,std::uint64_t ns,Transform t,erplay::ActionState a,bool animation,bool actor_only){return queue_replay(replay_finish,session,ns,t,false,a,animation,actor_only);}
+bool Client::queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t ns,Transform t,bool pause,erplay::ActionState a,bool animation,bool actor_only){
+    if(!a.valid()||(animation&&actor_only))return false;
     double norm=0;for(auto v:t.position)if(!std::isfinite(v))return false;for(auto v:t.quaternion){if(!std::isfinite(v))return false;norm+=double(v)*v;}
     if(!session||std::abs(norm-1.0)>0.001)return false;
     std::lock_guard lock(mutex_);
     if(state_.trace_active||state_.trace_requested||!state_.connected||!state_.ready||!state_.replay_supported||pending_.load()!=0||state_.phase==armed||state_.phase==observing)return false;
+    if(actor_only&&!state_.nightly_supported)return false;
     if(kind==replay_begin){if(active_session_||state_.pending||state_.replay_phase==playing||state_.replay_phase==paused)return false;active_session_=session;}
     else if(active_session_!=session)return false;
-    Packet p;p.timestamp_ns=theater_clock::monotonic_ns();p.kind=kind;p.session=session;p.replay_timestamp_ns=ns;p.replay_state=pause?paused:playing;p.action=a;p.flags=animation?1:0;
+    Packet p;p.timestamp_ns=theater_clock::monotonic_ns();p.kind=kind;p.session=session;p.replay_timestamp_ns=ns;p.replay_state=pause?paused:playing;p.action=a;p.flags=actor_only?2:(animation?1:0);
     std::copy(t.position.begin(),t.position.end(),p.position);std::copy(t.quaternion.begin(),t.quaternion.end(),p.quaternion);
     latest_request_=p;replay_pending_=true;state_.pending=true;wake_.notify_one();return true;
 }
@@ -70,7 +82,7 @@ void Client::run(std::atomic<DWORD>& sample_pid){
     auto send=[&](Packet command){command.sequence=++sequence;if(command.kind==probe_nudge)command.position[0]=0.5f;
         Packet reply;if(!exchange(pipe,event,command,reply))return false;
         if(reply.flags&1){double norm=0;for(auto v:reply.position)if(!std::isfinite(v))return false;for(auto v:reply.quaternion){if(!std::isfinite(v))return false;norm+=double(v)*v;}if(std::abs(norm-1.0)>0.01)return false;}
-        std::lock_guard lock(mutex_);state_.connected=true;state_.ready=(reply.flags&1)!=0;state_.actor_supported=(reply.flags&32)!=0;state_.replay_supported=(reply.flags&2)!=0;state_.trace_active=(reply.flags&4)!=0;state_.trace_supported=(reply.flags&8)!=0;state_.trace_failed=(reply.flags&16)!=0;if(state_.trace_failed)state_.trace_requested=false;
+        std::lock_guard lock(mutex_);state_.connected=true;state_.nightly_supported=(reply.flags&64)!=0;state_.ready=(reply.flags&1)!=0;state_.actor_supported=(reply.flags&32)!=0;state_.replay_supported=(reply.flags&2)!=0;state_.trace_active=(reply.flags&4)!=0;state_.trace_supported=(reply.flags&8)!=0;state_.trace_failed=(reply.flags&16)!=0;if(state_.trace_failed)state_.trace_requested=false;
         if(command.kind==replay_begin||command.kind==replay_apply||command.kind==replay_finish)++replay_sends;
         const auto elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-perf_start).count();
         if(elapsed>=1.0){state_.replay_send_hz=double(replay_sends)/elapsed;replay_sends=0;perf_start=std::chrono::steady_clock::now();}

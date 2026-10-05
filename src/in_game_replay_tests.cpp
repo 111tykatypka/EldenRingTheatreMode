@@ -39,10 +39,10 @@ private:
                 if(request.kind==game_control::stop){phase_=game_control::inactive;session_=0;}
                 if(request.kind==game_control::replay_begin||request.kind==game_control::replay_apply||request.kind==game_control::replay_finish){
                     session_=request.session;replay_ns_=request.replay_timestamp_ns;applied_=request.sequence;
-                    std::copy(std::begin(request.position),std::end(request.position),live_.position.begin());std::copy(std::begin(request.quaternion),std::end(request.quaternion),live_.quaternion.begin());
+                    if(request.flags!=2){std::copy(std::begin(request.position),std::end(request.position),live_.position.begin());std::copy(std::begin(request.quaternion),std::end(request.quaternion),live_.quaternion.begin());}
                     phase_=request.kind==game_control::replay_finish?game_control::finished:request.replay_state;
                 }
-                reply.kind=game_control::status;reply.sequence=sequence;reply.timestamp_ns=GetTickCount64()*1'000'000ULL;reply.flags=35;
+                reply.kind=game_control::status;reply.sequence=sequence;reply.timestamp_ns=GetTickCount64()*1'000'000ULL;reply.flags=99;
                 reply.session=session_;reply.replay_timestamp_ns=replay_ns_;reply.replay_state=phase_;reply.applied_sequence=applied_;
                 std::copy(live_.position.begin(),live_.position.end(),reply.position);std::copy(live_.quaternion.begin(),live_.quaternion.end(),reply.quaternion);
             }
@@ -102,6 +102,17 @@ int run_tests(int argc,wchar_t**argv){
     assert(controller.play(*player,5'000'000'000,now));
     assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));controller.stop();
     assert(wait_for([&]{return !client.state().pending;}));
+    // Transport mock: selected-only sends one NPC and carries a no-player-write session flag.
+    controller.enable_animation(false);controller.select_actor_only(1);controller.enable_characters(false);
+    const auto live_before=client.state().live;now=Clock::now();assert(controller.play(*player,5'000'000'000,now));
+    assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));
+    assert(game.last(game_control::replay_begin).flags==2);controller.tick(now+1s);
+    assert(wait_for([&]{return game.last(game_control::replay_apply).flags==2&&game.last(game_control::actor_apply).replay_timestamp_ns==1'000'000'000;}));
+    assert(client.state().live.position==live_before.position);
+    controller.stop();assert(wait_for([&]{return !client.state().pending;}));
+    controller.select_actor_only(999);assert(!controller.play(*player,5'000'000'000,now));
+    assert(wait_for([&]{return !client.state().pending;}));controller.select_actor_only(0);
+    controller.enable_characters(true);controller.enable_animation(true);
     if(argc>1){
         auto real=std::make_unique<replay::Player>(std::filesystem::path(argv[1]));const auto first=real->reader().sample(0);
         game.live({{first.position.x,first.position.y,first.position.z},{first.orientation.x,first.orientation.y,first.orientation.z,first.orientation.w}});

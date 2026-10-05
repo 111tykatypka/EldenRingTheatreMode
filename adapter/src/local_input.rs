@@ -11,13 +11,13 @@ pub struct LocalInputLock { saved:Option<(FieldInsHandle,bool,bool,u64)> }
 impl LocalInputLock {
     pub fn apply(&mut self, player:&mut PlayerIns) {
         let chr=&mut player.chr_ins;
-        if self.saved.is_none(){self.saved=Some((chr.field_ins_handle,chr.debug_flags.disabled_movement(),chr.debug_flags.disabled_secondary_actions(),chr.modules.action_request.disabled_action_inputs.0));crate::log_game("REPLAY_INPUT_LOCK=ON; EXPERIMENTAL local normalized action ownership; earlier PreBehaviorSafe callback");}
-        chr.debug_flags.set_disabled_movement(true);chr.debug_flags.set_disabled_secondary_actions(true);
+        if self.saved.is_none(){self.saved=Some((chr.field_ins_handle,false,false,chr.modules.action_request.disabled_action_inputs.0));crate::log_game("REPLAY_INPUT_LOCK=ON; EXPERIMENTAL normalized action masking; debug flags BLOCKED (layout conflict); earlier PreBehaviorSafe callback");}
+        // Debug flag writes blocked: pinned SDK 0x530 conflicts with Freecam reference 0x538.
         chr.modules.action_request.disabled_action_inputs.0|=ACTION_MASK;
         OWNED_HANDLE.store(handle(player),Ordering::Release);LAST_WRITE.store(crate::monotonic_ns(),Ordering::Release);
     }
     pub fn same_owner(&self,player:&PlayerIns)->bool{self.saved.as_ref().is_none_or(|(handle,_,_,_)|*handle==player.chr_ins.field_ins_handle)}
-    pub fn restore_player(&mut self,player:&mut PlayerIns){if let Some((handle,movement,secondary,disabled))=self.saved.take(){LAST_WRITE.store(0,Ordering::Release);if player.chr_ins.field_ins_handle==handle{player.chr_ins.debug_flags.set_disabled_movement(movement);player.chr_ins.debug_flags.set_disabled_secondary_actions(secondary);let mask=&mut player.chr_ins.modules.action_request.disabled_action_inputs.0;*mask=(*mask&!ACTION_MASK)|(disabled&ACTION_MASK);crate::log_game("REPLAY_INPUT_LOCK=RESTORED; owned bits only");}}}
+    pub fn restore_player(&mut self,player:&mut PlayerIns){if let Some((handle,_movement,_secondary,disabled))=self.saved.take(){LAST_WRITE.store(0,Ordering::Release);if player.chr_ins.field_ins_handle==handle{let mask=&mut player.chr_ins.modules.action_request.disabled_action_inputs.0;*mask=(*mask&!ACTION_MASK)|(disabled&ACTION_MASK);crate::log_game("REPLAY_INPUT_LOCK=RESTORED; owned bits only");}}}
     pub fn restore(&mut self) {
         if self.saved.is_none(){return;}
         if let Ok(player)=unsafe{PlayerIns::local_player_mut()}{self.restore_player(player);return;}
@@ -31,7 +31,7 @@ impl LocalInputLock {
 
 /// Experimental producer-stage neutralization. No OS device interception.
 pub fn early_tick(now:u64){
- let last=LAST_WRITE.load(Ordering::Acquire);if last==0||now.saturating_sub(last)>250_000_000||!crate::replay_runtime::input_owned(now){return;}
+ let last=LAST_WRITE.load(Ordering::Acquire);if last==0||now.saturating_sub(last)>250_000_000||!crate::replay_runtime::player_writes_enabled()||!crate::replay_runtime::input_owned(now){return;}
  let Ok(p)=(unsafe{PlayerIns::local_player_mut()})else{return;};if handle(p)!=OWNED_HANDLE.load(Ordering::Acquire){return;}
  if !neutralize(&mut p.chr_ins){crate::replay_runtime::stop(6);}
 }

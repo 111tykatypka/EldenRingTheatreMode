@@ -376,6 +376,7 @@ void play_replay() {
     if (can_start_game_replay()) {
       app.game_replay->enable_animation(app.animation);
       app.game_replay->enable_characters(app.actor_playback);
+      app.game_replay->select_actor_only(app.selected_actor_only?app.selected_replay_actor:0);
       app.game_replay->play(*app.replay_player, app.limit_ns);
     }
   } else
@@ -389,6 +390,7 @@ void restart_replay() {
     if (can_start_game_replay()) {
       app.game_replay->enable_animation(app.animation);
       app.game_replay->enable_characters(app.actor_playback);
+      app.game_replay->select_actor_only(app.selected_actor_only?app.selected_replay_actor:0);
       app.game_replay->restart(*app.replay_player, app.limit_ns);
     }
   } else

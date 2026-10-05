@@ -13,6 +13,8 @@ static APPLIED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static APPLIED_GENERATION: AtomicU64 = AtomicU64::new(0);
 static RECEIVE_COUNT:AtomicU64=AtomicU64::new(0);
 static PENDING: AtomicBool = AtomicBool::new(false);
+static ACTOR_ONLY:AtomicBool=AtomicBool::new(false);
+pub fn player_writes_enabled()->bool{!ACTOR_ONLY.load(Ordering::Acquire)}
 static REQUEST: Mutex<Option<Request>> = Mutex::new(None);
 
 pub fn stop(detail: u32) {
@@ -27,7 +29,8 @@ pub fn stop(detail: u32) {
 }
 pub fn connection(connected: bool) { CONNECTED.store(connected,Ordering::Release); stop(0); }
 pub fn heartbeat(now_ns: u64) { HEARTBEAT_NS.store(now_ns,Ordering::Release); }
-pub fn input_owned(now:u64)->bool{active()&&transform_probe::lease_valid(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),now)}
+pub fn connection_lease(now:u64)->bool{transform_probe::lease_valid(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),now)}
+pub fn input_owned(now:u64)->bool{active()&&connection_lease(now)}
 pub fn active() -> bool { PENDING.load(Ordering::Acquire) || matches!(status().0,replay::PLAYING|replay::PAUSED) }
 pub fn status() -> (u32,u32,u64,u64,u64) {
     // An in-flight callback may finish publishing just after STOP. Its old
@@ -47,7 +50,9 @@ pub fn receive(packet: wire::Packet, _now_ns: u64) {
         GENERATION.fetch_add(1,Ordering::AcqRel);
         PHASE.store(replay::INACTIVE,Ordering::Release); SESSION.store(0,Ordering::Release);
         APPLIED_SEQUENCE.store(0,Ordering::Release); DETAIL.store(0,Ordering::Release);
+        ACTOR_ONLY.store(packet.flags==2,Ordering::Release);
     } else if SESSION.load(Ordering::Acquire)!=packet.session || !active() { stop(replay::ERR_SESSION); return; }
+    if (packet.flags==2)!=ACTOR_ONLY.load(Ordering::Acquire){stop(replay::ERR_SESSION);return;}
     let request = Request {player_action:packet.player_action,animation_enabled:packet.flags&1!=0,action,session:packet.session,sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),
         received_ns:packet.timestamp_ns,replay_ns:packet.replay_timestamp_ns,paused:packet.replay_state==replay::PAUSED,
         target:Transform {position:packet.position,quaternion:packet.quaternion}};
@@ -105,17 +110,20 @@ impl GameReplay {
         };
         // STOP may arrive after a request was read; recheck just before the write.
         if generation!=GENERATION.load(Ordering::Acquire) || !CONNECTED.load(Ordering::Acquire) {return;}
-        self.input.apply(player);
-        self.animation.apply(player,r.player_action,r.animation_enabled);
-        let physics=&mut player.chr_ins.modules.physics;
-        physics.position.0=r.target.position[0];physics.position.1=r.target.position[1];physics.position.2=r.target.position[2];
-        physics.orientation=Quaternion(r.target.quaternion[0],r.target.quaternion[1],r.target.quaternion[2],r.target.quaternion[3]);
-        self.writes+=1;self.last_applied=Some(r.target);
+        if player_writes_enabled(){
+            self.input.apply(player);self.animation.apply(player,r.player_action,r.animation_enabled);
+            crate::grounding::request(now_ns,"player_write_before",&player.chr_ins,r);
+            let physics=&mut player.chr_ins.modules.physics;
+            physics.position.0=r.target.position[0];physics.position.1=r.target.position[1];physics.position.2=r.target.position[2];
+            physics.orientation=Quaternion(r.target.quaternion[0],r.target.quaternion[1],r.target.quaternion[2],r.target.quaternion[3]);
+            crate::grounding::request(now_ns,"player_write_after",&player.chr_ins,r);
+            self.writes+=1;self.last_applied=Some(r.target);
+        }
         // Test A: no guessed offsets, no velocity/gravity/input/HKS changes,
         // no proxy sync flags until visual runtime evidence establishes a need.
         if matches!(r.action,Action::Begin) || now_ns.saturating_sub(self.log_ns)>=1_000_000_000 {
-            crate::log_game(&format!("REPLAY_APPLY session={} sequence={} replay_ns={} requested={:?} actual_before={:?} previous_target_error={:?} writes={} mode={}; position/orientation ONLY",
-                r.session,r.sequence,r.replay_ns,r.target,live,previous.map(|p|transform_probe::distance(p,live)),self.writes,self.playback.phase));
+            crate::log_game(&format!("REPLAY_APPLY session={} sequence={} replay_ns={} requested={:?} actual_before={:?} previous_target_error={:?} writes={} mode={} player_writes_enabled={}; position/orientation ONLY",
+                r.session,r.sequence,r.replay_ns,r.target,live,previous.map(|p|transform_probe::distance(p,live)),self.writes,self.playback.phase,player_writes_enabled()));
             self.log_ns=now_ns;
         }
         if generation==GENERATION.load(Ordering::Acquire) {

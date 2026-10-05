@@ -88,6 +88,7 @@ struct App {
   std::uint64_t limit_ns{};
   bool animation{};
   bool actor_playback{};
+  bool selected_actor_only{};std::uint64_t selected_replay_actor{};
 };
 extern App app;
 struct PlaybackView {

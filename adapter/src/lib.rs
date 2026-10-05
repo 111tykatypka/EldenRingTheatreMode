@@ -23,6 +23,8 @@ mod player_action;
 mod locomotion_trace;
 mod character_capture;
 mod grounding;
+mod ownership_probe;
+mod world_observation;
 mod research_readonly;
 mod actor_replay;
 mod visual_capture;
@@ -126,21 +128,28 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let mut replay=replay_runtime::GameReplay::default();
                 let mut trace=locomotion_trace::Capture::default();
                 let mut characters=character_capture::Capture::new();
-                let mut grounding=grounding::Capture::default();
+                grounding::initialize();
+                let mut ownership=ownership_probe::Probe::default();
+                let mut world_observation=world_observation::Capture::default();
+                // Warm reflected singleton resolution outside game callbacks; instance may not yet exist.
+                let _=unsafe{eldenring::cs::CSLuaEventManImp::instance()};
                 let mut research=research_readonly::Capture::new();
                 let mut actors=actor_replay::Actors::new();
-                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{let now=monotonic_ns();local_input::early_tick(now);actor_replay::early_tick(now);} )));
+                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{let now=monotonic_ns();grounding::player(now,"player_pre_behavior");local_input::early_tick(now);actor_replay::early_tick(now);} )));
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PreBehaviorSafe,early);}
                 log_game("EXPERIMENTAL normalized input callback registered at ChrIns_PreBehaviorSafe; inactive unless replay owns local player");
                 let mut last_animation_id=-1i32;
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
                     characters.tick(now);
-                    grounding.tick(now);
+                    grounding::player(now,"player_post_physics_before");
+                    world_observation.tick(now);
                     research.tick(now);
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||replay.tick(now))).is_err(){replay.fail();}
+                    grounding::player(now,"player_post_physics_after");
+                    ownership.tick(now);
                     actors.tick(now);
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {
                         if !world_ready.swap(true,Ordering::AcqRel){log_game(&format!("WorldChrMan READY; instance={:p}",world));set_state(WORLDCHR_READY,"WORLDCHR_READY");set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}

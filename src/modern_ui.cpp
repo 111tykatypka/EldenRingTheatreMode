@@ -733,11 +733,16 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
     ImGui::BeginDisabled(p.active);
     ImGui::Checkbox("Experimental raw animation requests", &app.animation);
     ImGui::Checkbox("Experimental existing-character transform replay", &app.actor_playback);
+    ImGui::Checkbox("Replay selected NPC only (player writes OFF)", &app.selected_actor_only);
+    app.selected_replay_actor=selected_actor;
+    ImGui::Text("Selected replay actor: %llu",static_cast<unsigned long long>(selected_actor));
+    if(app.selected_actor_only&&selected_actor==0)ImGui::TextWrapped("Select a non-player track in Characters before starting. No track selected: playback will be rejected.");
     static int limit = 0;
     if (ImGui::Combo("Native duration", &limit,
-                     "Full replay\0First 5 seconds\0First 10 seconds\0"))
-      app.limit_ns = limit == 1   ? 5'000'000'000ULL
-                     : limit == 2 ? 10'000'000'000ULL
+                     "Full replay\0First 2 seconds\0First 5 seconds\0First 10 seconds\0"))
+      app.limit_ns = limit == 1   ? 2'000'000'000ULL
+                     : limit == 2 ? 5'000'000'000ULL
+                     : limit == 3 ? 10'000'000'000ULL
                                   : 0;
     ImGui::EndDisabled();
     static float radius = 200, hz = 60;
@@ -779,12 +784,29 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
     button("Game log",
            [] { reveal(fs::temp_directory_path() / L"TheaterModeGame.log"); });
     button("Collect tester logs", [] {
-      for(const auto*name:{L"TheaterModeGame.log",L"TheaterModeLocomotionTrace.log"}){
+      for(const auto*name:{L"TheaterModeGame.log",L"TheaterModeLocomotionTrace.log",L"TheaterModeRuntimeTrace.jsonl"}){
         auto source=fs::temp_directory_path()/name;
         if(fs::exists(source))fs::copy_file(source,app.logs/name,fs::copy_options::overwrite_existing);
       }
       reveal(app.logs);
     });
+    button("Runtime differential trace (10s)", [] { log_line("RUNTIME_TRACE_HOST_START queued="+std::to_string(app.control.runtime_trace(true))); });
+    ImGui::SameLine();button("Stop runtime trace", [] { app.control.runtime_trace(false); });
+    ImGui::TextWrapped("Read-only trace: LIVE or replay; PreBehavior, before/after PostPhysics writes. Stops after 10 seconds. Unknown proxy/ground fields are null.");
+    ImGui::BeginDisabled(p.active||selected_actor==0);
+    static int ownership_mode=4;
+    ImGui::Combo("Selected NPC experiment",&ownership_mode,"noMove only\0noAttack only\0noMove + noAttack\0noUpdate only\0animationSpeed = 0\0");
+    if(ownership_mode!=4)ImGui::TextWrapped("BLOCKED: debug flag offset conflict (SDK 0x530 vs reference 0x538). No flag write allowed in this nightly.");
+    ImGui::BeginDisabled(ownership_mode!=4);
+    button("Run selected NPC experiment (2s)", [] {
+      std::lock_guard lock(app.replay_mutex);
+      if(app.replay_player){for(const auto& a:app.replay_player->reader().characters())if(a.registry.id==selected_actor){
+        log_line("OWNERSHIP_PROBE_HOST selected_id="+std::to_string(selected_actor)+" mode="+std::to_string(ownership_mode+1)+" queued="+std::to_string(app.control.probe_actor(a.registry,ownership_mode+1)));break;
+      }}
+    });
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    ImGui::TextWrapped("Developer experiment: one exact existing NPC, 2s, captured values restored on Stop/disconnect/timeout. These are not verified AI ownership. Debug-camera control mode: NOT IMPLEMENTED.");
     button("Trace start", [] { app.control.trace(game_control::trace_start); });
     ImGui::SameLine();
     button("Trace stop", [] { app.control.trace(game_control::trace_stop); });
