@@ -1,0 +1,69 @@
+# =========================
+# Visual Studio
+# =========================
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# =========================
+# CMake / Visual Studio build
+# =========================
+.build/
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# =========================
+# Rust build artifacts
+# =========================
+adapter/target/
+target/
+
+# =========================
+# Compiled binaries
+# =========================
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+*.idb
+*.pch
+*.res
+*.tlog
+
+# =========================
+# Logs / temporary files
+# =========================
+*.log
+*.tmp
+*.bak
+
+# =========================
+# Crash dumps
+# =========================
+*.dmp
+
+# =========================
+# OS
+# =========================
+Thumbs.db
+Desktop.ini
+
+# =========================
+# Generated replay / capture data
+# =========================
+replays/
+captures/
+recordings/
+*.erplay

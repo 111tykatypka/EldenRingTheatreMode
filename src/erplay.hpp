@@ -1,0 +1,103 @@
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace erplay {
+
+struct Quaternion { float x{}, y{}, z{}, w{1.0f}; };
+struct Vec3 { float x{}, y{}, z{}; };
+struct Sample {
+    std::uint64_t index{};
+    std::uint64_t replay_time_ns{};
+    std::uint64_t source_time_ns{};
+    Vec3 position{};
+    Quaternion orientation{};
+};
+struct Metadata {
+    std::string title;
+    std::string description;
+    std::string tags;
+    std::string game_version{"2.7.0.0"};
+    std::string mod_version{"0.2.0"};
+    std::uint64_t recording_start_unix_ns{};
+    double requested_rate_hz{60.0};
+};
+struct Summary {
+    Metadata metadata;
+    std::uint64_t sample_count{};
+    std::uint64_t duration_ns{};
+    std::uint64_t paused_duration_ns{};
+    double actual_rate_hz{};
+    std::uint64_t chunk_count{};
+};
+enum class RecordingState { idle, recording, paused, saving, ready, error };
+
+// Incremental .tmp writer. finalize() validates the completed stream and atomically
+// renames it to the requested .erplay path. Destruction leaves an incomplete .tmp.
+class Writer {
+public:
+    Writer(std::filesystem::path final_path, Metadata metadata,
+           std::uint32_t samples_per_chunk = 600);
+    ~Writer();
+    Writer(const Writer&) = delete;
+    Writer& operator=(const Writer&) = delete;
+    void append(Sample sample);
+    [[nodiscard]] Summary finalize(std::uint64_t paused_duration_ns = 0);
+    [[nodiscard]] const std::filesystem::path& temporary_path() const noexcept;
+private:
+    struct Impl;
+    Impl* impl_;
+};
+
+// Converts the adapter's monotonic source clock into an active replay clock.
+// Paused intervals are omitted from replay time and their wall duration is retained.
+class RecordingSession {
+public:
+    explicit RecordingSession(Writer& writer) noexcept;
+    void start();
+    void ingest(Sample source_sample);
+    void pause(std::uint64_t source_time_ns);
+    void resume(std::uint64_t source_time_ns);
+    [[nodiscard]] Summary stop();
+    [[nodiscard]] RecordingState state() const noexcept { return state_; }
+    [[nodiscard]] std::uint64_t accepted_samples() const noexcept { return sample_index_; }
+    [[nodiscard]] std::uint64_t paused_duration_ns() const noexcept { return paused_total_ns_; }
+private:
+    Writer& writer_;
+    RecordingState state_{RecordingState::idle};
+    std::uint64_t source_origin_ns_{}, pause_started_ns_{}, paused_total_ns_{}, sample_index_{};
+    bool has_origin_{};
+};
+
+// Validated random-access reader. It keeps a compact timestamp/file-offset index
+// and only caches one serialized chunk of samples at a time.
+class Reader {
+public:
+    explicit Reader(const std::filesystem::path& path);
+    ~Reader();
+    Reader(Reader&&) noexcept;
+    Reader& operator=(Reader&&) noexcept;
+    Reader(const Reader&) = delete;
+    Reader& operator=(const Reader&) = delete;
+    [[nodiscard]] const Summary& summary() const noexcept;
+    [[nodiscard]] Sample sample(std::uint64_t index) const;
+    [[nodiscard]] std::pair<Sample, Sample> bracket(std::uint64_t replay_time_ns) const;
+    [[nodiscard]] std::uint64_t lower_sample(std::uint64_t replay_time_ns) const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// Full integrity scan. Throws with a diagnostic for malformed/truncated data.
+[[nodiscard]] Summary validate(const std::filesystem::path& path);
+// Salvages complete checksum-valid chunks from an interrupted .tmp file.
+// The original remains untouched; recovered output is validated before rename.
+[[nodiscard]] Summary recover_incomplete(const std::filesystem::path& temporary_path,
+                                         const std::filesystem::path& final_path);
+
+} // namespace erplay
