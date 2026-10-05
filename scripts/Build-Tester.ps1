@@ -43,7 +43,7 @@ Copy-Item -LiteralPath (Join-Path $repo 'ERPLAY_FORMAT.md') -Destination $output
 Copy-Item -LiteralPath (Join-Path $repo 'third_party\imgui\LICENSE.txt') -Destination (Join-Path $outputFull 'DearImGui-LICENSE.txt') -Force
 
 # Include attribution/license texts, never third-party binaries or game exports.
-$raw=& $cargo metadata --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --locked --offline --format-version 1
+$raw=& $cargo metadata --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --locked --offline --filter-platform x86_64-pc-windows-msvc --format-version 1
 if($LASTEXITCODE -ne 0){throw 'Cannot obtain pinned dependency/license metadata'}
 $metadata=$raw|ConvertFrom-Json
 $notices=@('Third-party Rust package metadata from the locked dependency graph.','Dear ImGui license is included separately.','No Elden Ring executable, camera-tool binary, game asset, Ghidra database or YAFSML binary is bundled.','')
