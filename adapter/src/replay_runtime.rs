@@ -13,6 +13,8 @@ static APPLIED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static APPLIED_GENERATION: AtomicU64 = AtomicU64::new(0);
 static RECEIVE_COUNT:AtomicU64=AtomicU64::new(0);
 static PENDING: AtomicBool = AtomicBool::new(false);
+static MODE:AtomicU32=AtomicU32::new(0);
+pub fn xz_only()->bool{MODE.load(Ordering::Acquire)==4}
 static ACTOR_ONLY:AtomicBool=AtomicBool::new(false);
 pub fn player_writes_enabled()->bool{!ACTOR_ONLY.load(Ordering::Acquire)}
 static REQUEST: Mutex<Option<Request>> = Mutex::new(None);
@@ -50,9 +52,10 @@ pub fn receive(packet: wire::Packet, _now_ns: u64) {
         GENERATION.fetch_add(1,Ordering::AcqRel);
         PHASE.store(replay::INACTIVE,Ordering::Release); SESSION.store(0,Ordering::Release);
         APPLIED_SEQUENCE.store(0,Ordering::Release); DETAIL.store(0,Ordering::Release);
+        MODE.store(packet.flags,Ordering::Release);
         ACTOR_ONLY.store(packet.flags==2,Ordering::Release);
     } else if SESSION.load(Ordering::Acquire)!=packet.session || !active() { stop(replay::ERR_SESSION); return; }
-    if (packet.flags==2)!=ACTOR_ONLY.load(Ordering::Acquire){stop(replay::ERR_SESSION);return;}
+    if packet.flags!=MODE.load(Ordering::Acquire){stop(replay::ERR_SESSION);return;}
     let request = Request {player_action:packet.player_action,animation_enabled:packet.flags&1!=0,action,session:packet.session,sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),
         received_ns:packet.timestamp_ns,replay_ns:packet.replay_timestamp_ns,paused:packet.replay_state==replay::PAUSED,
         target:Transform {position:packet.position,quaternion:packet.quaternion}};
@@ -97,9 +100,14 @@ impl GameReplay {
         let previous=self.last_applied;
         if let Some(r)=request {
             if matches!(r.action,Action::Begin) {
-                crate::log_game(&format!("REPLAY_START session={} live={:?} first={:?} delta={:?} distance={:.6} policy=warning-only map=UNKNOWN",
+                crate::log_game(if xz_only(){"REPLAY_TRANSFORM_MODE=XZ_ROTATION; recorded Y retained in trace target, native Y NOT WRITTEN"}else{"REPLAY_TRANSFORM_MODE=FULL_XYZ"});
+                crate::log_game(&format!("REPLAY_START session={} live={:?} first={:?} delta={:?} distance={:.6} policy=require-near-start map=UNKNOWN",
                     r.session,live,r.target,std::array::from_fn::<_,3,_>(|i|r.target.position[i]-live.position[i]),
                     transform_probe::distance(live,r.target)));
+            }
+            if matches!(r.action,Action::Begin)&&player_writes_enabled()&&!crate::start_guard::near(live,r.target) {
+                stop(10);self.playback.cancel();self.input.restore_player(player);self.animation.restore_player(player);
+                crate::log_game("REPLAY_ERROR=START_SCENE_UNKNOWN_DISPLACEMENT; no player write; horizontal<=1 vertical<=0.25 required");return;
             }
             if let Err(detail)=self.playback.ingest(r,live) {stop(detail);self.input.restore_player(player);self.animation.restore_player(player);crate::log_game(&format!("REPLAY_ERROR=TARGET_REJECTED detail={detail}"));return;}
             PENDING.store(false,Ordering::Release);
@@ -114,10 +122,12 @@ impl GameReplay {
             self.input.apply(player);self.animation.apply(player,r.player_action,r.animation_enabled);
             crate::grounding::request(now_ns,"player_write_before",&player.chr_ins,r);
             let physics=&mut player.chr_ins.modules.physics;
-            physics.position.0=r.target.position[0];physics.position.1=r.target.position[1];physics.position.2=r.target.position[2];
+            physics.position.0=r.target.position[0];
+            if !xz_only(){physics.position.1=r.target.position[1];}
+            physics.position.2=r.target.position[2];
             physics.orientation=Quaternion(r.target.quaternion[0],r.target.quaternion[1],r.target.quaternion[2],r.target.quaternion[3]);
             crate::grounding::request(now_ns,"player_write_after",&player.chr_ins,r);
-            self.writes+=1;self.last_applied=Some(r.target);
+            self.writes+=1;let mut applied=r.target;if xz_only(){applied.position[1]=live.position[1];}self.last_applied=Some(applied);
         }
         // Test A: no guessed offsets, no velocity/gravity/input/HKS changes,
         // no proxy sync flags until visual runtime evidence establishes a need.

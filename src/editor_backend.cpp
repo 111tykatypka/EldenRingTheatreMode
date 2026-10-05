@@ -1,3 +1,4 @@
+#include "ingame_editor_server.hpp"
 #include "editor_backend.hpp"
 namespace theater {
 App app;
@@ -374,7 +375,8 @@ void play_replay() {
     return;
   if (app.game_pid.load() || app.game_replay->active()) {
     if (can_start_game_replay()) {
-      app.game_replay->enable_animation(app.animation);
+      app.game_replay->enable_animation(app.animation&&!app.xz_diagnostic);
+      app.game_replay->xz_diagnostic(app.xz_diagnostic);
       app.game_replay->enable_characters(app.actor_playback);
       app.game_replay->select_actor_only(app.selected_actor_only?app.selected_replay_actor:0);
       app.game_replay->play(*app.replay_player, app.limit_ns);
@@ -388,7 +390,8 @@ void restart_replay() {
     return;
   if (app.game_pid.load() || app.game_replay->active()) {
     if (can_start_game_replay()) {
-      app.game_replay->enable_animation(app.animation);
+      app.game_replay->enable_animation(app.animation&&!app.xz_diagnostic);
+      app.game_replay->xz_diagnostic(app.xz_diagnostic);
       app.game_replay->enable_characters(app.actor_playback);
       app.game_replay->select_actor_only(app.selected_actor_only?app.selected_replay_actor:0);
       app.game_replay->restart(*app.replay_player, app.limit_ns);
@@ -819,6 +822,7 @@ void initialize(HWND window) {
   app.stop_hotkey = register_hotkey(window, 2, VK_F6, "F6 STOP");
   register_hotkey(window, 3, VK_F7, "F7 PAUSE");
   register_hotkey(window, 4, VK_F8, "F8 RESUME");
+  ingame_editor::start();
   app.control.start(app.game_pid);
   app.characters.start(app.game_pid);
   app.worker = std::jthread(pipe_worker);
@@ -828,6 +832,7 @@ void initialize(HWND window) {
       "Modern host initialized; dedicated playback worker; native writes OFF");
 }
 void shutdown() {
+  ingame_editor::shutdown();
   app.playback_thread.request_stop();
   if (app.playback_thread.joinable())
     app.playback_thread.join();

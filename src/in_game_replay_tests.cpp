@@ -99,8 +99,8 @@ int run_tests(int argc,wchar_t**argv){
     assert(!client.apply_replay(999,0,{},false));
     game_control::Transform bad;bad.position[0]=std::numeric_limits<float>::quiet_NaN();assert(!client.begin_replay(999,bad));
     game.live({{500,0,0},{0,0,0,1}});assert(wait_for([&]{return client.state().live.position[0]==500;}));
-    assert(controller.play(*player,5'000'000'000,now));
-    assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));controller.stop();
+    const auto begins=game.count(game_control::replay_begin);
+    assert(!controller.play(*player,5'000'000'000,now));assert(game.count(game_control::replay_begin)==begins);
     assert(wait_for([&]{return !client.state().pending;}));
     // Transport mock: selected-only sends one NPC and carries a no-player-write session flag.
     controller.enable_animation(false);controller.select_actor_only(1);controller.enable_characters(false);

@@ -19,7 +19,7 @@ impl Capture{
   assert_eq!(std::mem::offset_of!(CSLuaEventManImp,lua_event_script_imitation),0x18);
   assert_eq!(std::mem::offset_of!(CSLuaEventScriptImitation,lua_warp_bonfire_entity_id),0x1c);
   assert_eq!(std::mem::offset_of!(CSChrBehaviorModule,animation_speed),0x17c8);
-  assert_eq!(std::mem::offset_of!(ChrIns,debug_flags),0x530); // CONFLICT with Freecam 0x538; flag writes blocked.
+  assert_eq!(std::mem::offset_of!(ChrIns,debug_flags),0x530); // SDK declaration only; exact native debug field is +538, see native_debug_flags.
   assert_eq!(std::mem::offset_of!(ChrCtrl,chr_proxy_flags),0xfc);
  }
 }

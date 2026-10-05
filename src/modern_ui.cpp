@@ -1,3 +1,4 @@
+#include "ingame_editor_server.hpp"
 #include "modern_ui.hpp"
 #include "editor_math.hpp"
 #include "imgui.h"
@@ -15,7 +16,7 @@ TimeView timeline;
 bool reset_layout = false, show_diagnostics = true, show_settings = true;
 double warning_threshold = 15;
 std::string error;
-bool pending_restart = false, pending_warning = false;
+
 float viewport_zoom = 1;
 ImVec2 viewport_pan{};
 std::string text(const std::wstring &s) { return game_launcher::utf8(s); }
@@ -45,18 +46,9 @@ void choose_replay() {
     open_replay(selected);
   }
 }
-void request_play(const PlaybackView &p, const game_control::State &remote,
+void request_play(const PlaybackView &, const game_control::State &,
                   bool restart) {
-  pending_restart = restart;
-  if (p.loaded && app.game_pid.load() && !p.active &&
-      !app.preview_path.empty()) {
-    const auto &first = app.preview_path.front();
-    float pos[]{first.x, first.y, first.z};
-    if (start_distance(pos, remote.live.position.data()) > warning_threshold) {
-      pending_warning = true;
-      return;
-    }
-  }
+
   commands.push_back(restart ? restart_replay : play_replay);
 }
 void dock_layout() {
@@ -239,7 +231,7 @@ void draw_timeline(const PlaybackView &p, const game_control::State &remote) {
                name.c_str());
     if (hover && ImGui::IsMouseClicked(0) && io.MousePos.y >= row_y &&
         io.MousePos.y < row_y + 24) {
-      selected_actor = id;
+      selected_actor = id; app.selected_replay_actor=id;
       if (local < 220)
         expanded[id] = !expanded[id];
     }
@@ -380,6 +372,7 @@ void save_settings() {
   f << warning_threshold;
 }
 void dispatch() {
+  theater::ingame_editor::poll();
   auto pending = std::move(commands);
   commands.clear();
   for (auto &fn : pending)
@@ -393,13 +386,14 @@ void dispatch() {
 void draw(const Snapshot &recorder, const PlaybackView &p,
           const game_control::State &remote,
           const game_launcher::State &launch) {
+  selected_actor=app.selected_replay_actor;
   if (last_document != app.opened_replay) {
     last_document = app.opened_replay;
     timeline.fit(p.summary.duration_ns / 1e9);
     viewport_zoom = 1;
     viewport_pan = {};
     chosen_bookmark = UINT64_MAX;
-    selected_actor = 0;
+    selected_actor = 0;app.selected_replay_actor=0;
     hidden.clear();
     expanded.clear();
   }
@@ -612,24 +606,6 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   if (ImGui::Button("Restart"))
     request_play(p, remote, true);
   ImGui::EndDisabled();
-  if (pending_warning) {
-    ImGui::OpenPopup("Replay start location");
-    pending_warning = false;
-  }
-  if (ImGui::BeginPopupModal("Replay start location", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextWrapped("Recorded start is farther than the warning threshold. "
-                       "Map compatibility is UNKNOWN. Explicit playback moves "
-                       "the player to the first sample.");
-    if (ImGui::Button("Play anyway / move to start")) {
-      commands.push_back(pending_restart ? restart_replay : play_replay);
-      ImGui::CloseCurrentPopup();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel"))
-      ImGui::CloseCurrentPopup();
-    ImGui::EndPopup();
-  }
   ImGui::Separator();
   ImGui::Text("Position: %.4f  %.4f  %.4f", p.state.position.x,
               p.state.position.y, p.state.position.z);
@@ -706,8 +682,9 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       if (ImGui::Selectable(("Actor " + std::to_string(id)).c_str(),
-                            selected_actor == id))
-        selected_actor = id;
+                            selected_actor == id)) {
+        selected_actor = id; app.selected_replay_actor=id;
+      }
       ImGui::TableNextColumn();
       ImGui::Text("%u", v.info.registry.entity_id);
       ImGui::TableNextColumn();
@@ -725,7 +702,9 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   ImGui::End();
   if (show_settings) {
     ImGui::Begin("Settings", &show_settings);
-    ImGui::InputDouble("Start distance warning", &warning_threshold, 1, 10,
+    ImGui::Checkbox("Developer XZ-only diagnostic (native Y; not final replay)", &app.xz_diagnostic);
+    ImGui::TextWrapped("Map UNKNOWN: start blocked beyond 1.0 horizontal / 0.25 vertical units. Return to recording start.");
+    ImGui::InputDouble("Legacy warning preference (unused)", &warning_threshold, 1, 10,
                        "%.1f");
     warning_threshold =
         std::isfinite(warning_threshold) ? std::max(0., warning_threshold) : 15;
@@ -784,7 +763,7 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
     button("Game log",
            [] { reveal(fs::temp_directory_path() / L"TheaterModeGame.log"); });
     button("Collect tester logs", [] {
-      for(const auto*name:{L"TheaterModeGame.log",L"TheaterModeLocomotionTrace.log",L"TheaterModeRuntimeTrace.jsonl"}){
+      for(const auto*name:{L"TheaterModeGame.log",L"TheaterModeLocomotionTrace.log",L"TheaterModeRuntimeTrace.jsonl", L"TheaterModeRender.log"}){
         auto source=fs::temp_directory_path()/name;
         if(fs::exists(source))fs::copy_file(source,app.logs/name,fs::copy_options::overwrite_existing);
       }
@@ -796,8 +775,9 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
     ImGui::BeginDisabled(p.active||selected_actor==0);
     static int ownership_mode=4;
     ImGui::Combo("Selected NPC experiment",&ownership_mode,"noMove only\0noAttack only\0noMove + noAttack\0noUpdate only\0animationSpeed = 0\0");
-    if(ownership_mode!=4)ImGui::TextWrapped("BLOCKED: debug flag offset conflict (SDK 0x530 vs reference 0x538). No flag write allowed in this nightly.");
-    ImGui::BeginDisabled(ownership_mode!=4);
+    if(ownership_mode==3)ImGui::TextWrapped("noUpdate BLOCKED: native update lifecycle not yet verified.");
+    ImGui::TextWrapped("noMove/noAttack: exact +0x538 static consumers verified; DLL requires live callback/owner layout check. Two-second reversible experiment only.");
+    ImGui::BeginDisabled(ownership_mode==3);
     button("Run selected NPC experiment (2s)", [] {
       std::lock_guard lock(app.replay_mutex);
       if(app.replay_player){for(const auto& a:app.replay_player->reader().characters())if(a.registry.id==selected_actor){

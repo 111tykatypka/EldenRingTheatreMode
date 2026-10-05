@@ -17,6 +17,7 @@ game_control::Transform Controller::transform() const {const auto&s=player_->sta
 bool Controller::play(replay::Player& player,std::uint64_t requested_limit,replay::Player::Clock::time_point now){
     if(phase_==Phase::paused&&player_==&player){player_->play(now);transition(Phase::playing,animation_?L"PLAYING — transforms + EXPERIMENTAL animation requests":L"PLAYING — transform only");tick(now);return active();}
     if(active())return false;
+    if(xz_only_&&selected_actor_){fail(L"XZ diagnostic is player-only; disable selected-NPC mode");return false;}
     player_=&player;const auto remote=control_.state();const auto boot_ns=theater_clock::monotonic_ns();
     actors_=(characters_||selected_actor_)?player.reader().characters():std::vector<erplay::CharacterInfo>{};
     std::erase_if(actors_,[&](const auto&a){const bool unsupported=(std::uint32_t(a.registry.native_handle)>>28)!=1;if(unsupported)logger_("ACTOR_UNSUPPORTED_SELECTOR replay_id="+std::to_string(a.registry.id)+"; track captured but not applied");return unsupported;});
@@ -27,11 +28,16 @@ bool Controller::play(replay::Player& player,std::uint64_t requested_limit,repla
     if(!remote.connected||!remote.ready||!remote.replay_supported){fail(L"ERROR: matching Phase5 DLL / Player FOUND required");return false;}
     if(remote.sample_timestamp_ns==0||remote.sample_timestamp_ns>boot_ns||boot_ns-remote.sample_timestamp_ns>500'000'000){fail(L"ERROR: live player state is stale");return false;}
     player_->seek(0);const auto first=transform();const auto d=distance(remote.live,first);
-    std::ostringstream log;log<<"REPLAY_START_GUARD live=("<<remote.live.position[0]<<','<<remote.live.position[1]<<','<<remote.live.position[2]<<") first=("<<first.position[0]<<','<<first.position[1]<<','<<first.position[2]<<") delta=("<<first.position[0]-remote.live.position[0]<<','<<first.position[1]-remote.live.position[1]<<','<<first.position[2]-remote.live.position[2]<<") distance="<<d<<" policy=warning-only map=UNKNOWN";logger_(log.str());
+    std::ostringstream log;log<<"REPLAY_START_GUARD live=("<<remote.live.position[0]<<','<<remote.live.position[1]<<','<<remote.live.position[2]<<") first=("<<first.position[0]<<','<<first.position[1]<<','<<first.position[2]<<") delta=("<<first.position[0]-remote.live.position[0]<<','<<first.position[1]-remote.live.position[1]<<','<<first.position[2]-remote.live.position[2]<<") distance="<<d<<" policy=require-near-start map=UNKNOWN";logger_(log.str());
     if(!std::isfinite(d)){fail(L"ERROR: non-finite start displacement");return false;}
+    const double dx=first.position[0]-remote.live.position[0],dz=first.position[2]-remote.live.position[2];
+    const double dy=std::abs(double(first.position[1])-remote.live.position[1]);
+    if(!selected_actor_&&(std::hypot(dx,dz)>1.0||dy>0.25)){
+        fail(L"START BLOCKED: map UNKNOWN; return within 1.0 XZ / 0.25 Y of recorded start. No teleport performed.");return false;}
+    if(xz_only_&&!remote.phase7_supported){fail(L"XZ diagnostic requires matching Phase7 DLL");return false;}
     limit_ns_=requested_limit?std::min(requested_limit,player.summary().duration_ns):player.summary().duration_ns;
     actor_log_ns_=0;session_=GetTickCount64()*1'000'000ULL+nonce.fetch_add(1);pause_on_start_=false;
-    if(!control_.begin_replay(session_,first,player_->state().current_action,animation_&&!selected_actor_,selected_actor_!=0)){fail(L"ERROR: replay BEGIN refused (probe/STOP busy or unsupported DLL)");return false;}
+    if(!control_.begin_replay(session_,first,player_->state().current_action,animation_&&!selected_actor_,selected_actor_!=0,xz_only_)){fail(L"ERROR: replay BEGIN refused (probe/STOP busy or unsupported DLL)");return false;}
     deadline_=now+std::chrono::seconds(2);transition(Phase::starting,L"STARTING — waiting for first game-thread write");
     logger_("REPLAY_START session="+std::to_string(session_)+" limit_ns="+std::to_string(limit_ns_)+" action_events="+std::to_string(player_->summary().action_event_count)+" animation_override="+std::to_string(animation_&&!selected_actor_));return true;
 }
@@ -49,7 +55,7 @@ void Controller::restart(replay::Player& player,std::uint64_t limit,replay::Play
 }
 void Controller::finish(replay::Player::Clock::time_point now){
     player_->seek(limit_ns_);
-    if(!control_.finish_replay(session_,limit_ns_,transform(),player_->state().current_action,animation_&&!selected_actor_,selected_actor_!=0)){fail(L"ERROR: final transform command refused");return;}
+    if(!control_.finish_replay(session_,limit_ns_,transform(),player_->state().current_action,animation_&&!selected_actor_,selected_actor_!=0,xz_only_)){fail(L"ERROR: final transform command refused");return;}
     deadline_=now+std::chrono::seconds(2);transition(Phase::finishing,L"FINISHING — final transform once, then writes OFF");
 }
 void Controller::tick(replay::Player::Clock::time_point now){
@@ -76,7 +82,7 @@ void Controller::tick(replay::Player::Clock::time_point now){
         return;
     }
     if(phase_==Phase::playing){player_->advance(now);if(player_->state().timestamp_ns>=limit_ns_){finish(now);return;}}
-    if(!control_.apply_replay(session_,player_->state().timestamp_ns,transform(),phase_==Phase::paused,player_->state().current_action,animation_&&!selected_actor_,selected_actor_!=0)){fail(L"ERROR: transform update refused; writes OFF");return;}
+    if(!control_.apply_replay(session_,player_->state().timestamp_ns,transform(),phase_==Phase::paused,player_->state().current_action,animation_&&!selected_actor_,selected_actor_!=0,xz_only_)){fail(L"ERROR: transform update refused; writes OFF");return;}
     if((characters_||selected_actor_)&&!send_characters())fail(L"ERROR: actor target update refused; all writes OFF");
 }
 bool Controller::send_characters(){

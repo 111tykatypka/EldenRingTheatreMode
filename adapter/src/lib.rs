@@ -15,6 +15,8 @@ use pelite::pe64::{Pe, PeView};
 mod game_profile { include!(concat!(env!("OUT_DIR"), "/game_profile.rs")); }
 mod control_protocol;
 mod transform_probe;
+mod start_guard;
+mod native_debug_flags;
 mod probe_runtime;
 mod transform_replay;
 mod replay_runtime;
@@ -36,6 +38,8 @@ const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_C
 #[repr(C)]#[derive(Clone,Copy,Default)]struct WireMessage{magic:u32,version:u16,kind:u16,sequence:u64,timestamp_ns:u64,position:[f32;3],quaternion_xyzw:[f32;4],euler_raw:[f32;3],player_present:u32,reserved:u32,action:player_action::State}
 const _:()=assert!(std::mem::size_of::<WireMessage>()==104);
 #[repr(C)]struct TmValidationReport{size:u32,status:u32,checked:u32,passed:u32,file_version:[u16;4],product_version:[u16;4],machine:u16,reserved:u16,image_base:usize,runtime_path:[u16;32768],sha256:[i8;65]}
+unsafe extern "C"{fn tm_render_start(emergency:extern "C" fn())->i32;}
+extern "C" fn render_emergency_stop(){replay_runtime::stop(0);probe_runtime::stop(0);}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
 #[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
 #[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
@@ -101,6 +105,9 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     return;
                 }
                 log_game("Runtime profile accepted: EldenRing_1_17 / WW 2.7.0.0");
+                // Early, after exact executable guard; never under the loader lock.
+                let graphics=unsafe{tm_render_start(render_emergency_stop)};
+                log_game(&format!("IN_GAME_UI_HOOKS={graphics}; visuals UNVERIFIED"));
                 set_state(PROFILE_READY,"PROFILE_READY");
                 set_state(TASK_SIGNATURE_SCAN,"TASK_SIGNATURE_SCAN");
                 log_game("Task signature scan start: ERSoundBankLoader register_task pattern; profile=EldenRing_1_17 / WW_2.7.0.0");
@@ -129,6 +136,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let mut trace=locomotion_trace::Capture::default();
                 let mut characters=character_capture::Capture::new();
                 grounding::initialize();
+
                 let mut ownership=ownership_probe::Probe::default();
                 let mut world_observation=world_observation::Capture::default();
                 // Warm reflected singleton resolution outside game callbacks; instance may not yet exist.

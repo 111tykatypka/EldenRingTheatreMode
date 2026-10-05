@@ -216,9 +216,9 @@
     "ChrIns.debug_flags": {
       "sdk_offset": "0x530",
       "freecam_offset": "0x538",
-      "status": "CONFLICT; flag writes BLOCKED"
+      "status": "STATIC_VERIFIED: exact ctor RVA 3e7409 initializes +538; +530 is callback 3f8fd0. SDK debug_flags field is not used."
     },
-    "status": "REFERENCE; bit semantics agree, enclosing member offset CONFLICTS; animationSpeed experiment UNVERIFIED"
+    "status": "Debug tail offset STATIC_VERIFIED, noMove/noAttack bit consumers CROSS_CHECKED; short guarded probes only; noUpdate BLOCKED"
   },
   "world_binding": {
     "singleton": "CSLuaEventMan",
@@ -235,5 +235,14 @@
     "proxy sync consumers",
     "native AI control ownership"
   ],
-  "note": "Metadata only. No reference code, game binary, pseudocode or binaries bundled. Partial Ghidra is not ground truth."
+  "note": "Metadata only. No reference code, game binary, pseudocode or binaries bundled. Partial Ghidra is not ground truth.",
+  "phase7": {
+    "chrins_constructor_rva": "3e6e30",
+    "flags_initialize_rva": "3e7409",
+    "movement_test_rva": "3cc235",
+    "secondary_test_rva": "3d0008",
+    "proxy_set_candidate_rva": "3c8bb0",
+    "proxy_set_candidate": "or dword ptr [rbx+fc],3 followed by +100/+110 SIMD stores; function ABI UNKNOWN; no call/write added",
+    "hks_walk": "MoveStart requires MoveSpeedLevel>0 and ExecEventHalfBlend; raw TAE ID alone is insufficient"
+  }
 }

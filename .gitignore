@@ -72,3 +72,5 @@ recordings/
 # Python research utilities
 __pycache__/
 *.pyc
+
+third_party/minhook/

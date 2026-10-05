@@ -34,7 +34,7 @@ static_assert(std::endian::native==std::endian::little && sizeof(Packet)==128);
 static_assert(offsetof(Packet,position)==24 && offsetof(Packet,quaternion)==36 && offsetof(Packet,state)==52);
 static_assert(offsetof(Packet,replay_timestamp_ns)==64 && offsetof(Packet,session)==72 && offsetof(Packet,applied_sequence)==88 && offsetof(Packet,action)==96);
 struct State {
-    bool connected{},ready{},pending{},actor_supported{},nightly_supported{}; std::uint32_t phase{off},detail{};
+    bool connected{},ready{},pending{},actor_supported{},nightly_supported{},phase7_supported{}; std::uint32_t phase{off},detail{};
     std::uint64_t command_sequence{}; std::wstring diagnostic{L"Waiting for game sample connection"};
     bool trace_supported{},trace_active{},trace_requested{},trace_failed{};bool replay_supported{};std::uint32_t replay_phase{inactive},replay_detail{};
     double replay_send_hz{};
@@ -51,9 +51,9 @@ public:
     bool trace(std::uint16_t kind,std::uint32_t phase=0);
     bool runtime_trace(bool start);
     bool probe_actor(const erplay::CharacterRecord& actor,std::uint32_t mode);
-    bool begin_replay(std::uint64_t session,Transform transform,erplay::ActionState action={},bool animation=false,bool actor_only=false);
-    bool apply_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause,erplay::ActionState action={},bool animation=false,bool actor_only=false);
-    bool finish_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,erplay::ActionState action={},bool animation=false,bool actor_only=false);
+    bool begin_replay(std::uint64_t session,Transform transform,erplay::ActionState action={},bool animation=false,bool actor_only=false,bool xz_only=false);
+    bool apply_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause,erplay::ActionState action={},bool animation=false,bool actor_only=false,bool xz_only=false);
+    bool finish_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,erplay::ActionState action={},bool animation=false,bool actor_only=false,bool xz_only=false);
     bool actor_targets(std::uint64_t session,std::uint64_t ns,const std::vector<erplay::CharacterRecord>& actors,bool pause);
     void emergency_stop();
     void close();
@@ -66,7 +66,7 @@ private:
     std::optional<Packet> latest_request_;std::uint64_t active_session_{};
     std::vector<Packet> actor_requests_;
     std::atomic_bool replay_pending_{};
-    bool queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause,erplay::ActionState action={},bool animation=false,bool actor_only=false);
+    bool queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause,erplay::ActionState action={},bool animation=false,bool actor_only=false,bool xz_only=false);
     void run(std::atomic<DWORD>& sample_process_id);
     void disconnected(const std::wstring& reason);
 };

@@ -11,8 +11,8 @@ pub struct LocalInputLock { saved:Option<(FieldInsHandle,bool,bool,u64)> }
 impl LocalInputLock {
     pub fn apply(&mut self, player:&mut PlayerIns) {
         let chr=&mut player.chr_ins;
-        if self.saved.is_none(){self.saved=Some((chr.field_ins_handle,false,false,chr.modules.action_request.disabled_action_inputs.0));crate::log_game("REPLAY_INPUT_LOCK=ON; EXPERIMENTAL normalized action masking; debug flags BLOCKED (layout conflict); earlier PreBehaviorSafe callback");}
-        // Debug flag writes blocked: pinned SDK 0x530 conflicts with Freecam reference 0x538.
+        if self.saved.is_none(){self.saved=Some((chr.field_ins_handle,false,false,chr.modules.action_request.disabled_action_inputs.0));crate::log_game("REPLAY_INPUT_LOCK=ON; EXPERIMENTAL normalized action masking; debug flags not used for local replay; earlier PreBehaviorSafe callback");}
+        // Do not use the SDK debug field (+530 is a native callback). NPC probes use an exact +538 view separately.
         chr.modules.action_request.disabled_action_inputs.0|=ACTION_MASK;
         OWNED_HANDLE.store(handle(player),Ordering::Release);LAST_WRITE.store(crate::monotonic_ns(),Ordering::Release);
     }

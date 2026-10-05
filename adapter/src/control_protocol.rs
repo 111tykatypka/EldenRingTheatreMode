@@ -96,7 +96,7 @@ impl Packet {
         let replay=matches!(self.kind,REPLAY_BEGIN|REPLAY_APPLY|REPLAY_FINISH);
         if replay && self.version<2 {return Err("replay requires protocol v2");}
         if self.sequence == 0 || self.sequence <= last_sequence { return Err("sequence regression"); }
-        if self.state != 0 || self.detail != 0 || (self.flags != 0 && !(replay && self.version==3 && matches!(self.flags,1|2))) || self.replay_detail!=0 || self.applied_sequence!=0 { return Err("reserved command fields"); }
+        if self.state != 0 || self.detail != 0 || (self.flags != 0 && !(replay && self.version==3 && matches!(self.flags,1|2|4))) || self.replay_detail!=0 || self.applied_sequence!=0 { return Err("reserved command fields"); }
         if !self.position.iter().chain(self.quaternion.iter()).all(|v| v.is_finite()) { return Err("non-finite payload"); }
         let norm: f64 = self.quaternion.iter().map(|v| f64::from(*v).powi(2)).sum();
         if (norm - 1.0).abs() > 0.001 { return Err("invalid quaternion normalization"); }
@@ -131,7 +131,7 @@ mod tests {
         let actor=Packet{kind:OWNERSHIP_PROBE,session:1,applied_sequence:0x10000001,position:[0.;3],flags:1,..command()};
         for mode in 1..=5{assert!(Packet{flags:mode,..actor}.validate_command(6,100).is_ok());}
         for mode in [0,6,32]{assert!(Packet{flags:mode,..actor}.validate_command(6,100).is_err());}
-        let replay=Packet{kind:REPLAY_BEGIN,session:1,replay_state:1,flags:2,..command()};assert!(replay.validate_command(6,100).is_ok());assert!(Packet{flags:3,..replay}.validate_command(6,100).is_err());
+        let replay=Packet{kind:REPLAY_BEGIN,session:1,replay_state:1,flags:2,..command()};assert!(replay.validate_command(6,100).is_ok());assert!(Packet{flags:3,..replay}.validate_command(6,100).is_err());assert!(Packet{flags:4,..replay}.validate_command(6,100).is_ok());assert!(Packet{flags:5,..replay}.validate_command(6,100).is_err());
     }
     #[test]fn actor_targets_validate_without_raw_pointers(){
         let p=Packet{kind:ACTOR_APPLY,session:1,replay_state:1,applied_sequence:0x10000001,detail:123,replay_detail:456,state:5,..command()};

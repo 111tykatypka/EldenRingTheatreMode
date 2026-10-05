@@ -8,7 +8,6 @@ static BUDGET:AtomicUsize=AtomicUsize::new(1024);
 static QUEUE_DROPS:AtomicU64=AtomicU64::new(0);
 pub fn configure_budget(n:usize){BUDGET.store(n.clamp(1,16384),Ordering::Release);}
 // Native ownership not established; conflicting debug layout must not be written.
-const MASK:u32=0;
 const ACTION_MASK:u64=0;
 static GENERATION:AtomicU64=AtomicU64::new(1);
 static PENDING:Mutex<Vec<(Packet,u64,u64)>>=Mutex::new(Vec::new());
@@ -28,14 +27,14 @@ pub fn receive(packet:Packet,now:u64){
 }
 fn handle(raw:u64)->FieldInsHandle{FieldInsHandle{selector:FieldInsSelector(raw as u32),block_id:BlockId::from((raw>>32) as i32)}}
 fn matches(chr:&ChrIns,p:Packet)->bool{chr.field_ins_handle==handle(p.applied_sequence)&&chr.event_entity_id==p.detail&&chr.npc_param_id==p.replay_detail as i32&&chr.chr_type as u32==p.state}
-struct Lease { packet:Packet, generation:u64, address:usize, flags:u32, actions:u64, origin:u64, playback:Playback }
+struct Lease { packet:Packet, generation:u64, address:usize, actions:u64, origin:u64, playback:Playback }
 pub struct Actors { owned:Vec<Lease>, incoming:Vec<(Packet,u64,u64)>, next_log:u64,applied:u64,rejected:u64,max_correction:f64 }
 impl Actors {
  pub fn new()->Self{let budget=BUDGET.load(Ordering::Acquire);if let Ok(mut owned)=OWNED.lock(){owned.reserve(budget);}if let Ok(mut pending)=PENDING.lock(){pending.reserve(budget);}Self{owned:Vec::with_capacity(budget),incoming:Vec::with_capacity(budget),next_log:0,applied:0,rejected:0,max_correction:0.0}}
  fn restore(lease:&Lease,world:&mut WorldChrMan){
   if let Some(chr)=world.chr_ins_by_handle_mut(&handle(lease.packet.applied_sequence)){
    if matches(chr,lease.packet)&&chr as *mut _ as usize==lease.address{
-    if MASK!=0{chr.debug_flags.0=(chr.debug_flags.0&!MASK)|(lease.flags&MASK);}
+
     if ACTION_MASK!=0{let bits=&mut chr.modules.action_request.disabled_action_inputs.0;*bits=(*bits&!ACTION_MASK)|(lease.actions&ACTION_MASK);}
    }
   }
@@ -58,7 +57,7 @@ impl Actors {
     // Prototype may only acquire matching existing actors near their recorded placement.
     if self.owned.len()>=BUDGET.load(Ordering::Acquire) || crate::transform_probe::distance(live,target)>20.0{crate::grounding::actor_event(now,"actor_budget_or_start_distance_rejected",Some(chr),packet);self.rejected+=1;continue;}
     crate::log_game(&format!("ACTOR_ACQUIRE session={} handle={:016X} entity={} npc={} start_distance={:.3}; ownership EXPERIMENTAL",packet.session,packet.applied_sequence,packet.detail,packet.replay_detail as i32,crate::transform_probe::distance(live,target)));
-    self.owned.push(Lease{packet,generation,address:chr as *mut _ as usize,flags:chr.debug_flags.0,actions:chr.modules.action_request.disabled_action_inputs.0,origin:packet.replay_timestamp_ns,playback:Playback::default()});self.owned.len()-1
+    self.owned.push(Lease{packet,generation,address:chr as *mut _ as usize,actions:chr.modules.action_request.disabled_action_inputs.0,origin:packet.replay_timestamp_ns,playback:Playback::default()});self.owned.len()-1
    };
    let lease=&mut self.owned[index];
    if lease.address!=chr as *mut _ as usize||lease.generation!=generation{self.rejected+=1;continue;}

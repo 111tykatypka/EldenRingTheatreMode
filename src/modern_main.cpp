@@ -1,3 +1,4 @@
+#include "ingame_editor_server.hpp"
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
@@ -44,6 +45,7 @@ bool create_device(HWND w) {
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
                                                              LPARAM);
 LRESULT CALLBACK modern_proc(HWND w, UINT m, WPARAM a, LPARAM b) {
+  if(m==WM_APP+77){theater::ingame_editor::poll();return 0;}
   if (m == WM_HOTKEY) {
     if (a == 2)
       theater::emergency_stop();

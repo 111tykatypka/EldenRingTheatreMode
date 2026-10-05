@@ -13,7 +13,7 @@ static COMMAND_SEQUENCE:AtomicU64=AtomicU64::new(0);
 static PENDING:Mutex<Option<Request>>=Mutex::new(None);
 #[derive(Clone,Copy)] struct Request { sequence:u64, generation:u64, received_ns:u64, delta:[f32;3] }
 
-fn stop(detail:u32) {
+pub(crate) fn stop(detail:u32) {
     crate::ownership_probe::stop();
     crate::replay_runtime::stop(detail);
     crate::locomotion_trace::stop();
@@ -104,7 +104,7 @@ fn status(version:u16)->wire::Packet {
     let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
     wire::Packet {version,player_action:Default::default(),replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32|64}else{0}) }
+        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32|64|128}else{0}) }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;

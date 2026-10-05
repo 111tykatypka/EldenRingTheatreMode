@@ -86,7 +86,7 @@ struct App {
   std::vector<erplay::Vec3> preview_path;
   fs::path opened_replay;
   std::uint64_t limit_ns{};
-  bool animation{};
+  bool animation{};bool xz_diagnostic{};
   bool actor_playback{};
   bool selected_actor_only{};std::uint64_t selected_replay_actor{};
 };

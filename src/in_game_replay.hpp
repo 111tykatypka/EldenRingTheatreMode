@@ -18,6 +18,7 @@ public:
     bool active() const;
     void enable_animation(bool enabled){if(!active())animation_=enabled;}
     void enable_characters(bool enabled){if(!active())characters_=enabled;}
+    void xz_diagnostic(bool enabled){if(!active())xz_only_=enabled;}
     void select_actor_only(std::uint64_t id){if(!active())selected_actor_=id;}
     Phase phase() const {return phase_;}
     const std::wstring& diagnostic() const {return diagnostic_;}
@@ -26,7 +27,7 @@ private:
     game_control::Client& control_;Logger logger_;replay::Player* player_{};
     Phase phase_{Phase::inactive};std::wstring diagnostic_{L"INACTIVE — no transform writes"};
     std::uint64_t session_{},limit_ns_{};replay::Player::Clock::time_point deadline_{};bool pause_on_start_{};bool animation_{};
-    std::uint64_t selected_actor_{},actor_log_ns_{};bool characters_{};std::vector<erplay::CharacterInfo> actors_;
+    std::uint64_t selected_actor_{},actor_log_ns_{};bool characters_{};bool xz_only_{};std::vector<erplay::CharacterInfo> actors_;
     bool send_characters();
     void transition(Phase phase,const std::wstring& diagnostic);
     void fail(const std::wstring& diagnostic);
