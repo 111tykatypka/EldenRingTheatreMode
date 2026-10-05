@@ -7,10 +7,10 @@ pub const PAUSED: u32 = 2;
 pub const FINISHED: u32 = 3;
 pub const ERROR: u32 = 4;
 pub const TARGET_LEASE_NS: u64 = 250_000_000;
-pub const MAX_START_DISTANCE: f64 = 15.0;
+
 pub const MAX_TARGET_STEP: f64 = 5.0;
 pub const ERR_SESSION: u32 = 9;
-pub const ERR_START_DISTANCE: u32 = 10;
+// Error 10 retired: distance is a host warning, not a runtime blocker.
 pub const ERR_TIME: u32 = 11;
 pub const ERR_TARGET_STALE: u32 = 12;
 pub const ERR_TARGET_STEP: u32 = 13;
@@ -42,7 +42,7 @@ impl Playback {
         match r.action {
             Action::Begin => {
                 if matches!(self.phase, PLAYING | PAUSED) || r.replay_ns != 0 { return self.fail(ERR_SESSION); }
-                if distance(live, r.target) > MAX_START_DISTANCE { return self.fail(ERR_START_DISTANCE); }
+
                 self.session = r.session;
             }
             Action::Apply | Action::Finish => {
@@ -95,7 +95,8 @@ impl Playback {
     }
     #[test] fn guards_distance_session_time_and_large_step() {
         let mut p = Playback::default();
-        assert_eq!(p.ingest(Request { target:Transform { position:[100.0,2.0,3.0],..live() },..begin() },live()),Err(ERR_START_DISTANCE));
+        assert_eq!(p.ingest(Request { target:Transform { position:[100.0,2.0,3.0],..live() },..begin() },live()),Ok(()));
+        p.cancel();
         p.ingest(begin(),live()).unwrap();
         assert_eq!(p.ingest(Request { action:Action::Apply,sequence:2,session:9,..begin() },live()),Err(ERR_SESSION));
         p.ingest(begin(),live()).unwrap();

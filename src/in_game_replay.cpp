@@ -21,8 +21,8 @@ bool Controller::play(replay::Player& player,std::uint64_t requested_limit,repla
     if(!remote.connected||!remote.ready||!remote.replay_supported){fail(L"ERROR: matching Phase5 DLL / Player FOUND required");return false;}
     if(remote.sample_timestamp_ns==0||remote.sample_timestamp_ns>boot_ns||boot_ns-remote.sample_timestamp_ns>500'000'000){fail(L"ERROR: live player state is stale");return false;}
     player_->seek(0);const auto first=transform();const auto d=distance(remote.live,first);
-    std::ostringstream log;log<<"REPLAY_START_GUARD live=("<<remote.live.position[0]<<','<<remote.live.position[1]<<','<<remote.live.position[2]<<") first=("<<first.position[0]<<','<<first.position[1]<<','<<first.position[2]<<") delta=("<<first.position[0]-remote.live.position[0]<<','<<first.position[1]-remote.live.position[1]<<','<<first.position[2]-remote.live.position[2]<<") distance="<<d<<" max=15";logger_(log.str());
-    if(!std::isfinite(d)||d>15.0){fail(L"ERROR: start displacement exceeds 15 units. Return to the recorded starting area.");return false;}
+    std::ostringstream log;log<<"REPLAY_START_GUARD live=("<<remote.live.position[0]<<','<<remote.live.position[1]<<','<<remote.live.position[2]<<") first=("<<first.position[0]<<','<<first.position[1]<<','<<first.position[2]<<") delta=("<<first.position[0]-remote.live.position[0]<<','<<first.position[1]-remote.live.position[1]<<','<<first.position[2]-remote.live.position[2]<<") distance="<<d<<" policy=warning-only map=UNKNOWN";logger_(log.str());
+    if(!std::isfinite(d)){fail(L"ERROR: non-finite start displacement");return false;}
     limit_ns_=requested_limit?std::min(requested_limit,player.summary().duration_ns):player.summary().duration_ns;
     session_=GetTickCount64()*1'000'000ULL+nonce.fetch_add(1);pause_on_start_=false;
     if(!control_.begin_replay(session_,first,player_->state().current_action,animation_)){fail(L"ERROR: replay BEGIN refused (probe/STOP busy or unsupported DLL)");return false;}

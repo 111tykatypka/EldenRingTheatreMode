@@ -90,9 +90,9 @@ impl GameReplay {
         let previous=self.last_applied;
         if let Some(r)=request {
             if matches!(r.action,Action::Begin) {
-                crate::log_game(&format!("REPLAY_START session={} live={:?} first={:?} delta={:?} distance={:.6} max_start={}",
+                crate::log_game(&format!("REPLAY_START session={} live={:?} first={:?} delta={:?} distance={:.6} policy=warning-only map=UNKNOWN",
                     r.session,live,r.target,std::array::from_fn::<_,3,_>(|i|r.target.position[i]-live.position[i]),
-                    transform_probe::distance(live,r.target),replay::MAX_START_DISTANCE));
+                    transform_probe::distance(live,r.target)));
             }
             if let Err(detail)=self.playback.ingest(r,live) {stop(detail);self.input.restore_player(player);self.animation.restore_player(player);crate::log_game(&format!("REPLAY_ERROR=TARGET_REJECTED detail={detail}"));return;}
             PENDING.store(false,Ordering::Release);

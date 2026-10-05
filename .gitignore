@@ -67,3 +67,4 @@ replays/
 captures/
 recordings/
 *.erplay
+.vendor-cache/
