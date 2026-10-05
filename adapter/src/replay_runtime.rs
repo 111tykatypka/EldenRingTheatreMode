@@ -10,6 +10,7 @@ static DETAIL: AtomicU32 = AtomicU32::new(0);
 static SESSION: AtomicU64 = AtomicU64::new(0);
 static REPLAY_NS: AtomicU64 = AtomicU64::new(0);
 static APPLIED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static APPLIED_GENERATION: AtomicU64 = AtomicU64::new(0);
 static PENDING: AtomicBool = AtomicBool::new(false);
 static REQUEST: Mutex<Option<Request>> = Mutex::new(None);
 
@@ -17,18 +18,25 @@ pub fn stop(detail: u32) {
     GENERATION.fetch_add(1, Ordering::AcqRel);
     let old = PHASE.swap(if detail==0 {replay::INACTIVE} else {replay::ERROR}, Ordering::AcqRel);
     DETAIL.store(detail, Ordering::Release); SESSION.store(0, Ordering::Release); PENDING.store(false, Ordering::Release);
+    REPLAY_NS.store(0,Ordering::Release); APPLIED_SEQUENCE.store(0,Ordering::Release);
     if matches!(old,replay::PLAYING|replay::PAUSED) || detail!=0 {
         crate::log_game(&format!("REPLAY_STOP detail={detail}; all subsequent transform writes disabled"));
     }
 }
 pub fn connection(connected: bool) { CONNECTED.store(connected,Ordering::Release); stop(0); }
 pub fn heartbeat(now_ns: u64) { HEARTBEAT_NS.store(now_ns,Ordering::Release); }
-pub fn active() -> bool { PENDING.load(Ordering::Acquire) || matches!(PHASE.load(Ordering::Acquire),replay::PLAYING|replay::PAUSED) }
+pub fn active() -> bool { PENDING.load(Ordering::Acquire) || matches!(status().0,replay::PLAYING|replay::PAUSED) }
 pub fn status() -> (u32,u32,u64,u64,u64) {
+    // An in-flight callback may finish publishing just after STOP. Its old
+    // generation must never look like a new active session/acknowledgement.
+    if APPLIED_GENERATION.load(Ordering::Acquire)!=GENERATION.load(Ordering::Acquire) {
+        let detail=DETAIL.load(Ordering::Acquire);
+        return (if detail==0 {replay::INACTIVE} else {replay::ERROR},detail,0,0,0);
+    }
     (PHASE.load(Ordering::Acquire),DETAIL.load(Ordering::Acquire),SESSION.load(Ordering::Acquire),
      REPLAY_NS.load(Ordering::Acquire),APPLIED_SEQUENCE.load(Ordering::Acquire))
 }
-pub fn receive(packet: wire::Packet, now_ns: u64) {
+pub fn receive(packet: wire::Packet, _now_ns: u64) {
     let action = match packet.kind { wire::REPLAY_BEGIN=>Action::Begin,wire::REPLAY_APPLY=>Action::Apply,wire::REPLAY_FINISH=>Action::Finish,_=>return };
     if matches!(action,Action::Begin) {
         if active() { stop(replay::ERR_SESSION); return; }
@@ -37,7 +45,7 @@ pub fn receive(packet: wire::Packet, now_ns: u64) {
         APPLIED_SEQUENCE.store(0,Ordering::Release); DETAIL.store(0,Ordering::Release);
     } else if SESSION.load(Ordering::Acquire)!=packet.session || !active() { stop(replay::ERR_SESSION); return; }
     let request = Request {action,session:packet.session,sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),
-        received_ns:now_ns,replay_ns:packet.replay_timestamp_ns,paused:packet.replay_state==replay::PAUSED,
+        received_ns:packet.timestamp_ns,replay_ns:packet.replay_timestamp_ns,paused:packet.replay_state==replay::PAUSED,
         target:Transform {position:packet.position,quaternion:packet.quaternion}};
     if let Ok(mut slot)=REQUEST.lock() { *slot=Some(request); PENDING.store(true,Ordering::Release); }
     else { stop(6); }
@@ -99,7 +107,7 @@ impl GameReplay {
         if generation==GENERATION.load(Ordering::Acquire) {
             let old=PHASE.swap(self.playback.phase,Ordering::AcqRel);
             SESSION.store(r.session,Ordering::Release);REPLAY_NS.store(r.replay_ns,Ordering::Release);
-            APPLIED_SEQUENCE.store(r.sequence,Ordering::Release);DETAIL.store(0,Ordering::Release);
+            APPLIED_SEQUENCE.store(r.sequence,Ordering::Release);APPLIED_GENERATION.store(generation,Ordering::Release);
             if old!=self.playback.phase {crate::log_game(&format!("REPLAY_STATE={} session={} replay_ns={}",self.playback.phase,r.session,r.replay_ns));}
             if self.playback.phase==replay::FINISHED {crate::log_game("REPLAY_FINISHED; final transform applied once; writes OFF");}
         }

@@ -79,7 +79,7 @@ impl Packet {
         let norm: f64 = self.quaternion.iter().map(|v| f64::from(*v).powi(2)).sum();
         if (norm - 1.0).abs() > 0.001 { return Err("invalid quaternion normalization"); }
         // STOP has no write payload and is accepted even when its timestamp is old.
-        if self.kind != STOP && (self.timestamp_ns > now_ns || now_ns - self.timestamp_ns > 500_000_000) {
+        if self.kind != STOP && (self.timestamp_ns > now_ns || now_ns - self.timestamp_ns > if replay {250_000_000} else {500_000_000}) {
             return Err("stale/future command");
         }
         if replay {
