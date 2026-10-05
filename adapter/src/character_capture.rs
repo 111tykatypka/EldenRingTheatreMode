@@ -49,7 +49,8 @@ impl Capture {
    frame.rows.push(Observation{id:self.identities[index].id,handle,entity:chr.event_entity_id,npc:chr.npc_param_id,block:i32::from(chr.block_id),kind:chr.chr_type as u32,position:p,rotation:q,action});
    frame.visuals.push(crate::visual_capture::actor(self.identities[index].id,now,chr));
   }
-  // Re-entry becomes a NEW observational lifetime. No claim of engine spawn/despawn.
+  // Re-entry after the two-second identity cache becomes a new observational
+  // lifetime. No claim of engine spawn/despawn.
   self.identities.retain(|v|v.seen||now.saturating_sub(v.last_seen)<2_000_000_000);
  }
 }

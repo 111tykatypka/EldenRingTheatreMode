@@ -641,7 +641,8 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   ImGui::Text("Game: %s | Samples: %llu",
               p.summary.metadata.game_version.c_str(), p.summary.sample_count);
   if(p.loaded){std::lock_guard lock(app.replay_mutex);auto visual=app.replay_player->reader().visual_at(selected_actor,p.state.timestamp_ns);
-    if(visual){ImGui::Separator();ImGui::Text("Recorded model %u | HP %u/%u | ground bits %u",visual->model,visual->hp,visual->max_hp,visual->ground);
+    if(visual){ImGui::Separator();ImGui::Text("Recorded model %u | ground bits %u",visual->model,visual->ground);
+      if(visual->flags&2)ImGui::Text("Recorded HP %u / %u",visual->hp,visual->max_hp);else ImGui::TextDisabled("HP UNAVAILABLE");
       if(visual->flags&8){ImGui::Text("Equipment slots L%u R%u | arm style %u",visual->left_slot,visual->right_slot,visual->arm_style);for(unsigned i=0;i<22;++i){ImGui::Text("Slot %u: native param %d",i,visual->equipment[i]);}}
       if(visual->flags&16)ImGui::Text("Native bounded face snapshot: 288 bytes | body archetype %u",visual->archetype);
       ImGui::TextDisabled("Captured state only; equipment/face/HP are not written into the game.");

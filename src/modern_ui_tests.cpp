@@ -43,6 +43,18 @@ int main() {
     auto result = writer.finalize();
   }
   theater::open_replay(file);
+  // UI actor cursors and playback reuse the same Reader stream; production
+  // must serialize both paths using replay_mutex.
+  std::atomic_bool read_failed{};
+  std::jthread reader([&]{
+    try{for(unsigned i=0;i<1000;++i){std::lock_guard lock(theater::app.replay_mutex);
+      const auto index=i%10;auto sample=theater::app.replay_player->reader().sample(index);
+      auto actor=theater::app.replay_player->reader().character_bracket(1,index*1'000'000'000ULL);
+      if(!actor||sample.position.x!=float(index)||actor->first.position[0]!=float(index))read_failed=true;
+    }}catch(...){read_failed=true;}
+  });
+  for(unsigned i=0;i<1000;++i)theater::refresh_character_cursor((i%10)*1'000'000'000ULL);
+  reader.join();if(read_failed)return 2;
   for (auto size : {ImVec2{1280, 720}, ImVec2{1920, 1080}, ImVec2{3440, 1440},
                     ImVec2{7680, 2160}, ImVec2{800, 600}}) {
     io.DisplaySize = size;

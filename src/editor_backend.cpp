@@ -725,9 +725,9 @@ void pipe_worker() {
 }
 
 void refresh_character_cursor(std::uint64_t time) {
-  // UI-owned document lifetime. character_at only reads immutable indexes and
-  // an independent file stream; it never touches the playback worker's mutable
-  // chunk cache or ReplayClock.
+  // Actor reads reuse the indexed Reader stream. Serialize with the playback
+  // worker's reads so UI refresh cannot change its seek position mid-decode.
+  std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
   static std::string last_error;

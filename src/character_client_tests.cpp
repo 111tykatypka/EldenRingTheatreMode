@@ -33,7 +33,7 @@ struct Header {
 void send(HANDLE pipe, std::uint64_t sequence, bool invalid = false) {
   Header header;
   header.sequence = sequence;
-  header.version=2;header.reserved=2;
+  header.version=sequence==1?1:2;header.reserved=header.version==2?2:0;
   header.timestamp = theater_clock::monotonic_ns();
   erplay::CharacterRecord row;
   row.id = 42;
@@ -43,10 +43,12 @@ void send(HANDLE pipe, std::uint64_t sequence, bool invalid = false) {
     row.orientation = {0, 0, 0, 0};
   std::ostringstream payload(std::ios::binary);
   erplay::write_character_record(payload, row);
-  erplay::VisualState player;player.timestamp_ns=header.timestamp;player.flags=8;player.equipment[0]=123;erplay::write_visual(payload,player);
-  erplay::VisualState npc; npc.id=42;npc.timestamp_ns=header.timestamp;npc.flags=3;npc.hp=50;npc.max_hp=100;erplay::write_visual(payload,npc);
+  if(header.version==2){
+    erplay::VisualState player;player.timestamp_ns=header.timestamp;player.flags=8;player.equipment[0]=123;erplay::write_visual(payload,player);
+    erplay::VisualState npc; npc.id=42;npc.timestamp_ns=header.timestamp;npc.flags=3;npc.hp=50;npc.max_hp=100;erplay::write_visual(payload,npc);
+  }
   auto bytes = payload.str();
-  check(bytes.size() == 112+2*erplay::visual_record_bytes);
+  check(bytes.size() == 112+header.reserved*erplay::visual_record_bytes);
   DWORD written{};
   check(WriteFile(pipe, &header, sizeof(header), &written, nullptr) &&
         written == sizeof(header));
