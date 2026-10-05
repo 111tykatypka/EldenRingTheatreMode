@@ -14,6 +14,7 @@ static PENDING:Mutex<Option<Request>>=Mutex::new(None);
 #[derive(Clone,Copy)] struct Request { sequence:u64, generation:u64, received_ns:u64, delta:[f32;3] }
 
 fn stop(detail:u32) {
+    crate::replay_runtime::stop(detail);
     GENERATION.fetch_add(1,Ordering::AcqRel);
     STATE.store(if detail==0 {OFF} else {ERROR},Ordering::Release);
     DETAIL.store(detail,Ordering::Release);
@@ -89,46 +90,53 @@ impl GameProbe {
     fn WriteFile(handle:*mut c_void,buffer:*const c_void,size:u32,written:*mut u32,overlapped:*mut c_void)->i32;
     fn DisconnectNamedPipe(handle:*mut c_void)->i32;fn CloseHandle(handle:*mut c_void)->i32;fn GetLastError()->u32;
 }
-fn read_packet(handle:*mut c_void)->Option<[u8;wire::BYTES]> {
+fn read_packet(handle:*mut c_void)->Option<Vec<u8>> {
     let mut b=[0u8;wire::BYTES];let mut offset=0;
-    while offset<b.len(){let mut count=0;let ok=unsafe{ReadFile(handle,b[offset..].as_mut_ptr().cast(),(b.len()-offset) as u32,&mut count,std::ptr::null_mut())};if ok==0||count==0{return None;}offset+=count as usize;}
-    Some(b)
+    while offset<wire::LEGACY_BYTES{let mut count=0;let ok=unsafe{ReadFile(handle,b[offset..].as_mut_ptr().cast(),(wire::LEGACY_BYTES-offset) as u32,&mut count,std::ptr::null_mut())};if ok==0||count==0{return None;}offset+=count as usize;}
+    let version=u16::from_le_bytes([b[4],b[5]]);
+    if version==wire::VERSION {while offset<b.len(){let mut count=0;let ok=unsafe{ReadFile(handle,b[offset..].as_mut_ptr().cast(),(b.len()-offset) as u32,&mut count,std::ptr::null_mut())};if ok==0||count==0{return None;}offset+=count as usize;}}
+    Some(b[..if version==1 {wire::LEGACY_BYTES} else {wire::BYTES}].to_vec())
 }
-fn status()->wire::Packet {
+fn status(version:u16)->wire::Packet {
     let sample=crate::latest().unwrap_or_default();
-    wire::Packet {kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
+    let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
+    wire::Packet {version,replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:if ready(){1}else{0} }
+        flags:(if ready(){1}else{0}) | if version==wire::VERSION {2}else{0} }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;
-    crate::log_game("PHASE4A=TRANSFORM_WRITE_PROBE; PROBE_STATE=OFF; no REPLAY_APPLY implemented in this checkpoint");
+    crate::log_game("PHASE4B=TRANSFORM_REPLAY; REPLAY_STATE=INACTIVE; PROBE_STATE=OFF; animation unavailable");
     let name=std::ffi::OsStr::new(wire::PIPE).encode_wide().chain(Some(0)).collect::<Vec<_>>();
     loop {
         // Duplex local-only control pipe; retain the original sample pipe unchanged.
         let h=unsafe{CreateNamedPipeW(name.as_ptr(),3|0x0008_0000,0x8,1,wire::BYTES as u32,wire::BYTES as u32,0,std::ptr::null_mut())};
         if h==(-1isize as *mut c_void){crate::log_game(&format!("CONTROL_PIPE_CREATE_ERROR={}",unsafe{GetLastError()}));stop(7);return;}
         if unsafe{ConnectNamedPipe(h,std::ptr::null_mut())}==0 && unsafe{GetLastError()}!=535 {unsafe{CloseHandle(h)};std::thread::sleep(std::time::Duration::from_millis(100));continue;}
-        stop(0);COMMAND_SEQUENCE.store(0,Ordering::Release);CONNECTED.store(true,Ordering::Release);let mut last_sequence=0;
-        crate::log_game("CONTROL_IPC=CONNECTED; PROBE_STATE=OFF; no player writes until explicit PROBE_NUDGE");
+        stop(0);crate::replay_runtime::connection(true);COMMAND_SEQUENCE.store(0,Ordering::Release);CONNECTED.store(true,Ordering::Release);let mut last_sequence=0;
+        crate::log_game("CONTROL_IPC=CONNECTED; PROBE_STATE=OFF; no player writes until explicit PROBE_NUDGE or REPLAY_BEGIN");
         while let Some(bytes)=read_packet(h) {
             let now_ns=unsafe{crate::GetTickCount64()}*1_000_000;
             let packet=match wire::Packet::decode(&bytes).and_then(|p|p.validate_command(last_sequence,now_ns).map(|_|p)) {
                 Ok(packet)=>packet,Err(e)=>{stop(8);crate::log_game(&format!("CONTROL_ERROR=MALFORMED_PACKET ({e}); PROBE_STATE=OFF"));break;}
             };
-            last_sequence=packet.sequence;HEARTBEAT_NS.store(now_ns,Ordering::Release);
+            last_sequence=packet.sequence;COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);HEARTBEAT_NS.store(now_ns,Ordering::Release);crate::replay_runtime::heartbeat(now_ns);
             if packet.kind==wire::STOP {COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);stop(0);crate::log_game("PROBE_STOP; PROBE_STATE=OFF");}
             if packet.kind==wire::PROBE_NUDGE {
                 COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);
                 if !ready(){stop(5);crate::log_game("PROBE_REJECTED=RUNTIME_NOT_READY");}
-                else if matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING){crate::log_game("PROBE_REJECTED=BUSY");}
+                else if crate::replay_runtime::active() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING){crate::log_game("PROBE_REJECTED=BUSY");}
                 else if let Ok(mut slot)=PENDING.lock(){DETAIL.store(0,Ordering::Release);STATE.store(ARMED,Ordering::Release);*slot=Some(Request {sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),received_ns:now_ns,delta:packet.position});crate::log_game("PROBE_STATE=ARMED; awaiting game callback");}
                 else {stop(6);}
             }
-            let reply=status().encode();let mut written=0;
-            if unsafe{WriteFile(h,reply.as_ptr().cast(),wire::BYTES as u32,&mut written,std::ptr::null_mut())}==0||written as usize!=wire::BYTES {break;}
+            if matches!(packet.kind,wire::REPLAY_BEGIN|wire::REPLAY_APPLY|wire::REPLAY_FINISH) {
+                if !ready() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING) {crate::replay_runtime::stop(5);}
+                else {crate::replay_runtime::receive(packet,now_ns);}
+            }
+            let response=status(packet.version);let reply=response.encode();let mut written=0;
+            if unsafe{WriteFile(h,reply.as_ptr().cast(),response.byte_count() as u32,&mut written,std::ptr::null_mut())}==0||written as usize!=response.byte_count() {break;}
         }
-        CONNECTED.store(false,Ordering::Release);stop(0);crate::log_game("CONTROL_IPC=DISCONNECTED; PROBE_STATE=OFF");
+        CONNECTED.store(false,Ordering::Release);crate::replay_runtime::connection(false);stop(0);crate::log_game("CONTROL_IPC=DISCONNECTED; PROBE_STATE=OFF");
         unsafe{DisconnectNamedPipe(h);CloseHandle(h);}
     }
 }
