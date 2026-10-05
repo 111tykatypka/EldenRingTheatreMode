@@ -66,7 +66,7 @@ ActionEvent decode_action(std::istream& in){ActionEvent e;e.timestamp_ns=get<std
 void encode_character(std::ostream&o,const CharacterRecord&r){put(o,r.version);put(o,static_cast<std::uint16_t>(r.kind));put(o,r.flags);put(o,r.id);put(o,r.timestamp_ns);put(o,r.native_handle);put(o,r.entity_id);put(o,r.npc_param);put(o,r.block_id);put(o,r.character_type);for(float v:r.position)put(o,v);for(float v:r.orientation)put(o,v);put(o,static_cast<std::uint32_t>(r.action.action));put(o,r.action.flags);put(o,r.action.raw_action_bits);put(o,r.action.animation_id);put(o,r.action.animation_time);put(o,r.action.animation_length);put(o,r.action.playback_rate);put(o,r.reserved);}
 CharacterRecord decode_character(std::istream&i){CharacterRecord r;r.version=get<std::uint16_t>(i);r.kind=static_cast<CharacterKind>(get<std::uint16_t>(i));r.flags=get<std::uint32_t>(i);r.id=get<std::uint64_t>(i);r.timestamp_ns=get<std::uint64_t>(i);r.native_handle=get<std::uint64_t>(i);r.entity_id=get<std::uint32_t>(i);r.npc_param=get<std::int32_t>(i);r.block_id=get<std::int32_t>(i);r.character_type=get<std::uint32_t>(i);for(auto&v:r.position)v=get<float>(i);for(auto&v:r.orientation)v=get<float>(i);r.action.action=static_cast<PlayerAction>(get<std::uint32_t>(i));r.action.flags=get<std::uint32_t>(i);r.action.raw_action_bits=get<std::uint64_t>(i);r.action.animation_id=get<std::int32_t>(i);r.action.animation_time=get<float>(i);r.action.animation_length=get<float>(i);r.action.playback_rate=get<float>(i);r.reserved=get<std::uint32_t>(i);return r;}
 struct TypedChunk{std::uint32_t type{},flags{},count{};std::uint64_t bytes{};std::uint32_t crc{};};
-TypedChunk read_typed_header(std::istream& in){TypedChunk h;h.type=get<std::uint32_t>(in);h.flags=get<std::uint32_t>(in);h.count=get<std::uint32_t>(in);h.bytes=get<std::uint64_t>(in);h.crc=get<std::uint32_t>(in);if(h.flags>1||h.count==0)throw std::runtime_error("invalid typed chunk flags/count");if(h.type==action_track&&h.bytes!=std::uint64_t(h.count)*40)throw std::runtime_error("invalid action chunk length");if(h.type==3&&h.bytes!=std::uint64_t(h.count)*character_record_bytes)throw std::runtime_error("invalid character chunk length");if(h.type!=action_track&&h.type!=3&&(h.flags&1))throw std::runtime_error("unknown required track");return h;}
+TypedChunk read_typed_header(std::istream& in){TypedChunk h;h.type=get<std::uint32_t>(in);h.flags=get<std::uint32_t>(in);h.count=get<std::uint32_t>(in);h.bytes=get<std::uint64_t>(in);h.crc=get<std::uint32_t>(in);if(h.flags>1||h.count==0)throw std::runtime_error("invalid typed chunk flags/count");if(h.type==action_track&&h.bytes!=std::uint64_t(h.count)*40)throw std::runtime_error("invalid action chunk length");if(h.type==4&&h.bytes!=std::uint64_t(h.count)*visual_record_bytes)throw std::runtime_error("invalid visual chunk length");if(h.type==3&&h.bytes!=std::uint64_t(h.count)*character_record_bytes)throw std::runtime_error("invalid character chunk length");if(h.type!=action_track&&h.type!=3&&h.type!=4&&(h.flags&1))throw std::runtime_error("unknown required track");return h;}
 std::string read_payload(std::istream& in,std::uint64_t bytes,std::uint32_t checksum,std::uint64_t file_size){const auto pos=static_cast<std::uint64_t>(in.tellg());if(bytes>64ULL*1024*1024||pos>file_size||bytes>file_size-pos||bytes>std::numeric_limits<std::size_t>::max())throw std::runtime_error("truncated/oversized track payload");std::string payload(static_cast<std::size_t>(bytes),'\0');in.read(payload.data(),static_cast<std::streamsize>(bytes));if(!in||crc32(reinterpret_cast<const unsigned char*>(payload.data()),payload.size())!=checksum)throw std::runtime_error("track checksum mismatch");return payload;}
 void write_header(std::ostream& o,const Metadata& m,std::uint64_t count,std::uint64_t duration,std::uint64_t paused,double rate) {
     auto header_magic=magic;header_magic[7]=m.format_version==3?'3':'2';o.write(header_magic.data(), header_magic.size()); put(o,m.format_version); put(o,std::uint32_t{0});
@@ -96,6 +96,7 @@ struct Writer::Impl {
     std::vector<Sample> pending;std::vector<ActionEvent> pending_actions;std::optional<ActionEvent> last_action;std::uint64_t action_count{};
     std::uint32_t chunk_limit;
     std::vector<CharacterRecord> pending_characters;CharacterValidator characters;
+    std::vector<VisualState> pending_visuals;std::map<std::uint64_t,VisualState> last_visuals;
     std::uint64_t count{}, duration{}, chunks{};
     std::uint64_t first_source{}, last_source{}, last_replay{};
     bool has_sample{}, done{};
@@ -112,8 +113,9 @@ struct Writer::Impl {
         pending.reserve(chunk_limit);
     }
     void flush_characters(){if(pending_characters.empty())return;std::ostringstream data(std::ios::out|std::ios::binary);for(const auto&r:pending_characters)encode_character(data,r);const auto payload=data.str();put(out,track_marker);put(out,std::uint32_t{3});put(out,std::uint32_t{0});put(out,static_cast<std::uint32_t>(pending_characters.size()));put(out,static_cast<std::uint64_t>(payload.size()));put(out,crc32(reinterpret_cast<const unsigned char*>(payload.data()),payload.size()));out.write(payload.data(),static_cast<std::streamsize>(payload.size()));out.flush();if(!out)throw std::runtime_error("character chunk write failed");pending_characters.clear();}
+    void flush_visuals(){if(pending_visuals.empty())return;std::ostringstream data(std::ios::out|std::ios::binary);for(const auto&r:pending_visuals)write_visual(data,r);const auto payload=data.str();put(out,track_marker);put(out,std::uint32_t{4});put(out,std::uint32_t{0});put(out,static_cast<std::uint32_t>(pending_visuals.size()));put(out,static_cast<std::uint64_t>(payload.size()));put(out,crc32(reinterpret_cast<const unsigned char*>(payload.data()),payload.size()));out.write(payload.data(),static_cast<std::streamsize>(payload.size()));out.flush();if(!out)throw std::runtime_error("visual chunk write failed");pending_visuals.clear();}
     void flush_chunk() {
-        if(pending.empty()) {flush_characters();return;}
+        if(pending.empty()) {flush_characters();flush_visuals();return;}
         std::ostringstream bytes(std::ios::out|std::ios::binary);
         for(const auto& s:pending) encode(bytes,s);
         const auto payload=bytes.str();
@@ -124,7 +126,7 @@ struct Writer::Impl {
         if(!out) throw std::runtime_error("failed flushing replay chunk");
         ++chunks; pending.clear();
         if(!pending_actions.empty()){std::ostringstream data(std::ios::out|std::ios::binary);for(const auto&e:pending_actions)encode_action(data,e);const auto actions=data.str();put(out,track_marker);put(out,action_track);put(out,std::uint32_t{0});put(out,static_cast<std::uint32_t>(pending_actions.size()));put(out,static_cast<std::uint64_t>(actions.size()));put(out,crc32(reinterpret_cast<const unsigned char*>(actions.data()),actions.size()));out.write(actions.data(),static_cast<std::streamsize>(actions.size()));out.flush();if(!out)throw std::runtime_error("action chunk write failed");pending_actions.clear();}
-        flush_characters();
+        flush_characters();flush_visuals();
     }
 };
 
@@ -148,6 +150,8 @@ void Writer::append(Sample s) {
     x.pending.push_back(s); ++x.count; if(x.pending.size()>=x.chunk_limit) x.flush_chunk();
 }
 void Writer::append_character(CharacterRecord r){auto&x=*impl_;if(x.done||x.metadata.format_version!=3||!x.has_sample||r.timestamp_ns>x.duration)throw std::runtime_error("character record outside active player timeline");x.characters.accept(r);x.pending_characters.push_back(r);if(x.pending_characters.size()>=4096)x.flush_chunk();}
+void Writer::append_visual(VisualState s){auto&x=*impl_;if(x.done||x.metadata.format_version!=3||!x.has_sample||s.timestamp_ns>x.duration||!s.valid()||(s.id&&!x.characters.actors.contains(s.id)))throw std::runtime_error("invalid visual timeline/identity/schema");const auto old=x.last_visuals.find(s.id);if(old!=x.last_visuals.end()){if(s.timestamp_ns<old->second.timestamp_ns)throw std::runtime_error("visual time regression");if(s.same(old->second))return;}x.last_visuals[s.id]=s;x.pending_visuals.push_back(s);if(x.pending_visuals.size()>=512)x.flush_chunk();}
+void RecordingSession::ingest_visual(VisualState s){if(state_!=RecordingState::recording||!has_origin_||s.timestamp_ns<source_origin_ns_+paused_total_ns_)return;s.timestamp_ns-=source_origin_ns_+paused_total_ns_;writer_.append_visual(s);}
 void RecordingSession::ingest_character(CharacterRecord r){if(state_!=RecordingState::recording||!has_origin_||r.timestamp_ns<source_origin_ns_+paused_total_ns_)return;r.timestamp_ns-=source_origin_ns_+paused_total_ns_;writer_.append_character(r);}
 RecordingSession::RecordingSession(Writer& writer) noexcept : writer_(writer) {}
 void RecordingSession::start() {
@@ -195,7 +199,7 @@ Summary Writer::finalize(std::uint64_t paused_duration_ns) {
 
 Summary validate(const std::filesystem::path& p) {
     std::ifstream in(p,std::ios::binary); if(!in) throw std::runtime_error("cannot open replay for validation");
-    Summary s; read_header(in,s);CharacterValidator characters; std::uint64_t total=0, duration=0, chunks=0, previous_time=0, previous_source=0,action_total=0,previous_action_time=0; bool first=true,first_action=true;
+    Summary s; read_header(in,s);CharacterValidator characters;std::map<std::uint64_t,std::uint64_t> visual_times;std::uint64_t latest_visual=0; std::uint64_t total=0, duration=0, chunks=0, previous_time=0, previous_source=0,action_total=0,previous_action_time=0; bool first=true,first_action=true;
     while(true) {
         const auto marker=get<std::uint32_t>(in);
         if(marker==footer_marker) {
@@ -205,9 +209,9 @@ Summary validate(const std::filesystem::path& p) {
             if(!first_action&&previous_action_time>duration)throw std::runtime_error("action beyond replay duration");
             if(total!=s.sample_count || duration!=s.duration_ns) throw std::runtime_error("header summary mismatch");
             if(in.peek()!=std::char_traits<char>::eof()) throw std::runtime_error("unexpected bytes after replay footer");
-            if(characters.latest>duration)throw std::runtime_error("character beyond replay duration");s.character_count=characters.actors.size();s.character_sample_count=characters.samples;s.chunk_count=chunks;s.action_event_count=action_total; return s;
+            if(latest_visual>duration)throw std::runtime_error("visual beyond replay duration");if(characters.latest>duration)throw std::runtime_error("character beyond replay duration");s.character_count=characters.actors.size();s.character_sample_count=characters.samples;s.chunk_count=chunks;s.action_event_count=action_total; return s;
         }
-        if(marker==track_marker&&s.metadata.format_version==3){const auto h=read_typed_header(in);const auto payload=read_payload(in,h.bytes,h.crc,std::filesystem::file_size(p));if(h.type==action_track){std::istringstream data(payload,std::ios::in|std::ios::binary);for(std::uint32_t j=0;j<h.count;++j){const auto e=decode_action(data);if(!e.state.valid()||(!first_action&&e.timestamp_ns<previous_action_time))throw std::runtime_error("invalid action data/order");previous_action_time=e.timestamp_ns;first_action=false;++action_total;s.animation_sync_observations|=(e.state.flags&time_valid)!=0;}}else if(h.type==3){std::istringstream data(payload,std::ios::in|std::ios::binary);for(std::uint32_t j=0;j<h.count;++j)characters.accept(decode_character(data));}continue;}
+        if(marker==track_marker&&s.metadata.format_version==3){const auto h=read_typed_header(in);const auto payload=read_payload(in,h.bytes,h.crc,std::filesystem::file_size(p));if(h.type==action_track){std::istringstream data(payload,std::ios::in|std::ios::binary);for(std::uint32_t j=0;j<h.count;++j){const auto e=decode_action(data);if(!e.state.valid()||(!first_action&&e.timestamp_ns<previous_action_time))throw std::runtime_error("invalid action data/order");previous_action_time=e.timestamp_ns;first_action=false;++action_total;s.animation_sync_observations|=(e.state.flags&time_valid)!=0;}}else if(h.type==3){std::istringstream data(payload,std::ios::in|std::ios::binary);for(std::uint32_t j=0;j<h.count;++j)characters.accept(decode_character(data));}else if(h.type==4){std::istringstream data(payload,std::ios::in|std::ios::binary);for(std::uint32_t j=0;j<h.count;++j){auto v=read_visual(data);++s.visual_snapshot_count;if((v.id&&!characters.actors.contains(v.id))||(visual_times.contains(v.id)&&v.timestamp_ns<visual_times[v.id]))throw std::runtime_error("visual identity/order");visual_times[v.id]=v.timestamp_ns;latest_visual=std::max(latest_visual,v.timestamp_ns);}}continue;}
         if(marker!=chunk_marker) throw std::runtime_error("invalid chunk marker");
         const auto n=get<std::uint32_t>(in); const auto bytes=get<std::uint64_t>(in); const auto expected=get<std::uint32_t>(in);
         constexpr std::uint64_t sample_size=52;
@@ -237,7 +241,7 @@ struct Reader::Impl {
     std::vector<Chunk> chunks;std::vector<ActionEvent> actions;
     CharacterValidator characters;struct CharEntry{std::uint64_t time,offset;CharacterKind kind;std::uint32_t flags;};std::map<std::uint64_t,std::vector<CharEntry>> character_index;
     mutable std::uint32_t cached_chunk{std::numeric_limits<std::uint32_t>::max()};
-    mutable std::vector<Sample> cache;
+    mutable std::vector<Sample> cache;std::map<std::uint64_t,std::vector<Entry>> visual_index;
 
     explicit Impl(const std::filesystem::path& p) : path(p), info(validate(p)), input(p,std::ios::binary) {
         if(!input) throw std::runtime_error("cannot open replay for indexed reading");
@@ -246,7 +250,7 @@ struct Reader::Impl {
         while(true) {
             const auto marker=get<std::uint32_t>(input);
             if(marker==footer_marker) break;
-            if(marker==track_marker&&info.metadata.format_version==3){const auto h=read_typed_header(input);if(h.type==action_track){for(std::uint32_t j=0;j<h.count;++j)actions.push_back(decode_action(input));}else if(h.type==3){for(std::uint32_t j=0;j<h.count;++j){const auto offset=static_cast<std::uint64_t>(input.tellg());auto r=decode_character(input);characters.accept(r);if(r.kind!=CharacterKind::registry)character_index[r.id].push_back({r.timestamp_ns,offset,r.kind,r.flags});}}else input.seekg(static_cast<std::streamoff>(h.bytes),std::ios::cur);continue;}
+            if(marker==track_marker&&info.metadata.format_version==3){const auto h=read_typed_header(input);if(h.type==action_track){for(std::uint32_t j=0;j<h.count;++j)actions.push_back(decode_action(input));}else if(h.type==3){for(std::uint32_t j=0;j<h.count;++j){const auto offset=static_cast<std::uint64_t>(input.tellg());auto r=decode_character(input);characters.accept(r);if(r.kind!=CharacterKind::registry)character_index[r.id].push_back({r.timestamp_ns,offset,r.kind,r.flags});}}else if(h.type==4){for(std::uint32_t j=0;j<h.count;++j){const auto offset=static_cast<std::uint64_t>(input.tellg());auto v=read_visual(input);visual_index[v.id].push_back({v.timestamp_ns,offset,0});}}else input.seekg(static_cast<std::streamoff>(h.bytes),std::ios::cur);continue;}
             if(marker!=chunk_marker) throw std::runtime_error("invalid chunk marker while indexing replay");
             const auto n=get<std::uint32_t>(input); (void)get<std::uint64_t>(input); (void)get<std::uint32_t>(input);
             const auto start=static_cast<std::uint64_t>(input.tellg());
@@ -284,7 +288,19 @@ Sample Reader::sample(std::uint64_t i) const{return impl_->at(i);}
 const std::vector<ActionEvent>& Reader::action_events()const noexcept{return impl_->actions;}
 std::vector<CharacterInfo> Reader::characters()const{std::vector<CharacterInfo> result;for(const auto&[id,info]:impl_->characters.actors)result.push_back(info);return result;}
 std::vector<CharacterRecord> Reader::character_preview(std::uint64_t id,std::size_t maximum)const{std::vector<CharacterRecord> result;if(!maximum)return result;const auto it=impl_->character_index.find(id);if(it==impl_->character_index.end())return result;const auto stride=std::max<std::size_t>(1,(it->second.size()+maximum-1)/maximum);std::ifstream in(impl_->path,std::ios::binary);for(std::size_t i=0;i<it->second.size();++i){auto e=it->second[i];if(i%stride&&e.kind!=CharacterKind::presence)continue;in.seekg(static_cast<std::streamoff>(e.offset));result.push_back(decode_character(in));}return result;}
-std::optional<CharacterRecord> Reader::character_at(std::uint64_t id,std::uint64_t t)const{const auto found=impl_->character_index.find(id);if(found==impl_->character_index.end())return {};const auto&entries=found->second;auto it=std::upper_bound(entries.begin(),entries.end(),t,[](auto time,const auto&e){return time<e.time;});if(it==entries.begin())return {};--it;if(it->kind==CharacterKind::presence&&it->flags==0)return {};while(it->kind!=CharacterKind::transform){if(it==entries.begin())return {};--it;}if(t-it->time>250'000'000ULL)return {};std::ifstream in(impl_->path,std::ios::binary);in.seekg(static_cast<std::streamoff>(it->offset));return decode_character(in);}
+std::optional<std::pair<CharacterRecord,CharacterRecord>> Reader::character_bracket(std::uint64_t id,std::uint64_t t)const{
+ const auto found=impl_->character_index.find(id);if(found==impl_->character_index.end())return {};const auto&entries=found->second;
+ auto upper=std::upper_bound(entries.begin(),entries.end(),t,[](auto time,const auto&e){return time<e.time;});if(upper==entries.begin())return {};auto lower=upper;--lower;
+ if(lower->kind==CharacterKind::presence&&lower->flags==0)return {};
+ while(lower->kind!=CharacterKind::transform){if(lower==entries.begin())return {};--lower;}
+ if(t-lower->time>2'000'000'000ULL)return {};
+ auto read=[&](auto e){impl_->input.clear();impl_->input.seekg(static_cast<std::streamoff>(e.offset));return decode_character(impl_->input);};
+ auto a=read(*lower),b=a;
+ if(upper!=entries.end()&&upper->kind==CharacterKind::transform&&upper->time-lower->time<=2'000'000'000ULL)b=read(*upper);
+ return std::pair{a,b};
+}
+std::optional<CharacterRecord> Reader::character_at(std::uint64_t id,std::uint64_t t)const{auto pair=character_bracket(id,t);return pair?std::optional(pair->first):std::nullopt;}
+std::optional<VisualState> Reader::visual_at(std::uint64_t id,std::uint64_t t)const{auto found=impl_->visual_index.find(id);if(found==impl_->visual_index.end())return {};const auto& list=found->second;auto it=std::upper_bound(list.begin(),list.end(),t,[](auto time,const auto&e){return time<e.time;});if(it==list.begin())return {};--it;impl_->input.clear();impl_->input.seekg(static_cast<std::streamoff>(it->offset));return read_visual(impl_->input);}
 std::uint64_t Reader::lower_sample(std::uint64_t t) const {
     if(impl_->index.empty()) throw std::runtime_error("replay contains no samples");
     const auto it=std::upper_bound(impl_->index.begin(),impl_->index.end(),t,[](std::uint64_t v,const Impl::Entry&e){return v<e.time;});

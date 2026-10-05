@@ -16,6 +16,7 @@ static PENDING: AtomicBool = AtomicBool::new(false);
 static REQUEST: Mutex<Option<Request>> = Mutex::new(None);
 
 pub fn stop(detail: u32) {
+    crate::actor_replay::stop();
     GENERATION.fetch_add(1, Ordering::AcqRel);
     let old = PHASE.swap(if detail==0 {replay::INACTIVE} else {replay::ERROR}, Ordering::AcqRel);
     DETAIL.store(detail, Ordering::Release); SESSION.store(0, Ordering::Release); PENDING.store(false, Ordering::Release);

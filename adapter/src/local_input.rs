@@ -33,12 +33,16 @@ impl LocalInputLock {
 pub fn early_tick(now:u64){
  let last=LAST_WRITE.load(Ordering::Acquire);if last==0||now.saturating_sub(last)>250_000_000||!crate::replay_runtime::input_owned(now){return;}
  let Ok(p)=(unsafe{PlayerIns::local_player_mut()})else{return;};if handle(p)!=OWNED_HANDLE.load(Ordering::Acquire){return;}
- let r=&mut p.chr_ins.modules.action_request;
- if r.action_request_queue.input_entries.len()>256||r.action_request_queue.cancel_entries.len()>256{crate::replay_runtime::stop(6);return;}
+ if !neutralize(&mut p.chr_ins){crate::replay_runtime::stop(6);}
+}
+pub fn neutralize(chr:&mut eldenring::cs::ChrIns)->bool{
+ let r=&mut chr.modules.action_request;
+ if r.action_request_queue.input_entries.len()>256||r.action_request_queue.cancel_entries.len()>256{return false;}
  r.action_requests.0=0;r.previous_action_requests.0=0;r.new_action_presses.0=0;r.released_actions.0=0;r.cancel_ready_actions.0=0;r.queued_action_inputs.0=0;
  r.readback_new_presses.0=0;r.readback_cancel_ready.0=0;r.readback_queued_inputs.0=0;
  r.movement_request_duration=0.0;r.movement_request_flags.0&=!7;
  for e in r.action_request_queue.input_entries.iter_mut(){e.actions.0&=!((1u64<<38)-1);}
  for e in r.action_request_queue.cancel_entries.iter_mut(){e.actions.0&=!((1u64<<38)-1);}
  // Analog manipulator vectors are private/unavailable; don't claim they were cleared.
+ true
 }

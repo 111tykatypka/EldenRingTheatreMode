@@ -30,7 +30,7 @@ Player::Player(const std::filesystem::path& file) {
     state_.status=Status::loading;
     reader_=std::make_unique<erplay::Reader>(file);
     if(reader_->summary().metadata.game_version!="2.7.0.0") {state_.status=Status::error;throw std::runtime_error("incompatible replay game version");}
-    if(reader_->summary().metadata.mod_version!="0.2.0"&&reader_->summary().metadata.mod_version!="0.3.0") {state_.status=Status::error;throw std::runtime_error("incompatible replay mod version");}
+    if(reader_->summary().metadata.mod_version!="0.2.0"&&reader_->summary().metadata.mod_version!="0.3.0"&&reader_->summary().metadata.mod_version!="0.6.0") {state_.status=Status::error;throw std::runtime_error("incompatible replay mod version");}
     if(reader_->summary().sample_count==0) {state_.status=Status::error;throw std::runtime_error("replay contains no samples");}
     state_.status=Status::ready; update_state();
 }

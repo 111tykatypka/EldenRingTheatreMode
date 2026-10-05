@@ -64,3 +64,27 @@ The v3 FOOT is 44 bytes: the v2 36-byte footer followed by u64 count of known Pl
 Recovery preserves complete checksum-valid transform and typed chunks from an unfinished zero-summary header; discards a torn final chunk; rebuilds both summary and known-action footer count. It never invents events for a lost action tail. CRC mismatch or invalid complete events cause failure, not silent salvage. Original .tmp stays untouched. Process/disk failure between final header rewrite and rename can still require external diagnosis; perfect crash recovery is not promised.
 
 Reader retains a compact transform offset/timestamp index, one transform chunk cache and a compact action-event vector. Sequential playback advances a cursor; backward seek/restart uses upper_bound. Action IDs/time are held as observations; they are not linearly interpolated. There is no file-duration cap; index/action memory scales with session length and change frequency.
+
+## Phase 6 optional character and visual snapshots
+
+Tester recordings retain ERPLAY03, mod version `0.6.0`. The header/player payload/footer do not change. Readers accept known mod versions 0.2.0/0.3.0/0.6.0; future incompatible versions are rejected explicitly.
+
+Character track type **3** uses explicit **112-byte** little-endian records (`src/character_track.hpp`). Kinds: registry=1, transform=2, presence=3. Layout: schema u16 at 0, kind u16 at 2, flags u32 at 4, replay ID u64 at 8, timestamp u64 at 16, native handle u64 at 24, entity u32 at 32, NPC param i32 at 36, block i32 at 40, raw ChrType u32 at 44, XYZ f32 at 48, XYZW f32 at 60, 36-byte ActionState at 76, reserved u32 at 108. Registry stores identity; transform rows use replay ID with identity fields zeroed. Presence flag0=missing, flag1=present. Observational IDs are session scoped; native handles are NOT memory addresses. A new lifetime never silently replaces another actor's samples. Idle transforms use one-second heartbeats, changing actions or observed animation-time wrap still emit records. Host actor interpolation does not bridge a presence boundary and expires after a two-second observation gap.
+
+Visual track type **4**, flags optional=0, schema **1**, uses explicit **440-byte** records:
+
+| Offset | Field |
+| --- | --- |
+| 0 | u64 actor replay ID (0=local player) |
+| 8 | u64 active replay timestamp ns |
+| 16 | 12 u32 fields: schema, model, HP, maxHP, availability, left weapon slot, right weapon slot, arm style, gender, archetype, raw item-use SFX ID, ground bits |
+| 64 | 22 i32 equipment param IDs |
+| 152 | 288 bytes bounded native face buffer: magic[4], version u32, buffer_size u32, buffer[276] |
+
+Availability flags: 1=model, 2=nonnegative HP/maxHP, 4=ground state, 8=equipment/slots, 16=bounded face snapshot. Slots with flag8 must be <3 and arm style <=3. Ground bits: 0=standing solid, 1=falling, 2=touching solid. Invalid/unavailable values must not be interpreted as valid native state. Item SFX is raw context only, NOT an effect spawn event. NPC equipment/face are unavailable in this implementation. No vtables, pointers or native struct dumps are written.
+
+Visual snapshots are initial/changed only; equality excludes timestamp. Per-actor timestamps cannot regress or exceed player duration. Nonzero IDs require a prior registry. Typed payload CRC and lengths are validated; recovery preserves complete optional tracks. The existing footer counts only player action events, not actor/visual records. Summary derives visual count by scanning known tracks. Playback holds latest visual observation for inspection; it does NOT apply HP, model, equipment, face or effects to Elden Ring.
+
+Character observation IPC v2 retains the 40-byte header: magic/version/flags/count, formerly reserved u32 is visual count, then sequence/time/drop counts. Payload: `count*112` actor rows followed by `visual_count*440` snapshots. Host supports old v1 (reserved=0), validates exact time/registry/duplicate visual IDs and refuses malformed frames. Matching tester EXE/DLL is required.
+
+Control IPC retains v3/128-byte layout, adding actor command kind11 and status capability bit32. In actor packets: applied_sequence=native handle, state=ChrType, detail=entity ID, replay_detail=NPC param bits, session=player replay session; replay timestamp/XYZ/XYZW/action carry host state. No pointer is transmitted. Finite normalized quaternions, monotonic sequence, valid session/Chr selector, flags0 and 250ms target age are required. Stop remains the existing command and invalidates all actor leases. The DLL uses no ERPLAY parser or independent replay clock.

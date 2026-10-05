@@ -24,7 +24,11 @@ static bool read_machine(const wchar_t* path,uint16_t& machine){std::ifstream f(
 extern "C" uint32_t __cdecl tm_validate_profile(const wchar_t* input,uintptr_t image_base,TmValidationReport* r){
     if(!r||!input)return TM_ERR_PATH_OR_RESOURCE;ZeroMemory(r,sizeof(*r));r->size=sizeof(*r);r->image_base=image_base;
     wchar_t path[32768]{};DWORD plen=GetFullPathNameW(input,(DWORD)_countof(path),path,nullptr);if(!plen||plen>=_countof(path))return r->status=TM_ERR_PATH_OR_RESOURCE;lstrcpynW(r->runtime_path,path,(int)_countof(r->runtime_path));
-    r->checked|=TM_CHECK_PATH;if(CompareStringOrdinal(path,-1,TM_EXPECTED_EXE_PATH,-1,TRUE)==CSTR_EQUAL)r->passed|=TM_CHECK_PATH;
+    // A tester may install the exact supported binary on a different drive.
+    // Require its executable name; version, AMD64 and the full on-disk SHA-256
+    // below remain mandatory. The default installation directory is not identity.
+    const auto filename=std::filesystem::path(path).filename().wstring();
+    r->checked|=TM_CHECK_PATH;if(CompareStringOrdinal(filename.c_str(),-1,L"eldenring.exe",-1,TRUE)==CSTR_EQUAL)r->passed|=TM_CHECK_PATH;
     DWORD ignored{},size=GetFileVersionInfoSizeW(path,&ignored);if(size){std::vector<BYTE> data(size);VS_FIXEDFILEINFO* info{};UINT bytes{};if(GetFileVersionInfoW(path,0,size,data.data())&&VerQueryValueW(data.data(),L"\\",(LPVOID*)&info,&bytes)&&bytes>=sizeof(*info)&&info->dwSignature==0xFEEF04BD){split_version(info->dwFileVersionMS,info->dwFileVersionLS,r->file_version);split_version(info->dwProductVersionMS,info->dwProductVersionLS,r->product_version);r->checked|=TM_CHECK_FILE_VERSION|TM_CHECK_PRODUCT_VERSION;if(version_eq(r->file_version))r->passed|=TM_CHECK_FILE_VERSION;if(version_eq(r->product_version))r->passed|=TM_CHECK_PRODUCT_VERSION;}}
     if(read_machine(path,r->machine)){r->checked|=TM_CHECK_ARCH;if(r->machine==TM_EXPECTED_PE_MACHINE)r->passed|=TM_CHECK_ARCH;}
     if(image_base){r->checked|=TM_CHECK_IMAGE_BASE;if(r->image_base)r->passed|=TM_CHECK_IMAGE_BASE;}

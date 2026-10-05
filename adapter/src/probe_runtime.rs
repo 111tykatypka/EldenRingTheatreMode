@@ -103,7 +103,7 @@ fn status(version:u16)->wire::Packet {
     let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
     wire::Packet {version,player_action:Default::default(),replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()}else{0}) }
+        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32}else{0}) }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;
@@ -122,6 +122,7 @@ pub fn pipe_worker() {
                 Ok(packet)=>packet,Err(e)=>{stop(8);crate::log_game(&format!("CONTROL_ERROR=MALFORMED_PACKET ({e}); PROBE_STATE=OFF"));break;}
             };
             last_sequence=packet.sequence;COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);HEARTBEAT_NS.store(now_ns,Ordering::Release);crate::replay_runtime::heartbeat(now_ns);
+            if packet.kind==wire::ACTOR_APPLY && ready(){crate::actor_replay::receive(packet,now_ns);}
             if matches!(packet.kind,wire::TRACE_START|wire::TRACE_STOP|wire::TRACE_MARK){
                 if packet.kind==wire::TRACE_STOP || (ready() && !crate::replay_runtime::active() && !matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING)){crate::locomotion_trace::command(packet.kind,packet.position[0] as u32);}
                 else{crate::log_game("LOCOMOTION_TRACE_REJECTED=BUSY_OR_NOT_READY");}

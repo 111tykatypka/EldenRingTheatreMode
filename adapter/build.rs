@@ -5,6 +5,7 @@ fn main(){
  let manifest=PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
  let header=manifest.join("../shared/GameProfile.h");println!("cargo:rerun-if-changed={}",header.display());
  let shared_lib=manifest.join("../build/shared/Release");println!("cargo:rustc-link-search=native={}",shared_lib.display());println!("cargo:rustc-link-lib=static=GameProfile");
+ println!("cargo:rerun-if-changed={}",shared_lib.join("GameProfile.lib").display());
  let text=fs::read_to_string(header).expect("read shared GameProfile.h");
  let profile=quoted(value(&text,"TM_PROFILE_NAME"));let path=quoted(value(&text,"TM_EXPECTED_EXE_PATH")).replace("\\\\","\\");
  let file=quoted(value(&text,"TM_EXPECTED_FILE_VERSION"));let product=quoted(value(&text,"TM_EXPECTED_PRODUCT_VERSION"));let sha=quoted(value(&text,"TM_EXPECTED_SHA256"));

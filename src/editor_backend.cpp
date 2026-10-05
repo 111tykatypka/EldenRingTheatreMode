@@ -174,6 +174,9 @@ fs::path default_loader() {
   return path;
 }
 void load_loader_path() {
+  app.game_path = TM_EXPECTED_EXE_PATH;
+  std::ifstream game_config(app.root / L"Game.path", std::ios::binary);
+  if(game_config){try{const std::string text{std::istreambuf_iterator<char>(game_config),std::istreambuf_iterator<char>()};if(!text.empty())app.game_path=game_launcher::wide(text);}catch(const std::exception&e){log_line(std::string("Cannot load game path: ")+e.what());}}
   app.loader_path = default_loader();
   std::ifstream input(app.root / L"YAFSML.path", std::ios::binary);
   if (input) {
@@ -212,6 +215,22 @@ void choose_loader() {
     MessageBoxW(app.window, game_launcher::wide(e.what()).c_str(),
                 L"Launcher settings", MB_ICONERROR | MB_OK);
   }
+}
+void choose_game() {
+  if(app.game_pid.load() || app.launcher.state().busy())return;
+  wchar_t name[32768]{};wcsncpy_s(name, app.game_path.c_str(), _TRUNCATE);
+  OPENFILENAMEW ofn{sizeof(ofn)};ofn.hwndOwner=app.window;
+  ofn.lpstrFilter=L"Elden Ring (eldenring.exe)\0eldenring.exe\0";
+  ofn.lpstrFile=name;ofn.nMaxFile=32768;ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+  if(!GetOpenFileNameW(&ofn))return;
+  try{
+    // The launcher and injected DLL both use tm_validate_profile. A selected
+    // path cannot opt out of the full hash/version/architecture checks.
+    std::ofstream output(app.root/L"Game.path",std::ios::binary|std::ios::trunc);
+    const auto text=game_launcher::utf8(name);output.write(text.data(),static_cast<std::streamsize>(text.size()));
+    output.flush();if(!output)throw std::runtime_error("Cannot save game path");
+    app.game_path=name;log_line("Game executable selected: "+text);
+  }catch(const std::exception&e){MessageBoxW(app.window,game_launcher::wide(e.what()).c_str(),L"Game settings",MB_ICONERROR|MB_OK);}
 }
 void emergency_stop() {
   std::lock_guard playback_lock(app.replay_mutex);
@@ -331,7 +350,7 @@ bool register_hotkey(HWND w, int id, UINT key, const char *name) {
 }
 void launch_game() {
   try {
-    const game_launcher::Paths paths{app.loader_path, TM_EXPECTED_EXE_PATH,
+    const game_launcher::Paths paths{app.loader_path, app.game_path,
                                      executable_directory() /
                                          L"TheaterMode.dll",
                                      app.root / L"launch" / L"YAFSML.ini"};
@@ -356,6 +375,7 @@ void play_replay() {
   if (app.game_pid.load() || app.game_replay->active()) {
     if (can_start_game_replay()) {
       app.game_replay->enable_animation(app.animation);
+      app.game_replay->enable_characters(app.actor_playback);
       app.game_replay->play(*app.replay_player, app.limit_ns);
     }
   } else
@@ -368,6 +388,7 @@ void restart_replay() {
   if (app.game_pid.load() || app.game_replay->active()) {
     if (can_start_game_replay()) {
       app.game_replay->enable_animation(app.animation);
+      app.game_replay->enable_characters(app.actor_playback);
       app.game_replay->restart(*app.replay_player, app.limit_ns);
     }
   } else
@@ -381,6 +402,7 @@ void pipe_worker() {
       app.log.open(log_path, std::ios::binary | std::ios::app);
   }
   std::map<std::uint64_t, bool> character_known;
+  std::map<std::uint64_t, erplay::CharacterRecord> character_last_written;
   std::uint64_t character_samples = 0, character_min_source = 0;
   std::unique_ptr<erplay::Writer> writer;
   std::unique_ptr<erplay::RecordingSession> session;
@@ -437,7 +459,7 @@ void pipe_worker() {
             snap.player) {
           erplay::Metadata md;
           md.format_version = 3;
-          md.mod_version = "0.3.0";
+          md.mod_version = "0.6.0";
           md.game_version = "2.7.0.0";
           md.recording_start_unix_ns = unix_ns();
           md.requested_rate_hz = 60.0;
@@ -455,6 +477,7 @@ void pipe_worker() {
           session->start();
           character_min_source = monotonic_ns();
           character_known.clear();
+          character_last_written.clear();
           character_samples = 0;
           snap.state = erplay::RecordingState::recording;
           snap.samples = 0;
@@ -628,6 +651,15 @@ void pipe_worker() {
                 session->ingest_character(registry);
               }
               character_known[row.id] = true;
+              const auto previous=character_last_written.find(row.id);
+              if(previous!=character_last_written.end()){
+                const auto& last=previous->second;double movement=0,dot=0;
+                for(unsigned i=0;i<3;++i)movement+=std::pow(double(row.position[i])-last.position[i],2);
+                for(unsigned i=0;i<4;++i)dot+=double(row.orientation[i])*last.orientation[i];
+                const bool phase_wrap=(row.action.flags&erplay::time_valid)&&row.action.animation_time+0.1f<last.action.animation_time;
+                if(movement<0.000001 && std::abs(dot)>0.999999 && row.action.same_action(last.action) && !phase_wrap && row.timestamp_ns-last.timestamp_ns<1'000'000'000ULL)continue;
+              }
+              character_last_written[row.id]=row;
               row.native_handle = 0;
               row.entity_id = 0;
               row.npc_param = 0;
@@ -644,10 +676,12 @@ void pipe_worker() {
                   event.timestamp_ns = frame.timestamp;
                   event.kind = erplay::CharacterKind::presence;
                   session->ingest_character(event);
+                  character_last_written.erase(id);
                   present = false;
                 }
               }
             }
+            for(const auto&visual:frame.visuals)session->ingest_visual(visual);
           }
         } catch (const std::exception &e) {
           snap.state = erplay::RecordingState::error;

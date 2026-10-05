@@ -10,6 +10,7 @@ struct Frame {
   std::uint64_t sequence{}, timestamp{}, source_drops{};
   std::uint16_t flags{};
   std::vector<erplay::CharacterRecord> rows;
+  std::vector<erplay::VisualState> visuals;
 };
 struct Stats {
   double rate{};

@@ -18,6 +18,9 @@ bool Controller::play(replay::Player& player,std::uint64_t requested_limit,repla
     if(phase_==Phase::paused&&player_==&player){player_->play(now);transition(Phase::playing,animation_?L"PLAYING — transforms + EXPERIMENTAL animation requests":L"PLAYING — transform only");tick(now);return active();}
     if(active())return false;
     player_=&player;const auto remote=control_.state();const auto boot_ns=theater_clock::monotonic_ns();
+    actors_=characters_?player.reader().characters():std::vector<erplay::CharacterInfo>{};
+    std::erase_if(actors_,[&](const auto&a){const bool unsupported=(std::uint32_t(a.registry.native_handle)>>28)!=1;if(unsupported)logger_("ACTOR_UNSUPPORTED_SELECTOR replay_id="+std::to_string(a.registry.id)+"; track captured but not applied");return unsupported;});
+    if(characters_&&!remote.actor_supported){fail(L"Actor replay requires matching tester DLL; disable experimental actors for player-only fallback");return false;}
     if(!remote.connected||!remote.ready||!remote.replay_supported){fail(L"ERROR: matching Phase5 DLL / Player FOUND required");return false;}
     if(remote.sample_timestamp_ns==0||remote.sample_timestamp_ns>boot_ns||boot_ns-remote.sample_timestamp_ns>500'000'000){fail(L"ERROR: live player state is stale");return false;}
     player_->seek(0);const auto first=transform();const auto d=distance(remote.live,first);
@@ -70,6 +73,17 @@ void Controller::tick(replay::Player::Clock::time_point now){
         return;
     }
     if(phase_==Phase::playing){player_->advance(now);if(player_->state().timestamp_ns>=limit_ns_){finish(now);return;}}
-    if(!control_.apply_replay(session_,player_->state().timestamp_ns,transform(),phase_==Phase::paused,player_->state().current_action,animation_))fail(L"ERROR: transform update refused; writes OFF");
+    if(!control_.apply_replay(session_,player_->state().timestamp_ns,transform(),phase_==Phase::paused,player_->state().current_action,animation_)){fail(L"ERROR: transform update refused; writes OFF");return;}
+    if(characters_&&!send_characters())fail(L"ERROR: actor target update refused; all writes OFF");
+}
+bool Controller::send_characters(){
+ const auto t=player_->state().timestamp_ns;std::vector<erplay::CharacterRecord> targets;targets.reserve(actors_.size());
+ for(const auto& info:actors_){auto pair=player_->reader().character_bracket(info.registry.id,t);if(!pair)continue;const auto&[a,b]=*pair;auto row=info.registry;
+   const double factor=b.timestamp_ns>a.timestamp_ns?std::clamp(double(t-a.timestamp_ns)/double(b.timestamp_ns-a.timestamp_ns),0.,1.):0.;
+   for(unsigned i=0;i<3;++i)row.position[i]=float(a.position[i]+(b.position[i]-a.position[i])*factor);
+   const auto q=replay::slerp({a.orientation[0],a.orientation[1],a.orientation[2],a.orientation[3]},{b.orientation[0],b.orientation[1],b.orientation[2],b.orientation[3]},factor);
+   row.orientation={q.x,q.y,q.z,q.w};row.action=a.action;targets.push_back(row);
+ }
+ return control_.actor_targets(session_,t,targets,phase_==Phase::paused);
 }
 }

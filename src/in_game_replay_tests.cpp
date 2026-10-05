@@ -42,7 +42,7 @@ private:
                     std::copy(std::begin(request.position),std::end(request.position),live_.position.begin());std::copy(std::begin(request.quaternion),std::end(request.quaternion),live_.quaternion.begin());
                     phase_=request.kind==game_control::replay_finish?game_control::finished:request.replay_state;
                 }
-                reply.kind=game_control::status;reply.sequence=sequence;reply.timestamp_ns=GetTickCount64()*1'000'000ULL;reply.flags=3;
+                reply.kind=game_control::status;reply.sequence=sequence;reply.timestamp_ns=GetTickCount64()*1'000'000ULL;reply.flags=35;
                 reply.session=session_;reply.replay_timestamp_ns=replay_ns_;reply.replay_state=phase_;reply.applied_sequence=applied_;
                 std::copy(live_.position.begin(),live_.position.end(),reply.position);std::copy(live_.quaternion.begin(),live_.quaternion.end(),reply.quaternion);
             }
@@ -55,18 +55,25 @@ int run_tests(int argc,wchar_t**argv){
     const auto dir=std::filesystem::temp_directory_path()/(L"TheaterMode-Игровой-replay-tests-"+std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(dir);const auto file=dir/L"coordinator.erplay";
     {erplay::Metadata m;m.title="Mock coordinator test";m.format_version=3;m.mod_version="0.3.0";erplay::Writer writer(file,m,100);
-        for(std::uint64_t i=0;i<=1000;++i){erplay::Sample s;s.index=i;s.replay_time_ns=i*20'000'000;s.source_time_ns=100+i*20'000'000;s.position={float(i)*0.004f,0,0};const double angle=double(i)*0.002;s.orientation={0,float(std::sin(angle)),0,float(std::cos(angle))};s.action=erplay::ActionState{};s.action->flags=erplay::animation_valid;s.action->animation_id=i<150?10:20;writer.append(s);}(void)writer.finalize();}
+        for(std::uint64_t i=0;i<=1000;++i){erplay::Sample s;s.index=i;s.replay_time_ns=i*20'000'000;s.source_time_ns=100+i*20'000'000;s.position={float(i)*0.004f,0,0};const double angle=double(i)*0.002;s.orientation={0,float(std::sin(angle)),0,float(std::cos(angle))};s.action=erplay::ActionState{};s.action->flags=erplay::animation_valid;s.action->animation_id=i<150?10:20;writer.append(s);
+          erplay::CharacterRecord actor;actor.id=1;actor.timestamp_ns=s.replay_time_ns;actor.native_handle=0x10000042;actor.entity_id=1234;actor.npc_param=-1;actor.character_type=2;actor.position={s.position.x,0,2};actor.orientation={s.orientation.x,s.orientation.y,s.orientation.z,s.orientation.w};
+          if(i==0){actor.kind=erplay::CharacterKind::registry;writer.append_character(actor);}actor.kind=erplay::CharacterKind::transform;writer.append_character(actor);
+        }(void)writer.finalize();}
     auto player=std::make_unique<replay::Player>(file);
     MockGame game({});std::atomic<DWORD> sample_pid{GetCurrentProcessId()};game_control::Client client(game.name);client.start(sample_pid);
     assert(wait_for([&]{return client.state().connected&&client.state().ready;}));
-    in_game_replay::Controller controller(client,[&](const auto&line){if(argc>1)std::cerr<<line<<std::endl;});controller.enable_animation(true);auto now=Clock::now();
+    in_game_replay::Controller controller(client,[&](const auto&line){if(argc>1)std::cerr<<line<<std::endl;});controller.enable_animation(true);controller.enable_characters(true);auto now=Clock::now();
     assert(controller.play(*player,5'000'000'000,now));
     assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));
     assert(player->state().timestamp_ns==0);assert(game.last(game_control::replay_begin).action.animation_id==10&&game.last(game_control::replay_begin).flags==1); // BEGIN acknowledgement precedes clock start.
     controller.tick(now+1s);assert(player->state().timestamp_ns==1'000'000'000);
     assert(wait_for([&]{return game.last(game_control::replay_apply).replay_timestamp_ns==1'000'000'000;}));
+    assert(wait_for([&]{return game.last(game_control::actor_apply).replay_timestamp_ns==1'000'000'000;}));
+    const auto actor=game.last(game_control::actor_apply);assert(actor.session==game.last(game_control::replay_apply).session&&actor.applied_sequence==0x10000042&&actor.detail==1234&&actor.replay_detail==UINT32_MAX&&actor.state==2);
+    assert(std::abs(actor.position[0]-.2f)<.0001f&&actor.position[2]==2&&std::abs(actor.quaternion[1]-std::sin(.1))<.001f);
     controller.pause(now+2s);assert(player->state().timestamp_ns==2'000'000'000);
     assert(wait_for([&]{return client.state().replay_phase==game_control::paused;}));
+    assert(wait_for([&]{return game.last(game_control::actor_apply).replay_state==game_control::paused;}));
     controller.tick(now+10s);assert(player->state().timestamp_ns==2'000'000'000);
     assert(controller.play(*player,5'000'000'000,now+10s));controller.tick(now+11s);
     assert(player->state().timestamp_ns==3'000'000'000); // One host clock, pause wall time excluded.
@@ -80,6 +87,7 @@ int run_tests(int argc,wchar_t**argv){
     assert(player->state().timestamp_ns==5'000'000'000);assert(game.last(game_control::replay_finish).replay_timestamp_ns==5'000'000'000);
     const auto apply_count=game.count(game_control::replay_apply);controller.tick(now+19s);assert(game.count(game_control::replay_apply)==apply_count);
     controller.stop();assert(wait_for([&]{return !client.state().pending&&client.state().replay_phase==game_control::inactive;}));
+    const auto stopped_actor_count=game.count(game_control::actor_apply);controller.tick(now+22s);Sleep(120);assert(game.count(game_control::actor_apply)==stopped_actor_count);
     // Full duration must cross sample 301 and 800 and stop exactly at the final sample.
     assert(player->summary().sample_count==1001);now=Clock::now();assert(controller.play(*player,0,now));
     assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));

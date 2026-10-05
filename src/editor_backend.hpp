@@ -58,7 +58,7 @@ struct App {
   bool stop_hotkey{};
   character_capture::Client characters;
   game_launcher::Launcher launcher;
-  fs::path loader_path;
+  fs::path loader_path, game_path;
   std::atomic_bool sample_pipe_ready{};
   game_control::Client control;
   std::unique_ptr<in_game_replay::Controller> game_replay;
@@ -87,6 +87,7 @@ struct App {
   fs::path opened_replay;
   std::uint64_t limit_ns{};
   bool animation{};
+  bool actor_playback{};
 };
 extern App app;
 struct PlaybackView {
@@ -116,6 +117,7 @@ void bookmark_add();
 void bookmark_delete(std::uint64_t);
 void launch_game();
 void choose_loader();
+void choose_game();
 void log_line(const std::string &);
 std::wstring time_text(std::uint64_t);
 fs::path executable_directory();

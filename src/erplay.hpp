@@ -9,6 +9,7 @@
 #include <optional>
 #include "player_action.hpp"
 #include "character_track.hpp"
+#include "character_visual.hpp"
 
 namespace erplay {
 
@@ -42,6 +43,7 @@ struct Summary {
     std::uint64_t action_event_count{};
     bool animation_sync_observations{};
     std::uint64_t character_count{},character_sample_count{};
+    std::uint64_t visual_snapshot_count{};
 };
 enum class RecordingState { idle, recording, paused, saving, ready, error };
 
@@ -56,6 +58,7 @@ public:
     Writer& operator=(const Writer&) = delete;
     void append(Sample sample);
     void append_character(CharacterRecord record);
+    void append_visual(VisualState state);
     [[nodiscard]] Summary finalize(std::uint64_t paused_duration_ns = 0);
     [[nodiscard]] const std::filesystem::path& temporary_path() const noexcept;
 private:
@@ -71,6 +74,7 @@ public:
     void start();
     void ingest(Sample source_sample);
     void ingest_character(CharacterRecord source_record);
+    void ingest_visual(VisualState source_state);
     void pause(std::uint64_t source_time_ns);
     void resume(std::uint64_t source_time_ns);
     [[nodiscard]] Summary stop();
@@ -102,6 +106,8 @@ public:
     [[nodiscard]] std::vector<CharacterInfo> characters()const;
     [[nodiscard]] std::vector<CharacterRecord> character_preview(std::uint64_t id,std::size_t maximum=3000)const;
     [[nodiscard]] std::optional<CharacterRecord> character_at(std::uint64_t id,std::uint64_t time)const;
+    [[nodiscard]] std::optional<std::pair<CharacterRecord,CharacterRecord>> character_bracket(std::uint64_t id,std::uint64_t time)const;
+    [[nodiscard]] std::optional<VisualState> visual_at(std::uint64_t id,std::uint64_t time)const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

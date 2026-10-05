@@ -1,6 +1,7 @@
 #include "character_client.hpp"
 #include "clock_helpers.hpp"
 #include <sstream>
+#include <algorithm>
 
 namespace erplay {
 CharacterRecord read_character_record(std::istream &);
@@ -132,15 +133,15 @@ void Client::run(std::atomic<DWORD> &pid) {
       if (!read(&header, sizeof(header)))
         break;
       const auto now_ns = theater_clock::monotonic_ns();
-      if (header.magic != 0x54524843 || header.version != 1 ||
-          (header.flags & ~6) || header.reserved || header.count > 16384 ||
+      if (header.magic != 0x54524843 || (header.version != 1&&header.version!=2) ||
+          (header.flags & ~6) || (header.version==1&&header.reserved) || header.reserved>16385 || header.count > 16384 ||
           header.sequence <= last || header.timestamp < last_time ||
           header.timestamp > now_ns + 1'000'000'000ULL) {
         malformed = true;
         break;
       }
       std::string payload(static_cast<std::size_t>(header.count) *
-                              erplay::character_record_bytes,
+                              erplay::character_record_bytes+std::size_t(header.reserved)*erplay::visual_record_bytes,
                           '\0');
       if (!read(payload.data(), payload.size()))
         break;
@@ -161,6 +162,7 @@ void Client::run(std::atomic<DWORD> &pid) {
           validator.accept(row);
           frame.rows.push_back(row);
         }
+        for(std::uint32_t j=0;j<header.reserved;++j){auto visual=erplay::read_visual(in);if(visual.timestamp_ns!=header.timestamp)throw std::runtime_error("visual IPC time");if(visual.id&&std::none_of(frame.rows.begin(),frame.rows.end(),[&](const auto&r){return r.id==visual.id;}))throw std::runtime_error("visual IPC unregistered actor");if(std::any_of(frame.visuals.begin(),frame.visuals.end(),[&](const auto&v){return v.id==visual.id;}))throw std::runtime_error("duplicate visual IPC identity");frame.visuals.push_back(visual);}
       } catch (...) {
         malformed = true;
         break;

@@ -13,6 +13,7 @@ pub const REPLAY_FINISH: u16 = 7;
 pub const TRACE_START: u16 = 8;
 pub const TRACE_STOP: u16 = 9;
 pub const TRACE_MARK: u16 = 10;
+pub const ACTOR_APPLY: u16 = 11;
 pub const STATUS: u16 = 0x8000;
 pub const PIPE: &str = r"\\.\pipe\EldenRingTheaterMode_1_17_Control";
 
@@ -75,6 +76,13 @@ impl Packet {
         })
     }
     pub fn validate_command(&self, last_sequence: u64, now_ns: u64) -> Result<(), &'static str> {
+        if self.kind==ACTOR_APPLY {
+            if self.version!=3 || self.sequence==0 || self.sequence<=last_sequence || self.session==0 || self.applied_sequence==0 || (self.applied_sequence as u32 >>28)!=1 || self.flags!=0 || !matches!(self.replay_state,1|2) {return Err("actor identity/session/header");}
+            if !self.player_action.valid() || !self.position.iter().chain(self.quaternion.iter()).all(|v|v.is_finite()) {return Err("invalid actor state");}
+            let norm:f64=self.quaternion.iter().map(|v|f64::from(*v).powi(2)).sum();
+            if (norm-1.0).abs()>0.001 || self.timestamp_ns>now_ns || now_ns-self.timestamp_ns>250_000_000 {return Err("invalid/stale actor target");}
+            return Ok(());
+        }
         if !matches!(self.kind, HELLO | HEARTBEAT | PROBE_NUDGE | STOP | REPLAY_BEGIN | REPLAY_APPLY | REPLAY_FINISH | TRACE_START | TRACE_STOP | TRACE_MARK) { return Err("unknown command"); }
         if matches!(self.kind,TRACE_START|TRACE_STOP|TRACE_MARK) && self.version!=3 {return Err("trace requires v3");}
         let replay=matches!(self.kind,REPLAY_BEGIN|REPLAY_APPLY|REPLAY_FINISH);
@@ -110,6 +118,13 @@ mod tests {
     use super::*;
     fn command() -> Packet { Packet { version:3,player_action:Default::default(), replay_timestamp_ns:0,session:0,replay_state:0,replay_detail:0,applied_sequence:0, kind: PROBE_NUDGE, sequence: 7, timestamp_ns: 100,
         position: [0.5, 0.0, 0.0], quaternion: [0.0, 0.0, 0.0, 1.0], state: 0, detail: 0, flags: 0 } }
+    #[test]fn actor_targets_validate_without_raw_pointers(){
+        let p=Packet{kind:ACTOR_APPLY,session:1,replay_state:1,applied_sequence:0x10000001,detail:123,replay_detail:456,state:5,..command()};
+        assert!(p.validate_command(6,100).is_ok());
+        assert!(Packet::decode(&p.encode()).unwrap().validate_command(6,100).is_ok());
+        for bad in [Packet{applied_sequence:0,..p},Packet{applied_sequence:0x20000001,..p},Packet{session:0,..p},Packet{flags:1,..p},Packet{position:[f32::NAN,0.,0.],..p},Packet{quaternion:[0.;4],..p}]{assert!(bad.validate_command(6,100).is_err());}
+        assert!(p.validate_command(7,100).is_err());assert!(p.validate_command(6,250_000_101).is_err());
+    }
     #[test] fn wire_layout_and_round_trip() {
         let p = command(); let b = p.encode();
         assert_eq!(&b[..8], &[0x54, 0x43, 0x4d, 0x54, 3, 0, 3, 0]);

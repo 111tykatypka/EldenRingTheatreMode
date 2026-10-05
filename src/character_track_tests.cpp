@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <sstream>
 void check(bool b) {
   if (!b)
     throw std::runtime_error("check failed");
@@ -52,6 +53,8 @@ int main() {
             writer.append_character(reg);
           }
           writer.append_character(r);
+          erplay::VisualState visual;visual.id=id;visual.timestamp_ns=s.replay_time_ns;visual.flags=3;visual.model=1000;visual.hp=t<50?100:50;visual.max_hp=100;
+          writer.append_visual(visual);
           if (t == 99) {
             r.kind = erplay::CharacterKind::presence;
             writer.append_character(r);
@@ -66,9 +69,19 @@ int main() {
     check(reader.characters().size() == 3);
     check(reader.character_preview(1, 10).size() <= 11);
     check(reader.character_at(1, 50'000'000)->position[1] == 1);
+    auto bracket=reader.character_bracket(1,75'000'000);check(bool(bracket));
+    check(bracket->first.timestamp_ns==50'000'000&&bracket->second.timestamp_ns==100'000'000);
+    check(!reader.character_bracket(1,4'950'000'000));
     check(!reader.character_at(1, 4'950'000'000));
     check(!reader.character_at(999, 1));
     check(reader.sample(99).position.x == 99);
+    check(reader.visual_at(1,0)->hp==100);
+    check(reader.visual_at(1,2'500'000'000)->hp==50);
+    check(!reader.visual_at(0,0));
+    check(reader.summary().visual_snapshot_count==6); // Three initial HP states + three HP changes; repeated equal snapshots deduplicated.
+    erplay::VisualState roundtrip;roundtrip.flags=24;roundtrip.equipment[0]=-1;roundtrip.face[287]=255;
+    std::ostringstream encoded;erplay::write_visual(encoded,roundtrip);check(encoded.str().size()==erplay::visual_record_bytes);
+    std::istringstream decoded(encoded.str());check(erplay::read_visual(decoded).same(roundtrip));
     erplay::CharacterValidator validator;
     erplay::CharacterRecord r;
     r.id = 7;
@@ -131,6 +144,26 @@ int main() {
     float a[]{0, 0, 0}, b[]{10000, 0, 0};
     check(editor::start_distance(a, b) ==
           10000); // warning magnitude, not a hard blocker
+    // Storage throughput only. These are generated fixtures, NOT game FPS,
+    // native sampling or measured real gameplay compression ratios.
+    for(unsigned actors:{0u,5u,10u,20u}){
+      const auto path=root/("synthetic_"+std::to_string(actors)+".erplay");
+      const auto began=std::chrono::steady_clock::now();
+      erplay::Writer w(path,metadata,600);
+      for(std::uint64_t i=0;i<=3600;++i){
+        erplay::Sample s;s.index=i;s.replay_time_ns=i*1'000'000'000ULL/60;s.source_time_ns=s.replay_time_ns;s.position.x=float(i)*.001f;w.append(s);
+        for(std::uint64_t id=1;id<=actors;++id){
+          erplay::CharacterRecord r;r.id=id;r.timestamp_ns=s.replay_time_ns;
+          if(i==0){r.kind=erplay::CharacterKind::registry;w.append_character(r);}
+          if(id%2==0&&i%60!=0)continue; // idle actors: 1 Hz heartbeat
+          r.kind=erplay::CharacterKind::transform;r.position={id%2?float(i)*.001f:float(id),0,0};w.append_character(r);
+          erplay::VisualState v;v.id=id;v.timestamp_ns=s.replay_time_ns;v.flags=3;v.hp=100;v.max_hp=100;w.append_visual(v);
+        }
+      }
+      const auto result=w.finalize();check(result.character_count==actors&&result.visual_snapshot_count==actors);
+      const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count();
+      std::cout<<"SYNTHETIC_STORAGE_ONLY actors="<<actors<<" replay_seconds=60 bytes="<<std::filesystem::file_size(path)<<" character_records="<<result.character_sample_count<<" build_validate_seconds="<<seconds<<"\n";
+    }
     std::cout << "character registry/transform/presence, CRC, recovery, "
                  "Unicode and timeline math passed\n";
     return 0;

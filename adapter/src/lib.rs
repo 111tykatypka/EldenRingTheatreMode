@@ -24,6 +24,8 @@ mod locomotion_trace;
 mod character_capture;
 mod grounding;
 mod research_readonly;
+mod actor_replay;
+mod visual_capture;
 const STATE_WAITING:u32=0;const DLL_LOADED:u32=1;const PROFILE_VALIDATING:u32=2;const PROFILE_READY:u32=3;const TASK_SIGNATURE_SCAN:u32=10;const TASK_SIGNATURE_READY:u32=11;const TASK_RUNTIME_SEARCH:u32=12;const TASK_RUNTIME_READY:u32=13;const WORLDCHR_SEARCH:u32=20;const WORLDCHR_READY:u32=21;const PLAYER_SEARCH:u32=22;const PLAYER_FOUND:u32=23;const STATE_READY:u32=24;
 const ERR_TASK_TIMEOUT:u32=0x201;const ERR_INIT_PANIC:u32=0x202;const ERR_SAMPLER_THREAD:u32=0x203;const ERR_IPC_THREAD:u32=0x204;const ERR_TASK_SIGNATURE:u32=0x205;
 const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_CHECK_PRODUCT_VERSION:u32=0x0004;const TM_CHECK_ARCH:u32=0x0008;const TM_CHECK_SHA256:u32=0x0010;const TM_CHECK_IMAGE_BASE:u32=0x0020;
@@ -69,7 +71,7 @@ fn check_text(report:&TmValidationReport,flag:u32)->&'static str{if report.check
     let runtime_path=std::ffi::OsString::from_wide(&report.runtime_path[..report.runtime_path.iter().position(|c|*c==0).unwrap_or(report.runtime_path.len())]);
     let hash=unsafe{CStr::from_ptr(report.sha256.as_ptr())}.to_string_lossy();
     log_game(&format!("Runtime executable: {}",PathBuf::from(runtime_path).display()));
-    log_game(&format!("Expected executable: {}",game_profile::EXPECTED_EXE_PATH));
+    log_game(&format!("Default executable location: {}; actual path may differ, exact file/product version, AMD64 and full file SHA-256 remain required",game_profile::EXPECTED_EXE_PATH));
     log_game(&format!("Runtime file version: {}; expected: {}",version(report.file_version),game_profile::EXPECTED_FILE_VERSION_STR));
     log_game(&format!("Runtime product version: {}; expected: {}",version(report.product_version),game_profile::EXPECTED_PRODUCT_VERSION_STR));
     log_game(&format!("Runtime architecture: {}; TheaterMode.dll architecture: AMD64 (x86_64-pc-windows-msvc)",if report.machine==0x8664{"AMD64"}else if report.machine==0x14c{"x86"}else{"OTHER/UNKNOWN"}));
@@ -126,7 +128,8 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let mut characters=character_capture::Capture::new();
                 let mut grounding=grounding::Capture::default();
                 let mut research=research_readonly::Capture::new();
-                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{local_input::early_tick(monotonic_ns());})));
+                let mut actors=actor_replay::Actors::new();
+                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{let now=monotonic_ns();local_input::early_tick(now);actor_replay::early_tick(now);} )));
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PreBehaviorSafe,early);}
                 log_game("EXPERIMENTAL normalized input callback registered at ChrIns_PreBehaviorSafe; inactive unless replay owns local player");
                 let mut last_animation_id=-1i32;
@@ -138,6 +141,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||replay.tick(now))).is_err(){replay.fail();}
+                    actors.tick(now);
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {
                         if !world_ready.swap(true,Ordering::AcqRel){log_game(&format!("WorldChrMan READY; instance={:p}",world));set_state(WORLDCHR_READY,"WORLDCHR_READY");set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}
                         if let Some(player)=world.main_player.as_ref() {

@@ -593,6 +593,10 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   ImGui::EndDisabled();
   button("Choose YAFSML...", choose_loader);
   label(app.loader_path.wstring());
+  ImGui::BeginDisabled(launch.busy() || app.game_pid.load()!=0);
+  button("Choose Elden Ring EXE...", choose_game);
+  ImGui::EndDisabled();
+  label(app.game_path.wstring());
   button("Launch logs", [] { reveal(app.root / L"launch"); });
   ImGui::End();
   ImGui::Begin("Inspector");
@@ -636,6 +640,13 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
               p.state.current_action.animation_id);
   ImGui::Text("Game: %s | Samples: %llu",
               p.summary.metadata.game_version.c_str(), p.summary.sample_count);
+  if(p.loaded){std::lock_guard lock(app.replay_mutex);auto visual=app.replay_player->reader().visual_at(selected_actor,p.state.timestamp_ns);
+    if(visual){ImGui::Separator();ImGui::Text("Recorded model %u | HP %u/%u | ground bits %u",visual->model,visual->hp,visual->max_hp,visual->ground);
+      if(visual->flags&8){ImGui::Text("Equipment slots L%u R%u | arm style %u",visual->left_slot,visual->right_slot,visual->arm_style);for(unsigned i=0;i<22;++i){ImGui::Text("Slot %u: native param %d",i,visual->equipment[i]);}}
+      if(visual->flags&16)ImGui::Text("Native bounded face snapshot: 288 bytes | body archetype %u",visual->archetype);
+      ImGui::TextDisabled("Captured state only; equipment/face/HP are not written into the game.");
+    }
+  }
   for (const auto &actor : app.character_views)
     if (actor.info.registry.id == selected_actor) {
       ImGui::Separator();
@@ -720,6 +731,7 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
     button("Save settings", save_settings);
     ImGui::BeginDisabled(p.active);
     ImGui::Checkbox("Experimental raw animation requests", &app.animation);
+    ImGui::Checkbox("Experimental existing-character transform replay", &app.actor_playback);
     static int limit = 0;
     if (ImGui::Combo("Native duration", &limit,
                      "Full replay\0First 5 seconds\0First 10 seconds\0"))
@@ -727,7 +739,11 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
                      : limit == 2 ? 10'000'000'000ULL
                                   : 0;
     ImGui::EndDisabled();
-    static float radius = 150, hz = 20;
+    static float radius = 200, hz = 60;
+    static int radius_preset=2;
+    if(ImGui::Combo("Capture radius preset",&radius_preset,"Near (50)\0Medium (100)\0Wide (200)\0Custom\0")){
+      if(radius_preset<3)radius=radius_preset==0?50.f:radius_preset==1?100.f:200.f;
+    }
     static int budget = 1024;
     ImGui::InputFloat("Character radius", &radius);
     ImGui::InputFloat("Capture Hz", &hz);
@@ -744,7 +760,9 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
     ImGui::TextWrapped(
         "Input lock: old flags FAILED AT RUNTIME; new producer-stage "
         "neutralization EXPERIMENTAL. Grounding: diagnostics only, unresolved. "
-        "NPC native playback: not enabled.");
+        "Actor transform replay: opt-in, matching existing actors only; AI "
+        "ownership EXPERIMENTAL. No spawning, resurrection, equipment/VFX "
+        "restoration or verified gait reproduction. Exit radius = enter x 1.2.");
     ImGui::End();
   }
   if (show_diagnostics) {
@@ -759,6 +777,13 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
     ImGui::SameLine();
     button("Game log",
            [] { reveal(fs::temp_directory_path() / L"TheaterModeGame.log"); });
+    button("Collect tester logs", [] {
+      for(const auto*name:{L"TheaterModeGame.log",L"TheaterModeLocomotionTrace.log"}){
+        auto source=fs::temp_directory_path()/name;
+        if(fs::exists(source))fs::copy_file(source,app.logs/name,fs::copy_options::overwrite_existing);
+      }
+      reveal(app.logs);
+    });
     button("Trace start", [] { app.control.trace(game_control::trace_start); });
     ImGui::SameLine();
     button("Trace stop", [] { app.control.trace(game_control::trace_stop); });
