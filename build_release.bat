@@ -2,6 +2,8 @@
 setlocal
 set "ROOT=%~dp0."
 set "OUT=C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode"
+rem Optional first argument stages a checkpoint in an isolated output directory.
+if not "%~1"=="" set "OUT=%~f1"
 set "CMAKE=C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 set "CARGO=%USERPROFILE%\.cargo\bin\cargo.exe"
 if not exist "%OUT%" mkdir "%OUT%"
