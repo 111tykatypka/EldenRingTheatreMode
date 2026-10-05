@@ -2,6 +2,8 @@
 
 2026-10-05 — **IMPLEMENTED — RUNTIME VALIDATION REQUIRED**
 
+Launcher update: `PHASE4A_LAUNCHER_STATUS.md` supersedes the old separate-CMD launch procedure and host hash below. The current host has **START ELDEN RING**; the original probe/DLL checkpoint is unchanged.
+
 Base: current GitHub `main`, `a4ad666` (merge of `aee5afe` Phase 3 snapshot and initial GitHub commit).
 Branch: `phase4-in-game-replay-prototype`. The old checkout's uncommitted Phase 3 UI work is deliberately excluded.
 
