@@ -1,68 +1,42 @@
-# Modern — единый сеанс проверки
+# Exact next manual test — developer experimental nightly
 
-Статус: IMPLEMENTED — RUNTIME VALIDATION REQUIRED. NPC playback пока выключен.
+## Prepare
 
-## Что запускать
+1. Close Elden Ring and all older TheaterMode hosts. An already loaded DLL cannot be replaced in its process; restart is required for this new build.
+2. Use the packaged files in `C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Nightly_ResearchIntegration`. No rebuild is necessary. To reproduce from source: `powershell -ExecutionPolicy Bypass -File scripts\Build-Nightly.ps1` with VS2026 C++, Rust MSVC and the existing pinned dependencies.
+3. The YAFSML configuration must load **the new nightly TheaterMode.dll**, not Phase5/TesterBuild. Use the host's existing launcher so its generated config points to the sibling DLL. No replacement of the game EXE/files or loader is needed. If manually using your YAFSML configuration, update only its mod DLL path to the nightly file.
+4. Launch the nightly `EldenRingTheaterMode.exe` first. Click its existing Start Elden Ring control, which uses your established offline YAFSML workflow. If the configured loader path is missing, select your existing YAFSML; no new injector is required.
+5. Load your usual offline save at a safe, flat area with a living nearby NPC. Stay away from cliffs, elevators, combat and loading transitions for the first diagnostics. Wait for connected/module READY/player FOUND. Never test unsupported versions.
 
-Готовая папка:
-`C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Modern`
+## A. Read-only grounding baseline
 
-- `EldenRingTheaterMode.exe`
-- `TheaterMode.dll`
-- `EldenRingCompatibilityProbe.exe`
-- `BUILD_MANIFEST.txt`
+1. Replay stopped. In Diagnostics click **Runtime differential trace (10s)**. If the host log reports `queued=0`, wait for the current IPC update and click again; it is not a capture acknowledgement.
+2. Stand still for 2s, walk a short flat path, rotate, then stop. This button must not move your character. Window automatically ends after 10s; allow 1s for the worker flush.
+3. Click **Collect tester logs**. `TheaterModeRuntimeTrace.jsonl` contains native observations, not synthetic data.
 
-Сборка из исходников: `powershell -ExecutionPolicy Bypass -File scripts\Build-Modern.ps1`.
-Не используйте старые Build-Phase5/Phase5C из новой ветки для сохранённого эталона.
+## B. Player replay differential comparison
 
-1. Остановите запись/F6. Закройте старый Theater Mode и Elden Ring. Перезапуск
-   игры нужен для замены уже загруженной DLL. Steam/YAFSML переустанавливать не нужно.
-2. Откройте **Modern\EldenRingTheaterMode.exe**. В Launcher при необходимости
-   выберите существующий YAFSML.exe. Нажмите **Start Elden Ring**.
-3. Launcher использует `TheaterMode.dll` рядом с этим EXE и генерирует свой конфиг
-   в `%LOCALAPPDATA%\EldenRingTheaterMode\launch\YAFSML.ini`.
-   При таком запуске вручную переносить DLL не нужно. Если запускаете собственным
-   YAFSML-конфигом, замените только путь мода на **Modern\TheaterMode.dll**.
-   Не копируйте DLL в папку игры/Phase5 и не загружайте две версии одновременно.
-4. Используйте свой обычный offline/modded workflow. Загрузите знакомое безопасное
-   место с несколькими обычными NPC/врагами, без босса. Дождитесь PLAYER FOUND.
+1. Record a fresh 5–10s short walk in the same loaded area using the existing recorder. Stop and open that real replay. Existing files can also be used if they match this exact area/lifecycle.
+2. In Settings disable raw animation, experimental existing-character playback, and selected-NPC-only. Choose **First 2 seconds** initially.
+3. Click Runtime differential trace, then Play. Observe grounding and rotation. F6 is emergency Stop; use it immediately on unwanted falling/teleporting. Do not continue to a full fight when grounding fails.
+4. Send logs whether the bug persists or changes. Immediate readback correctness is not sufficient: the next physics/model/proxy observations and visible grounding matter.
 
-## Одна запись и проверка редактора
+## C. One NPC only
 
-5. До replay проверьте нормальное управление. Recorder должен показывать nearby
-   Characters и фактическую частоту. Если count=0 при видимых близких NPC — сохраните
-   лог; не делайте вывод, что NPC отсутствуют в мире.
-6. Нажмите F5 / Start. Запишите 20–30 секунд: постойте, пройдите короткий маршрут,
-   повернитесь, вернитесь к началу. Пусть рядом двигаются несколько обычных врагов.
-   Не меняйте карту. F7/F8 позволяют проверить паузу записи. F6 завершает файл.
-7. Откройте запись в Replay Library. Проверьте Player + Characters, раскрытие actor
-   groups, raw IDs, траектории, hide/show, bookmarks, seek и скорости.
-   Проверьте начало/50%/90%/99%/конец. NPC пока отображаются только как данные.
+1. Make a fresh short recording with one nearby living NPC in the current loaded world. Stop/open it without warping, reloading or killing that NPC.
+2. In Characters select that **NPC track**, not the player. Settings: enable **Replay selected NPC only (player writes OFF)**; raw animation OFF; native duration **First 2 seconds**. Existing-character bulk checkbox can remain OFF.
+3. Start the ten-second differential trace, then Play. Your player should remain under normal control; only the selected NPC is eligible for transform writes. Expected native application is **not yet verified**. If nothing moves, the logs must show whether the host produced a target, DLL received it, lookup/identity/distance rejected it, or writes were overwritten.
+4. Test Pause briefly, Resume, then F6 Stop. Only after successful short behavior try First 5 seconds. Do not test bosses/full replay first.
 
-## Контролируемый player replay
+## D. Optional isolated animation-speed experiment
 
-8. Вернитесь в ту же область к началу записи. В Settings выберите First 5 seconds,
-   experimental animation requests оставьте OFF. Нажмите Play / Resume in game.
-   При предупреждении о расстоянии подтвердите только если уверены в области.
-9. Проверьте position/rotation, Pause/Resume. Попробуйте движение и лёгкую атаку:
-   новый input lock экспериментален. F6 должен вернуть обычное управление.
-10. Отметьте отдельно: висит ли модель над землёй; идут ли ноги; пропадают ли атаки;
-    работают ли управление/пауза/Stop. Затем, если устойчиво, выберите Full replay.
-11. Проверьте resize/maximize, перенос на другой DPI, повторное открытие и Unload.
-    Это проверка нового UI; успешный headless test не заменяет её.
+1. Replay and recording stopped, exact nearby NPC track selected and still alive. Diagnostics mode **animationSpeed = 0** → **Run selected NPC experiment (2s)**.
+2. Observe whether ONLY that NPC's animation stops, and resumes after ~2 seconds. F6 cancels early. Player control should remain normal. Repeat with F6 after ~0.5s to check restoration.
+3. noMove/noAttack/both/noUpdate entries intentionally show BLOCKED and cannot run due to the verified source-layout conflict. Do not override this through Cheat Engine.
 
-## Что прислать
+## Send back
 
-- `%TEMP%\TheaterModeGame.log` — INPUT_LOCK, REPLAY_APPLY, GROUNDING, initialization.
-- `%LOCALAPPDATA%\EldenRingTheaterMode\logs\TheaterModeRecorder.log`.
-- Новый `.erplay` из `%LOCALAPPDATA%\EldenRingTheaterMode\replays`.
-- `Modern\BUILD_MANIFEST.txt`.
-- При сбое запуска: `%LOCALAPPDATA%\EldenRingTheaterMode\launch\log`.
+Click Collect tester logs and send the collected folder plus the real `.erplay` used and the package `BUILD_MANIFEST.txt`. Native files: `%TEMP%\TheaterModeGame.log`, `%TEMP%\TheaterModeRuntimeTrace.jsonl`; host: `%LOCALAPPDATA%\EldenRingTheaterMode\logs\TheaterModeRecorder.log` (or the host's Recorder logs button folder). Include what visibly happened: grounded/floating, NPC motion, rotation, speed restore, Pause/Resume/Stop, crash.
 
-Короткий ответ: UI / PLAYER FOUND / NPC count / сохранение / NPC tracks / движение
-replay / rotation / Pause+Resume / F6+normal control / input blocked / floating /
-crash. Лучше один полный результат, чем отдельная проверка после каждой кнопки.
-
-Следующее решение зависит от этого сеанса: подтверждение NPC read path, уточнение
-порядка input callback и решение о proxy synchronization. Не переходить к записи
-transform в NPC до этой проверки.
+Analyzer from project root: `python tools\research_integration\analyze_runtime_trace.py <TheaterModeRuntimeTrace.jsonl> --output trace_summary.json`.
+No new runtime feature is marked verified until these results are supplied.
