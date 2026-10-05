@@ -10,6 +10,9 @@ pub const STOP: u16 = 4;
 pub const REPLAY_BEGIN: u16 = 5;
 pub const REPLAY_APPLY: u16 = 6;
 pub const REPLAY_FINISH: u16 = 7;
+pub const TRACE_START: u16 = 8;
+pub const TRACE_STOP: u16 = 9;
+pub const TRACE_MARK: u16 = 10;
 pub const STATUS: u16 = 0x8000;
 pub const PIPE: &str = r"\\.\pipe\EldenRingTheaterMode_1_17_Control";
 
@@ -72,7 +75,8 @@ impl Packet {
         })
     }
     pub fn validate_command(&self, last_sequence: u64, now_ns: u64) -> Result<(), &'static str> {
-        if !matches!(self.kind, HELLO | HEARTBEAT | PROBE_NUDGE | STOP | REPLAY_BEGIN | REPLAY_APPLY | REPLAY_FINISH) { return Err("unknown command"); }
+        if !matches!(self.kind, HELLO | HEARTBEAT | PROBE_NUDGE | STOP | REPLAY_BEGIN | REPLAY_APPLY | REPLAY_FINISH | TRACE_START | TRACE_STOP | TRACE_MARK) { return Err("unknown command"); }
+        if matches!(self.kind,TRACE_START|TRACE_STOP|TRACE_MARK) && self.version!=3 {return Err("trace requires v3");}
         let replay=matches!(self.kind,REPLAY_BEGIN|REPLAY_APPLY|REPLAY_FINISH);
         if replay && self.version<2 {return Err("replay requires protocol v2");}
         if self.sequence == 0 || self.sequence <= last_sequence { return Err("sequence regression"); }
@@ -95,7 +99,8 @@ impl Packet {
         if self.kind == PROBE_NUDGE {
             let d: f64 = self.position.iter().map(|v| f64::from(*v).powi(2)).sum();
             if self.position[1] != 0.0 || !(d > 0.0 && d <= 1.0) { return Err("probe delta must be horizontal and <= 1 unit"); }
-        } else if self.position != [0.0; 3] { return Err("nonzero control payload"); }
+        } else if self.kind==TRACE_MARK {if self.position[1]!=0.0||self.position[2]!=0.0||!(0.0..=6.0).contains(&self.position[0])||self.position[0].fract()!=0.0{return Err("invalid trace marker");}}
+        else if self.position != [0.0; 3] { return Err("nonzero control payload"); }
         Ok(())
     }
 }
@@ -137,5 +142,6 @@ mod tests {
         assert!(Packet::decode(&old[..LEGACY_BYTES]).unwrap().validate_command(6,100).is_ok());
         assert!(Packet::decode(&old).is_err());
     }
+    #[test]fn trace_commands_reject_bad_markers(){let p=Packet{kind:TRACE_MARK,position:[2.,0.,0.],..command()};assert!(p.validate_command(6,100).is_ok());for phase in [-1.,2.5,7.,f32::NAN]{assert!(Packet{position:[phase,0.,0.],..p}.validate_command(6,100).is_err());}assert!(Packet{version:2,..p}.validate_command(6,100).is_err());}
 
 }

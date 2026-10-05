@@ -15,7 +15,7 @@
 namespace game_control {
 inline constexpr wchar_t pipe_name[]=L"\\\\.\\pipe\\EldenRingTheaterMode_1_17_Control";
 inline constexpr std::uint32_t magic=0x544d4354;
-enum Kind : std::uint16_t { hello=1, heartbeat=2, probe_nudge=3, stop=4, replay_begin=5, replay_apply=6, replay_finish=7, status=0x8000 };
+enum Kind : std::uint16_t { hello=1, heartbeat=2, probe_nudge=3, stop=4, replay_begin=5, replay_apply=6, replay_finish=7, trace_start=8, trace_stop=9, trace_mark=10, status=0x8000 };
 enum Phase : std::uint32_t { off=0, armed=1, observing=2, complete=3, error=4 };
 enum ReplayPhase : std::uint32_t { inactive=0, playing=1, paused=2, finished=3, replay_error=4 };
 struct Transform {std::array<float,3> position{};std::array<float,4> quaternion{0,0,0,1};};
@@ -34,7 +34,7 @@ static_assert(offsetof(Packet,replay_timestamp_ns)==64 && offsetof(Packet,sessio
 struct State {
     bool connected{},ready{},pending{}; std::uint32_t phase{off},detail{};
     std::uint64_t command_sequence{}; std::wstring diagnostic{L"Waiting for game sample connection"};
-    bool replay_supported{};std::uint32_t replay_phase{inactive},replay_detail{};
+    bool trace_supported{},trace_active{},trace_requested{},trace_failed{};bool replay_supported{};std::uint32_t replay_phase{inactive},replay_detail{};
     double replay_send_hz{};
     std::uint64_t session{},applied_sequence{},replay_timestamp_ns{},sample_timestamp_ns{},last_replay_session{};
     Transform live;
@@ -46,6 +46,7 @@ public:
     ~Client();
     void start(std::atomic<DWORD>& sample_process_id);
     bool nudge();
+    bool trace(std::uint16_t kind,std::uint32_t phase=0);
     bool begin_replay(std::uint64_t session,Transform transform,erplay::ActionState action={},bool animation=false);
     bool apply_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause,erplay::ActionState action={},bool animation=false);
     bool finish_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,erplay::ActionState action={},bool animation=false);

@@ -15,6 +15,7 @@ static PENDING:Mutex<Option<Request>>=Mutex::new(None);
 
 fn stop(detail:u32) {
     crate::replay_runtime::stop(detail);
+    crate::locomotion_trace::stop();
     GENERATION.fetch_add(1,Ordering::AcqRel);
     STATE.store(if detail==0 {OFF} else {ERROR},Ordering::Release);
     DETAIL.store(detail,Ordering::Release);
@@ -102,7 +103,7 @@ fn status(version:u16)->wire::Packet {
     let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
     wire::Packet {version,player_action:Default::default(),replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:(if ready(){1}else{0}) | if version>=2 {2}else{0} }
+        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()}else{0}) }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;
@@ -121,16 +122,20 @@ pub fn pipe_worker() {
                 Ok(packet)=>packet,Err(e)=>{stop(8);crate::log_game(&format!("CONTROL_ERROR=MALFORMED_PACKET ({e}); PROBE_STATE=OFF"));break;}
             };
             last_sequence=packet.sequence;COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);HEARTBEAT_NS.store(now_ns,Ordering::Release);crate::replay_runtime::heartbeat(now_ns);
+            if matches!(packet.kind,wire::TRACE_START|wire::TRACE_STOP|wire::TRACE_MARK){
+                if packet.kind==wire::TRACE_STOP || (ready() && !crate::replay_runtime::active() && !matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING)){crate::locomotion_trace::command(packet.kind,packet.position[0] as u32);}
+                else{crate::log_game("LOCOMOTION_TRACE_REJECTED=BUSY_OR_NOT_READY");}
+            }
             if packet.kind==wire::STOP {COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);stop(0);crate::log_game("PROBE_STOP; PROBE_STATE=OFF");}
             if packet.kind==wire::PROBE_NUDGE {
                 COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);
                 if !ready(){stop(5);crate::log_game("PROBE_REJECTED=RUNTIME_NOT_READY");}
-                else if crate::replay_runtime::active() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING){crate::log_game("PROBE_REJECTED=BUSY");}
+                else if crate::locomotion_trace::busy() || crate::replay_runtime::active() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING){crate::log_game("PROBE_REJECTED=BUSY");}
                 else if let Ok(mut slot)=PENDING.lock(){DETAIL.store(0,Ordering::Release);STATE.store(ARMED,Ordering::Release);*slot=Some(Request {sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),received_ns:now_ns,delta:packet.position});crate::log_game("PROBE_STATE=ARMED; awaiting game callback");}
                 else {stop(6);}
             }
             if matches!(packet.kind,wire::REPLAY_BEGIN|wire::REPLAY_APPLY|wire::REPLAY_FINISH) {
-                if !ready() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING) {crate::replay_runtime::stop(5);}
+                if !ready() || crate::locomotion_trace::busy() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING) {crate::replay_runtime::stop(5);}
                 else {crate::replay_runtime::receive(packet,now_ns);}
             }
             let response=status(packet.version);let reply=response.encode();let mut written=0;
