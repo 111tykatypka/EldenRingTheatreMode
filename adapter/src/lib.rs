@@ -18,6 +18,7 @@ mod transform_probe;
 mod probe_runtime;
 mod transform_replay;
 mod replay_runtime;
+mod local_input;
 const STATE_WAITING:u32=0;const DLL_LOADED:u32=1;const PROFILE_VALIDATING:u32=2;const PROFILE_READY:u32=3;const TASK_SIGNATURE_SCAN:u32=10;const TASK_SIGNATURE_READY:u32=11;const TASK_RUNTIME_SEARCH:u32=12;const TASK_RUNTIME_READY:u32=13;const WORLDCHR_SEARCH:u32=20;const WORLDCHR_READY:u32=21;const PLAYER_SEARCH:u32=22;const PLAYER_FOUND:u32=23;const STATE_READY:u32=24;
 const ERR_TASK_TIMEOUT:u32=0x201;const ERR_INIT_PANIC:u32=0x202;const ERR_SAMPLER_THREAD:u32=0x203;const ERR_IPC_THREAD:u32=0x204;const ERR_TASK_SIGNATURE:u32=0x205;
 const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_CHECK_PRODUCT_VERSION:u32=0x0004;const TM_CHECK_ARCH:u32=0x0008;const TM_CHECK_SHA256:u32=0x0010;const TM_CHECK_IMAGE_BASE:u32=0x0020;
@@ -27,8 +28,10 @@ const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_C
 const _:()=assert!(std::mem::size_of::<WireMessage>()==72);
 #[repr(C)]struct TmValidationReport{size:u32,status:u32,checked:u32,passed:u32,file_version:[u16;4],product_version:[u16;4],machine:u16,reserved:u16,image_base:usize,runtime_path:[u16;32768],sha256:[i8;65]}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
-#[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;fn GetTickCount64()->u64;}
+#[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
+#[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
 static SEQ:AtomicU64=AtomicU64::new(0);static TIME:AtomicU64=AtomicU64::new(0);static PRESENT:AtomicU32=AtomicU32::new(0);static PROFILE:AtomicU32=AtomicU32::new(STATE_WAITING);static INIT_STATE:AtomicU32=AtomicU32::new(STATE_WAITING);static VALUES:[AtomicU32;10]=[const{AtomicU32::new(0)};10];
+fn monotonic_ns()->u64 {let mut ticks=0;unsafe{QueryInterruptTimePrecise(&mut ticks)};ticks*100}
 fn log_game(message:&str){let path=std::env::temp_dir().join("TheaterModeGame.log");if let Ok(mut file)=OpenOptions::new().create(true).append(true).open(path){let _=writeln!(file,"{}",message);}}
 fn set_state(state:u32,label:&str){let old=INIT_STATE.swap(state,Ordering::AcqRel);if old!=state{log_game(&format!("INIT_STATE={label} ({state})"));}}
 type RegisterTaskFn=unsafe extern "C" fn(&CSTaskImp,CSTaskGroupIndex,&RecurringTask<FD4TaskData>);
@@ -108,7 +111,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let mut probe=probe_runtime::GameProbe::default();
                 let mut replay=replay_runtime::GameReplay::default();
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
-                    let now=unsafe{GetTickCount64()}*1_000_000;
+                    let now=monotonic_ns();
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||replay.tick(now))).is_err(){replay.fail();}
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {

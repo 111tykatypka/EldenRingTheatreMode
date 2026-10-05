@@ -2,6 +2,16 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transform { pub position: [f32; 3], pub quaternion: [f32; 4] }
 impl Transform {
+    pub fn interpolate(self, mut next:Self, t:f64)->Self {
+        let t=t.clamp(0.0,1.0);
+        let normalize=|q:[f32;4]| {let n=q.iter().map(|x|f64::from(*x).powi(2)).sum::<f64>().sqrt();q.map(|x|(f64::from(x)/n) as f32)};
+        let a=normalize(self.quaternion);next.quaternion=normalize(next.quaternion);
+        let mut dot=a.iter().zip(next.quaternion).map(|(a,b)|f64::from(*a)*f64::from(b)).sum::<f64>();
+        if dot<0.0 {dot=-dot;next.quaternion=next.quaternion.map(|x|-x);}
+        let q=if dot>0.9995 {std::array::from_fn(|i|(f64::from(a[i])+t*f64::from(next.quaternion[i]-a[i])) as f32)}
+        else {let angle=dot.clamp(-1.0,1.0).acos();let d=angle.sin();let x=((1.0-t)*angle).sin()/d;let y=(t*angle).sin()/d;std::array::from_fn(|i|(x*f64::from(a[i])+y*f64::from(next.quaternion[i])) as f32)};
+        Self {position:std::array::from_fn(|i|(f64::from(self.position[i])+t*f64::from(next.position[i]-self.position[i])) as f32),quaternion:normalize(q)}
+    }
     pub fn valid(self) -> bool {
         let norm: f64 = self.quaternion.iter().map(|v| f64::from(*v).powi(2)).sum();
         self.position.iter().chain(self.quaternion.iter()).all(|v| v.is_finite()) && (norm-1.0).abs() <= 0.01

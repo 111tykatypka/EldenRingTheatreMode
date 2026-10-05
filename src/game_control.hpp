@@ -34,6 +34,7 @@ struct State {
     bool connected{},ready{},pending{}; std::uint32_t phase{off},detail{};
     std::uint64_t command_sequence{}; std::wstring diagnostic{L"Waiting for game sample connection"};
     bool replay_supported{};std::uint32_t replay_phase{inactive},replay_detail{};
+    double replay_send_hz{};
     std::uint64_t session{},applied_sequence{},replay_timestamp_ns{},sample_timestamp_ns{},last_replay_session{};
     Transform live;
 };

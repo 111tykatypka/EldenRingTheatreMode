@@ -116,7 +116,7 @@ pub fn pipe_worker() {
         stop(0);crate::replay_runtime::connection(true);COMMAND_SEQUENCE.store(0,Ordering::Release);CONNECTED.store(true,Ordering::Release);let mut last_sequence=0;
         crate::log_game("CONTROL_IPC=CONNECTED; PROBE_STATE=OFF; no player writes until explicit PROBE_NUDGE or REPLAY_BEGIN");
         while let Some(bytes)=read_packet(h) {
-            let now_ns=unsafe{crate::GetTickCount64()}*1_000_000;
+            let now_ns=crate::monotonic_ns();
             let packet=match wire::Packet::decode(&bytes).and_then(|p|p.validate_command(last_sequence,now_ns).map(|_|p)) {
                 Ok(packet)=>packet,Err(e)=>{stop(8);crate::log_game(&format!("CONTROL_ERROR=MALFORMED_PACKET ({e}); PROBE_STATE=OFF"));break;}
             };

@@ -1,4 +1,5 @@
 #include "game_control.hpp"
+#include "clock_helpers.hpp"
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -17,7 +18,7 @@ bool transfer(HANDLE pipe,HANDLE event,void* data,DWORD bytes,bool writing) {
     }return true;
 }
 bool exchange(HANDLE pipe,HANDLE event,Packet& command,Packet& reply) {
-    if(!command.timestamp_ns)command.timestamp_ns=GetTickCount64()*1'000'000ULL;
+    if(!command.timestamp_ns)command.timestamp_ns=theater_clock::monotonic_ns();
     return transfer(pipe,event,&command,sizeof(command),true)&&transfer(pipe,event,&reply,sizeof(reply),false)&&
         reply.magic_value==magic&&reply.version==2&&reply.kind==status&&reply.state<=error&&reply.flags<=3&&reply.sequence==command.sequence&&reply.replay_state<=replay_error&&reply.applied_sequence<=reply.sequence;
 }
@@ -37,7 +38,7 @@ bool Client::queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t
     if(!state_.connected||!state_.ready||!state_.replay_supported||pending_.load()!=0||state_.phase==armed||state_.phase==observing)return false;
     if(kind==replay_begin){if(active_session_||state_.pending||state_.replay_phase==playing||state_.replay_phase==paused)return false;active_session_=session;}
     else if(active_session_!=session)return false;
-    Packet p;p.timestamp_ns=GetTickCount64()*1'000'000ULL;p.kind=kind;p.session=session;p.replay_timestamp_ns=ns;p.replay_state=pause?paused:playing;
+    Packet p;p.timestamp_ns=theater_clock::monotonic_ns();p.kind=kind;p.session=session;p.replay_timestamp_ns=ns;p.replay_state=pause?paused:playing;
     std::copy(t.position.begin(),t.position.end(),p.position);std::copy(t.quaternion.begin(),t.quaternion.end(),p.quaternion);
     latest_request_=p;replay_pending_=true;state_.pending=true;wake_.notify_one();return true;
 }
@@ -46,11 +47,15 @@ void Client::close(){if(!worker_.joinable())return;emergency_stop();shutting_dow
 void Client::disconnected(const std::wstring& reason){std::lock_guard lock(mutex_);pending_=0;latest_request_.reset();active_session_=0;replay_pending_=false;state_={};state_.diagnostic=reason;}
 void Client::run(std::atomic<DWORD>& sample_pid){
     HANDLE pipe=INVALID_HANDLE_VALUE;HANDLE event=CreateEventW(nullptr,TRUE,FALSE,nullptr);std::uint64_t sequence=0;DWORD server_pid=0;
+    auto perf_start=std::chrono::steady_clock::now();std::uint64_t replay_sends=0;
     if(!event){disconnected(L"Control event creation failed");return;}
     auto send=[&](Packet command){command.sequence=++sequence;if(command.kind==probe_nudge)command.position[0]=0.5f;
         Packet reply;if(!exchange(pipe,event,command,reply))return false;
         if(reply.flags&1){double norm=0;for(auto v:reply.position)if(!std::isfinite(v))return false;for(auto v:reply.quaternion){if(!std::isfinite(v))return false;norm+=double(v)*v;}if(std::abs(norm-1.0)>0.01)return false;}
         std::lock_guard lock(mutex_);state_.connected=true;state_.ready=(reply.flags&1)!=0;state_.replay_supported=(reply.flags&2)!=0;
+        if(command.kind==replay_begin||command.kind==replay_apply||command.kind==replay_finish)++replay_sends;
+        const auto elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-perf_start).count();
+        if(elapsed>=1.0){state_.replay_send_hz=double(replay_sends)/elapsed;replay_sends=0;perf_start=std::chrono::steady_clock::now();}
         state_.pending=pending_.load()!=0||latest_request_.has_value();state_.phase=reply.state;state_.detail=reply.detail;state_.command_sequence=reply.sequence;state_.diagnostic=L"";
         state_.replay_phase=reply.replay_state;state_.replay_detail=reply.replay_detail;state_.session=reply.session;state_.applied_sequence=reply.applied_sequence;
         state_.replay_timestamp_ns=reply.replay_timestamp_ns;state_.sample_timestamp_ns=reply.timestamp_ns;

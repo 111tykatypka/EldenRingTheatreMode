@@ -55,7 +55,7 @@ int run_tests(int argc,wchar_t**argv){
     const auto dir=std::filesystem::temp_directory_path()/(L"TheaterMode-Игровой-replay-tests-"+std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(dir);const auto file=dir/L"coordinator.erplay";
     {erplay::Metadata m;m.title="Mock coordinator test";erplay::Writer writer(file,m,100);
-        for(std::uint64_t i=0;i<=500;++i){erplay::Sample s;s.index=i;s.replay_time_ns=i*20'000'000;s.source_time_ns=100+i*20'000'000;s.position={float(i)*0.004f,0,0};const double angle=double(i)*0.002;s.orientation={0,float(std::sin(angle)),0,float(std::cos(angle))};writer.append(s);}(void)writer.finalize();}
+        for(std::uint64_t i=0;i<=1000;++i){erplay::Sample s;s.index=i;s.replay_time_ns=i*20'000'000;s.source_time_ns=100+i*20'000'000;s.position={float(i)*0.004f,0,0};const double angle=double(i)*0.002;s.orientation={0,float(std::sin(angle)),0,float(std::cos(angle))};writer.append(s);}(void)writer.finalize();}
     auto player=std::make_unique<replay::Player>(file);
     MockGame game({});std::atomic<DWORD> sample_pid{GetCurrentProcessId()};game_control::Client client(game.name);client.start(sample_pid);
     assert(wait_for([&]{return client.state().connected&&client.state().ready;}));
@@ -80,6 +80,14 @@ int run_tests(int argc,wchar_t**argv){
     assert(player->state().timestamp_ns==5'000'000'000);assert(game.last(game_control::replay_finish).replay_timestamp_ns==5'000'000'000);
     const auto apply_count=game.count(game_control::replay_apply);controller.tick(now+19s);assert(game.count(game_control::replay_apply)==apply_count);
     controller.stop();assert(wait_for([&]{return !client.state().pending&&client.state().replay_phase==game_control::inactive;}));
+    // Full duration must cross sample 301 and 800 and stop exactly at the final sample.
+    assert(player->summary().sample_count==1001);now=Clock::now();assert(controller.play(*player,0,now));
+    assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));
+    controller.tick(now+7s);assert(player->state().sample_index>301);
+    assert(wait_for([&]{return game.last(game_control::replay_apply).replay_timestamp_ns==7'000'000'000;}));
+    controller.tick(now+17s);assert(player->state().sample_index>800);
+    controller.tick(now+21s);assert(wait_for([&]{controller.tick(now+21s);return controller.phase()==in_game_replay::Phase::finished;}));
+    assert(player->state().timestamp_ns==20'000'000'000ULL);controller.stop();assert(wait_for([&]{return !client.state().pending;}));
     assert(!client.apply_replay(999,0,{},false));
     game_control::Transform bad;bad.position[0]=std::numeric_limits<float>::quiet_NaN();assert(!client.begin_replay(999,bad));
     game.live({{500,0,0},{0,0,0,1}});assert(wait_for([&]{return client.state().live.position[0]==500;}));

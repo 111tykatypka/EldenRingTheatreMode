@@ -11,6 +11,7 @@ static SESSION: AtomicU64 = AtomicU64::new(0);
 static REPLAY_NS: AtomicU64 = AtomicU64::new(0);
 static APPLIED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static APPLIED_GENERATION: AtomicU64 = AtomicU64::new(0);
+static RECEIVE_COUNT:AtomicU64=AtomicU64::new(0);
 static PENDING: AtomicBool = AtomicBool::new(false);
 static REQUEST: Mutex<Option<Request>> = Mutex::new(None);
 
@@ -37,6 +38,7 @@ pub fn status() -> (u32,u32,u64,u64,u64) {
      REPLAY_NS.load(Ordering::Acquire),APPLIED_SEQUENCE.load(Ordering::Acquire))
 }
 pub fn receive(packet: wire::Packet, _now_ns: u64) {
+    RECEIVE_COUNT.fetch_add(1,Ordering::Relaxed);
     let action = match packet.kind { wire::REPLAY_BEGIN=>Action::Begin,wire::REPLAY_APPLY=>Action::Apply,wire::REPLAY_FINISH=>Action::Finish,_=>return };
     if matches!(action,Action::Begin) {
         if active() { stop(replay::ERR_SESSION); return; }
@@ -53,53 +55,61 @@ pub fn receive(packet: wire::Packet, _now_ns: u64) {
 
 #[derive(Default)]
 pub struct GameReplay {
-    playback: Playback, generation: u64, log_ns: u64, writes: u64,
+    playback: Playback, generation: u64, log_ns: u64, writes: u64, input:crate::local_input::LocalInputLock, last_applied:Option<Transform>, perf_ns:u64, callbacks:u64, perf_writes:u64, perf_received:u64,
 }
 impl GameReplay {
     /// The IPC worker only copies requests. All mutable bindings are used here,
     /// on ChrIns_PostPhysics, before the sampler borrows WorldChrMan immutably.
     pub fn tick(&mut self, now_ns: u64) {
+        self.callbacks+=1;
+        if self.perf_ns==0{self.perf_ns=now_ns;self.perf_received=RECEIVE_COUNT.load(Ordering::Relaxed);}
+        if now_ns.saturating_sub(self.perf_ns)>=1_000_000_000 {let elapsed=(now_ns-self.perf_ns) as f64/1e9;let received=RECEIVE_COUNT.load(Ordering::Relaxed);
+            if self.writes>0||active(){crate::log_game(&format!("REPLAY_PERF ipc_receive_hz={:.2} game_callback_hz={:.2} apply_hz={:.2} interpolation_delay_ms=8.333",(received-self.perf_received) as f64/elapsed,self.callbacks as f64/elapsed,(self.writes-self.perf_writes) as f64/elapsed));}
+            self.callbacks=0;self.perf_ns=now_ns;self.perf_writes=self.writes;self.perf_received=received;
+        }
         let generation=GENERATION.load(Ordering::Acquire);
-        if generation!=self.generation { self.playback.cancel(); self.generation=generation; self.writes=0; }
+        if generation!=self.generation { self.input.restore();self.playback.cancel(); self.generation=generation;self.last_applied=None; }
         let request=match REQUEST.try_lock() {Ok(mut slot)=>slot.take(),Err(_)=>None}
             .filter(|r| r.generation==generation);
         if request.is_none() && !matches!(self.playback.phase,replay::PLAYING|replay::PAUSED) {return;}
         if !transform_probe::lease_valid(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),now_ns) {
-            stop(2); self.playback.cancel(); return;
+            stop(2); self.playback.cancel();self.input.restore(); return;
         }
         if crate::PROFILE.load(Ordering::Acquire)!=crate::STATE_WAITING || crate::INIT_STATE.load(Ordering::Acquire)!=crate::STATE_READY {
-            stop(5); self.playback.cancel(); crate::log_game("REPLAY_ERROR=RUNTIME_NOT_READY"); return;
+            stop(5); self.playback.cancel();self.input.restore(); crate::log_game("REPLAY_ERROR=RUNTIME_NOT_READY"); return;
         }
         // Reacquire on EVERY callback. Do not store an engine pointer/reference.
         let player=match unsafe{PlayerIns::local_player_mut()} {
-            Ok(player)=>player,Err(_)=>{stop(3);self.playback.cancel();crate::log_game("REPLAY_PLAYER_LOST; no automatic rearm");return;}
+            Ok(player)=>player,Err(_)=>{stop(3);self.playback.cancel();self.input.discard_lost_owner();crate::log_game("REPLAY_PLAYER_LOST; no automatic rearm");return;}
         };
         let physics=&mut player.chr_ins.modules.physics;
         let live=Transform {position:[physics.position.0,physics.position.1,physics.position.2],
             quaternion:[physics.orientation.0,physics.orientation.1,physics.orientation.2,physics.orientation.3]};
-        if !live.valid() {stop(4);self.playback.cancel();crate::log_game("REPLAY_ERROR=INVALID_LIVE_TRANSFORM");return;}
-        let previous=self.playback.previous_target();
+        if !live.valid() {stop(4);self.playback.cancel();self.input.restore();crate::log_game("REPLAY_ERROR=INVALID_LIVE_TRANSFORM");return;}
+        let previous=self.last_applied;
         if let Some(r)=request {
             if matches!(r.action,Action::Begin) {
                 crate::log_game(&format!("REPLAY_START session={} live={:?} first={:?} delta={:?} distance={:.6} max_start={}",
                     r.session,live,r.target,std::array::from_fn::<_,3,_>(|i|r.target.position[i]-live.position[i]),
                     transform_probe::distance(live,r.target),replay::MAX_START_DISTANCE));
             }
-            if let Err(detail)=self.playback.ingest(r,live) {stop(detail);crate::log_game(&format!("REPLAY_ERROR=TARGET_REJECTED detail={detail}"));return;}
+            if let Err(detail)=self.playback.ingest(r,live) {stop(detail);self.input.restore();crate::log_game(&format!("REPLAY_ERROR=TARGET_REJECTED detail={detail}"));return;}
             PENDING.store(false,Ordering::Release);
         }
         let Some(r)=self.playback.frame(generation,now_ns) else {
-            if self.playback.phase==replay::ERROR {stop(self.playback.detail);crate::log_game("REPLAY_ERROR=STALE_TARGET; normal gameplay restored");}
+            if self.playback.phase==replay::ERROR {stop(self.playback.detail);self.input.restore();crate::log_game("REPLAY_ERROR=STALE_TARGET; normal gameplay restored");}
             return;
         };
         // STOP may arrive after a request was read; recheck just before the write.
         if generation!=GENERATION.load(Ordering::Acquire) || !CONNECTED.load(Ordering::Acquire) {return;}
+        self.input.apply(player);
+        let physics=&mut player.chr_ins.modules.physics;
         physics.position.0=r.target.position[0];physics.position.1=r.target.position[1];physics.position.2=r.target.position[2];
         physics.orientation=Quaternion(r.target.quaternion[0],r.target.quaternion[1],r.target.quaternion[2],r.target.quaternion[3]);
-        self.writes+=1;
+        self.writes+=1;self.last_applied=Some(r.target);
         // Test A: no guessed offsets, no velocity/gravity/input/HKS changes,
         // no proxy sync flags until visual runtime evidence establishes a need.
-        if self.writes==1 || now_ns.saturating_sub(self.log_ns)>=1_000_000_000 {
+        if matches!(r.action,Action::Begin) || now_ns.saturating_sub(self.log_ns)>=1_000_000_000 {
             crate::log_game(&format!("REPLAY_APPLY session={} sequence={} replay_ns={} requested={:?} actual_before={:?} previous_target_error={:?} writes={} mode={}; position/orientation ONLY",
                 r.session,r.sequence,r.replay_ns,r.target,live,previous.map(|p|transform_probe::distance(p,live)),self.writes,self.playback.phase));
             self.log_ns=now_ns;
@@ -109,8 +119,8 @@ impl GameReplay {
             SESSION.store(r.session,Ordering::Release);REPLAY_NS.store(r.replay_ns,Ordering::Release);
             APPLIED_SEQUENCE.store(r.sequence,Ordering::Release);APPLIED_GENERATION.store(generation,Ordering::Release);
             if old!=self.playback.phase {crate::log_game(&format!("REPLAY_STATE={} session={} replay_ns={}",self.playback.phase,r.session,r.replay_ns));}
-            if self.playback.phase==replay::FINISHED {crate::log_game("REPLAY_FINISHED; final transform applied once; writes OFF");}
+            if self.playback.phase==replay::FINISHED {self.input.restore();crate::log_game("REPLAY_FINISHED; final transform applied once; writes OFF");}
         }
     }
-    pub fn fail(&mut self) {self.playback.cancel();stop(6);crate::log_game("REPLAY_ERROR=CALLBACK_PANIC");}
+    pub fn fail(&mut self) {self.input.restore();self.playback.cancel();stop(6);crate::log_game("REPLAY_ERROR=CALLBACK_PANIC");}
 }

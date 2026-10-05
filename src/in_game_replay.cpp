@@ -1,4 +1,5 @@
 #include "in_game_replay.hpp"
+#include "clock_helpers.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -16,7 +17,7 @@ game_control::Transform Controller::transform() const {const auto&s=player_->sta
 bool Controller::play(replay::Player& player,std::uint64_t requested_limit,replay::Player::Clock::time_point now){
     if(phase_==Phase::paused&&player_==&player){player_->play(now);transition(Phase::playing,L"PLAYING — transform only");tick(now);return active();}
     if(active())return false;
-    player_=&player;const auto remote=control_.state();const auto boot_ns=GetTickCount64()*1'000'000ULL;
+    player_=&player;const auto remote=control_.state();const auto boot_ns=theater_clock::monotonic_ns();
     if(!remote.connected||!remote.ready||!remote.replay_supported){fail(L"ERROR: matching Phase4B DLL / Player FOUND required");return false;}
     if(remote.sample_timestamp_ns==0||remote.sample_timestamp_ns>boot_ns||boot_ns-remote.sample_timestamp_ns>500'000'000){fail(L"ERROR: live player state is stale");return false;}
     player_->seek(0);const auto first=transform();const auto d=distance(remote.live,first);
