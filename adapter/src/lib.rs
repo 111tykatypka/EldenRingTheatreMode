@@ -19,13 +19,14 @@ mod probe_runtime;
 mod transform_replay;
 mod replay_runtime;
 mod local_input;
+mod player_action;
 const STATE_WAITING:u32=0;const DLL_LOADED:u32=1;const PROFILE_VALIDATING:u32=2;const PROFILE_READY:u32=3;const TASK_SIGNATURE_SCAN:u32=10;const TASK_SIGNATURE_READY:u32=11;const TASK_RUNTIME_SEARCH:u32=12;const TASK_RUNTIME_READY:u32=13;const WORLDCHR_SEARCH:u32=20;const WORLDCHR_READY:u32=21;const PLAYER_SEARCH:u32=22;const PLAYER_FOUND:u32=23;const STATE_READY:u32=24;
 const ERR_TASK_TIMEOUT:u32=0x201;const ERR_INIT_PANIC:u32=0x202;const ERR_SAMPLER_THREAD:u32=0x203;const ERR_IPC_THREAD:u32=0x204;const ERR_TASK_SIGNATURE:u32=0x205;
 const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_CHECK_PRODUCT_VERSION:u32=0x0004;const TM_CHECK_ARCH:u32=0x0008;const TM_CHECK_SHA256:u32=0x0010;const TM_CHECK_IMAGE_BASE:u32=0x0020;
 
 #[repr(C)]#[derive(Clone,Copy,Default)]pub struct PlayerSample{pub sequence:u64,pub timestamp_ns:u64,pub position:[f32;3],pub quaternion_xyzw:[f32;4],pub euler_raw:[f32;3],pub player_present:u32}
-#[repr(C)]#[derive(Clone,Copy,Default)]struct WireMessage{magic:u32,version:u16,kind:u16,sequence:u64,timestamp_ns:u64,position:[f32;3],quaternion_xyzw:[f32;4],euler_raw:[f32;3],player_present:u32}
-const _:()=assert!(std::mem::size_of::<WireMessage>()==72);
+#[repr(C)]#[derive(Clone,Copy,Default)]struct WireMessage{magic:u32,version:u16,kind:u16,sequence:u64,timestamp_ns:u64,position:[f32;3],quaternion_xyzw:[f32;4],euler_raw:[f32;3],player_present:u32,reserved:u32,action:player_action::State}
+const _:()=assert!(std::mem::size_of::<WireMessage>()==104);
 #[repr(C)]struct TmValidationReport{size:u32,status:u32,checked:u32,passed:u32,file_version:[u16;4],product_version:[u16;4],machine:u16,reserved:u16,image_base:usize,runtime_path:[u16;32768],sha256:[i8;65]}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
 #[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
@@ -44,9 +45,12 @@ const REGISTER_TASK_PATTERN:&[pelite::pattern::Atom]=pelite::pattern!("e8 ? ? ? 
     Ok((unsafe{std::mem::transmute::<usize,RegisterTaskFn>(base+rva as usize)},rva))
 }
 #[cfg(not(windows))]unsafe fn resolve_register_task()->Result<(RegisterTaskFn,u32),String>{Err("Windows runtime required".into())}
-fn publish(s:PlayerSample){SEQ.fetch_add(1,Ordering::AcqRel);TIME.store(s.timestamp_ns,Ordering::Relaxed);PRESENT.store(s.player_present,Ordering::Relaxed);let values=[s.position[0],s.position[1],s.position[2],s.quaternion_xyzw[0],s.quaternion_xyzw[1],s.quaternion_xyzw[2],s.quaternion_xyzw[3],s.euler_raw[0],s.euler_raw[1],s.euler_raw[2]];for(dst,value)in VALUES.iter().zip(values){dst.store(value.to_bits(),Ordering::Relaxed);}SEQ.fetch_add(1,Ordering::Release);}
-fn latest()->Option<PlayerSample>{loop{let before=SEQ.load(Ordering::Acquire);if before&1!=0{std::hint::spin_loop();continue;}let mut v=[0.0;10];for(dst,src)in v.iter_mut().zip(VALUES.iter()){*dst=f32::from_bits(src.load(Ordering::Relaxed));}let t=TIME.load(Ordering::Relaxed);let present=PRESENT.load(Ordering::Relaxed);let after=SEQ.load(Ordering::Acquire);if before==after{return if after==0{None}else{Some(PlayerSample{sequence:after/2,timestamp_ns:t,position:[v[0],v[1],v[2]],quaternion_xyzw:[v[3],v[4],v[5],v[6]],euler_raw:[v[7],v[8],v[9]],player_present:present})};}}}
+static ACTION:[AtomicU32;8]=[const{AtomicU32::new(0)};8];
+fn publish(s:PlayerSample,action:player_action::State){SEQ.fetch_add(1,Ordering::AcqRel);TIME.store(s.timestamp_ns,Ordering::Relaxed);PRESENT.store(s.player_present,Ordering::Relaxed);let values=[s.position[0],s.position[1],s.position[2],s.quaternion_xyzw[0],s.quaternion_xyzw[1],s.quaternion_xyzw[2],s.quaternion_xyzw[3],s.euler_raw[0],s.euler_raw[1],s.euler_raw[2]];for(dst,value)in VALUES.iter().zip(values){dst.store(value.to_bits(),Ordering::Relaxed);}for(i,b)in action.encode().chunks_exact(4).enumerate(){ACTION[i].store(u32::from_le_bytes(b.try_into().unwrap()),Ordering::Relaxed);}SEQ.fetch_add(1,Ordering::Release);}
+fn latest()->Option<PlayerSample>{loop{let before=SEQ.load(Ordering::Acquire);if before&1!=0{std::hint::spin_loop();continue;}let mut v=[0.0;10];for(dst,src)in v.iter_mut().zip(VALUES.iter()){*dst=f32::from_bits(src.load(Ordering::Relaxed));}let t=TIME.load(Ordering::Relaxed);let present=PRESENT.load(Ordering::Relaxed);std::sync::atomic::fence(Ordering::Acquire);let after=SEQ.load(Ordering::Acquire);if before==after{return if after==0{None}else{Some(PlayerSample{sequence:after/2,timestamp_ns:t,position:[v[0],v[1],v[2]],quaternion_xyzw:[v[3],v[4],v[5],v[6]],euler_raw:[v[7],v[8],v[9]],player_present:present})};}}}
 #[unsafe(no_mangle)]pub unsafe extern "C" fn theater_get_latest_sample(out:*mut PlayerSample)->bool{if out.is_null(){return false;}if let Some(sample)=latest(){unsafe{out.write(sample);}true}else{false}}
+fn latest_action()->player_action::State {let mut b=[0u8;32];for(i,a)in ACTION.iter().enumerate(){b[i*4..i*4+4].copy_from_slice(&a.load(Ordering::Relaxed).to_le_bytes());}player_action::State::decode(&b)}
+fn latest_pair()->Option<(PlayerSample,player_action::State)>{loop{let before=SEQ.load(Ordering::Acquire);if before&1!=0{continue;}let sample=latest();let action=latest_action();std::sync::atomic::fence(Ordering::Acquire);if before==SEQ.load(Ordering::Acquire){return sample.map(|s|(s,action));}}}
 fn version(v:[u16;4])->String{format!("{}.{}.{}.{}",v[0],v[1],v[2],v[3])}
 fn check_text(report:&TmValidationReport,flag:u32)->&'static str{if report.checked&flag==0{"UNAVAILABLE"}else if report.passed&flag!=0{"PASS"}else{"FAIL"}}
 #[cfg(windows)]fn validate_runtime_profile()->u32{
@@ -69,7 +73,7 @@ fn check_text(report:&TmValidationReport,flag:u32)->&'static str{if report.check
     if status==0{log_game("Runtime signatures/task validation: pending CSTaskImp initialization");}status
 }
 #[cfg(not(windows))]fn validate_runtime_profile()->u32{0x101}
-#[cfg(windows)]fn pipe_worker(){use std::os::windows::ffi::OsStrExt;type Handle=*mut c_void;#[link(name="kernel32")]unsafe extern "system"{fn CreateFileW(n:*const u16,a:u32,s:u32,sa:*mut c_void,c:u32,f:u32,t:Handle)->Handle;fn WriteFile(h:Handle,b:*const c_void,n:u32,w:*mut u32,o:*mut c_void)->i32;fn CloseHandle(h:Handle)->i32;fn Sleep(ms:u32);}const INVALID:Handle=-1isize as Handle;let name=std::ffi::OsStr::new(r"\\.\pipe\EldenRingTheaterMode_1_17").encode_wide().chain(Some(0)).collect::<Vec<_>>();let handle=loop{let h=unsafe{CreateFileW(name.as_ptr(),0x40000000,0,std::ptr::null_mut(),3,0,std::ptr::null_mut())};if h!=INVALID{break h;}unsafe{Sleep(500)}};let mut last=0u64;let mut last_state=u32::MAX;let mut last_send=std::time::Instant::now()-Duration::from_secs(3);let mut ready_sent=false;loop{let state=INIT_STATE.load(Ordering::Acquire);let err=PROFILE.load(Ordering::Acquire);if err!=STATE_WAITING{let msg=WireMessage{magic:0x544D5354,version:1,kind:5,sequence:err as u64,..Default::default()};let mut written=0;unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut());CloseHandle(handle);}return;}if state==STATE_WAITING{unsafe{Sleep(100)};continue;}if state!=STATE_READY{if state!=last_state||last_send.elapsed()>=Duration::from_secs(1){let msg=WireMessage{magic:0x544D5354,version:1,kind:4,sequence:state as u64,..Default::default()};let mut written=0;if unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut())}==0{break;}last_state=state;last_send=std::time::Instant::now();}unsafe{Sleep(50)};continue;}let msg=if let Some(s)=latest(){if s.sequence==last&&last_send.elapsed()<Duration::from_secs(2){unsafe{Sleep(8)};continue;}last=s.sequence;ready_sent=true;WireMessage{magic:0x544D5354,version:1,kind:if s.player_present!=0{2}else{3},sequence:s.sequence,timestamp_ns:s.timestamp_ns,position:s.position,quaternion_xyzw:s.quaternion_xyzw,euler_raw:s.euler_raw,player_present:s.player_present}}else{if ready_sent&&last_send.elapsed()<Duration::from_secs(2){unsafe{Sleep(8)};continue;}ready_sent=true;WireMessage{magic:0x544D5354,version:1,kind:1,..Default::default()}};let mut written=0;let ok=unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut())};if ok==0||written as usize!=std::mem::size_of::<WireMessage>(){break;}last_send=std::time::Instant::now();unsafe{Sleep(8)}}unsafe{CloseHandle(handle)};}
+#[cfg(windows)]fn pipe_worker(){use std::os::windows::ffi::OsStrExt;type Handle=*mut c_void;#[link(name="kernel32")]unsafe extern "system"{fn CreateFileW(n:*const u16,a:u32,s:u32,sa:*mut c_void,c:u32,f:u32,t:Handle)->Handle;fn WriteFile(h:Handle,b:*const c_void,n:u32,w:*mut u32,o:*mut c_void)->i32;fn CloseHandle(h:Handle)->i32;fn Sleep(ms:u32);}const INVALID:Handle=-1isize as Handle;let name=std::ffi::OsStr::new(r"\\.\pipe\EldenRingTheaterMode_1_17").encode_wide().chain(Some(0)).collect::<Vec<_>>();let handle=loop{let h=unsafe{CreateFileW(name.as_ptr(),0x40000000,0,std::ptr::null_mut(),3,0,std::ptr::null_mut())};if h!=INVALID{break h;}unsafe{Sleep(500)}};let mut last=0u64;let mut last_state=u32::MAX;let mut last_send=std::time::Instant::now()-Duration::from_secs(3);let mut ready_sent=false;loop{let state=INIT_STATE.load(Ordering::Acquire);let err=PROFILE.load(Ordering::Acquire);if err!=STATE_WAITING{let msg=WireMessage{magic:0x544D5354,version:2,kind:5,sequence:err as u64,..Default::default()};let mut written=0;unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut());CloseHandle(handle);}return;}if state==STATE_WAITING{unsafe{Sleep(100)};continue;}if state!=STATE_READY{if state!=last_state||last_send.elapsed()>=Duration::from_secs(1){let msg=WireMessage{magic:0x544D5354,version:2,kind:4,sequence:state as u64,..Default::default()};let mut written=0;if unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut())}==0{break;}last_state=state;last_send=std::time::Instant::now();}unsafe{Sleep(50)};continue;}let msg=if let Some((s,action))=latest_pair(){if s.sequence==last&&last_send.elapsed()<Duration::from_secs(2){unsafe{Sleep(8)};continue;}last=s.sequence;ready_sent=true;WireMessage{magic:0x544D5354,version:2,kind:if s.player_present!=0{2}else{3},sequence:s.sequence,timestamp_ns:s.timestamp_ns,position:s.position,quaternion_xyzw:s.quaternion_xyzw,euler_raw:s.euler_raw,player_present:s.player_present,reserved:0,action}}else{if ready_sent&&last_send.elapsed()<Duration::from_secs(2){unsafe{Sleep(8)};continue;}ready_sent=true;WireMessage{magic:0x544D5354,version:2,kind:1,..Default::default()}};let mut written=0;let ok=unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut())};if ok==0||written as usize!=std::mem::size_of::<WireMessage>(){break;}last_send=std::time::Instant::now();unsafe{Sleep(8)}}unsafe{CloseHandle(handle)};}
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)->i32 {
     if reason==1 {
@@ -110,6 +114,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let world_ready=std::sync::atomic::AtomicBool::new(false);let player_found=std::sync::atomic::AtomicBool::new(false);
                 let mut probe=probe_runtime::GameProbe::default();
                 let mut replay=replay_runtime::GameReplay::default();
+                let mut last_animation_id=-1i32;
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
@@ -123,13 +128,15 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                             let e=[p.orientation_euler.0,p.orientation_euler.1,p.orientation_euler.2];
                             if pos.iter().chain(q.iter()).chain(e.iter()).all(|v|v.is_finite()) {
                                 if !player_found.swap(true,Ordering::AcqRel){log_game(&format!("main_player FOUND; PlayerIns={:p}; first_position=({:.3},{:.3},{:.3})",player,pos[0],pos[1],pos[2]));set_state(PLAYER_FOUND,"PLAYER_FOUND");}
-                                publish(PlayerSample{sequence:0,timestamp_ns:now,position:pos,quaternion_xyzw:q,euler_raw:e,player_present:1});
+                                let action=player_action::observe(player);
+                                if action.animation_id!=last_animation_id{log_game(&format!("PLAYER_ANIMATION_OBSERVED id={} action={} flags={} time={} length={} raw_requests=0x{:X}; semantic mapping unverified",action.animation_id,action.action,action.flags,action.animation_time,action.animation_length,action.raw_action_bits));last_animation_id=action.animation_id;}
+                                publish(PlayerSample{sequence:0,timestamp_ns:now,position:pos,quaternion_xyzw:q,euler_raw:e,player_present:1},action);
                                 set_state(STATE_READY,"READY");
                                 return;
                             }
                         }
                     }
-                    publish(PlayerSample{sequence:0,timestamp_ns:now,player_present:0,..Default::default()});
+                    publish(PlayerSample{sequence:0,timestamp_ns:now,player_present:0,..Default::default()},player_action::State::default());
                     if player_found.swap(false,Ordering::AcqRel){log_game("main_player LOST; no cached PlayerIns retained");}
                     if world_ready.load(Ordering::Acquire){set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}
                 });
@@ -159,3 +166,13 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
     1
 }
 
+
+#[cfg(test)]mod sample_tests {
+ use super::*;
+ #[test]fn transform_and_action_snapshot_remain_paired(){
+  let done=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));let writer_done=done.clone();
+  let writer=std::thread::spawn(move||{for i in 1..=10000u64{publish(PlayerSample{timestamp_ns:i,position:[i as f32;3],quaternion_xyzw:[0.0,0.0,0.0,1.0],player_present:1,..Default::default()},player_action::State{raw_action_bits:i,..Default::default()});}writer_done.store(true,Ordering::Release);});
+  while !done.load(Ordering::Acquire){if let Some((sample,action))=latest_pair(){assert_eq!(sample.timestamp_ns,action.raw_action_bits);assert_eq!(sample.position[0],sample.timestamp_ns as f32);}}
+  writer.join().unwrap();let (sample,action)=latest_pair().unwrap();assert_eq!(sample.timestamp_ns,10000);assert_eq!(action.raw_action_bits,10000);
+ }
+}

@@ -20,7 +20,7 @@ bool transfer(HANDLE pipe,HANDLE event,void* data,DWORD bytes,bool writing) {
 bool exchange(HANDLE pipe,HANDLE event,Packet& command,Packet& reply) {
     if(!command.timestamp_ns)command.timestamp_ns=theater_clock::monotonic_ns();
     return transfer(pipe,event,&command,sizeof(command),true)&&transfer(pipe,event,&reply,sizeof(reply),false)&&
-        reply.magic_value==magic&&reply.version==2&&reply.kind==status&&reply.state<=error&&reply.flags<=3&&reply.sequence==command.sequence&&reply.replay_state<=replay_error&&reply.applied_sequence<=reply.sequence;
+        reply.magic_value==magic&&reply.version==3&&reply.kind==status&&reply.state<=error&&reply.flags<=3&&reply.sequence==command.sequence&&reply.replay_state<=replay_error&&reply.applied_sequence<=reply.sequence;
 }
 }
 Client::~Client(){close();}
@@ -28,17 +28,18 @@ void Client::start(std::atomic<DWORD>& pid){worker_=std::thread([this,&pid]{run(
 State Client::state() const {std::lock_guard lock(mutex_);return state_;}
 bool Client::nudge(){std::lock_guard lock(mutex_);if(!state_.connected||!state_.ready||state_.pending||state_.phase==armed||state_.phase==observing||active_session_)return false;
     int empty=0;if(!pending_.compare_exchange_strong(empty,1))return false;state_.pending=true;wake_.notify_one();return true;}
-bool Client::begin_replay(std::uint64_t session,Transform t){return queue_replay(replay_begin,session,0,t,false);}
-bool Client::apply_replay(std::uint64_t session,std::uint64_t ns,Transform t,bool pause){return queue_replay(replay_apply,session,ns,t,pause);}
-bool Client::finish_replay(std::uint64_t session,std::uint64_t ns,Transform t){return queue_replay(replay_finish,session,ns,t,false);}
-bool Client::queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t ns,Transform t,bool pause){
+bool Client::begin_replay(std::uint64_t session,Transform t,erplay::ActionState a,bool animation){return queue_replay(replay_begin,session,0,t,false,a,animation);}
+bool Client::apply_replay(std::uint64_t session,std::uint64_t ns,Transform t,bool pause,erplay::ActionState a,bool animation){return queue_replay(replay_apply,session,ns,t,pause,a,animation);}
+bool Client::finish_replay(std::uint64_t session,std::uint64_t ns,Transform t,erplay::ActionState a,bool animation){return queue_replay(replay_finish,session,ns,t,false,a,animation);}
+bool Client::queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t ns,Transform t,bool pause,erplay::ActionState a,bool animation){
+    if(!a.valid())return false;
     double norm=0;for(auto v:t.position)if(!std::isfinite(v))return false;for(auto v:t.quaternion){if(!std::isfinite(v))return false;norm+=double(v)*v;}
     if(!session||std::abs(norm-1.0)>0.001)return false;
     std::lock_guard lock(mutex_);
     if(!state_.connected||!state_.ready||!state_.replay_supported||pending_.load()!=0||state_.phase==armed||state_.phase==observing)return false;
     if(kind==replay_begin){if(active_session_||state_.pending||state_.replay_phase==playing||state_.replay_phase==paused)return false;active_session_=session;}
     else if(active_session_!=session)return false;
-    Packet p;p.timestamp_ns=theater_clock::monotonic_ns();p.kind=kind;p.session=session;p.replay_timestamp_ns=ns;p.replay_state=pause?paused:playing;
+    Packet p;p.timestamp_ns=theater_clock::monotonic_ns();p.kind=kind;p.session=session;p.replay_timestamp_ns=ns;p.replay_state=pause?paused:playing;p.action=a;p.flags=animation?1:0;
     std::copy(t.position.begin(),t.position.end(),p.position);std::copy(t.quaternion.begin(),t.quaternion.end(),p.quaternion);
     latest_request_=p;replay_pending_=true;state_.pending=true;wake_.notify_one();return true;
 }
@@ -71,7 +72,7 @@ void Client::run(std::atomic<DWORD>& sample_pid){
             if(pid){pipe=CreateFileW(pipe_.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,nullptr);
                 if(pipe!=INVALID_HANDLE_VALUE){
                     if(!GetNamedPipeServerProcessId(pipe,&server_pid)||server_pid!=pid){CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;disconnected(L"Control/sample pipe process mismatch");}
-                    else if(!send_kind(hello)){CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;disconnected(L"Control v2 handshake failed: use the matching Phase4B DLL and restart the game");}
+                    else if(!send_kind(hello)){CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;disconnected(L"Control v3 handshake failed: use the matching Phase5 DLL and restart the game");}
                 }
             }
         }else if(sample_pid.load()!=server_pid){send_kind(stop);CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;disconnected(L"Game sample connection lost; probe/replay OFF");}

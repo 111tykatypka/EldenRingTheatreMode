@@ -11,7 +11,7 @@ using namespace game_control;
 bool await(const std::function<bool()>& predicate){for(int i=0;i<300;++i){if(predicate())return true;Sleep(10);}return false;}
 int main(){
     Packet golden;golden.kind=probe_nudge;golden.sequence=7;golden.timestamp_ns=100;golden.position[0]=0.5f;
-    const unsigned char prefix[]{0x54,0x43,0x4d,0x54,2,0,3,0};assert(std::memcmp(&golden,prefix,sizeof(prefix))==0);
+    const unsigned char prefix[]{0x54,0x43,0x4d,0x54,3,0,3,0};assert(std::memcmp(&golden,prefix,sizeof(prefix))==0);
     const auto name=L"\\\\.\\pipe\\TheaterMode.ControlTest."+std::to_wstring(GetCurrentProcessId());
     const HANDLE server=CreateNamedPipeW(name.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,PIPE_TYPE_BYTE|PIPE_REJECT_REMOTE_CLIENTS,1,sizeof(Packet),sizeof(Packet),0,nullptr);assert(server!=INVALID_HANDLE_VALUE);
     std::atomic<unsigned> nudges{},stops{};std::atomic_bool transport_ok{true};
@@ -19,7 +19,7 @@ int main(){
         std::uint64_t last=0;std::uint32_t phase=off;
         while(true){Packet request;auto* cursor=reinterpret_cast<char*>(&request);DWORD left=sizeof(request);
             while(left){DWORD got=0;if(!ReadFile(server,cursor,left,&got,nullptr)||got==0){left=0;goto disconnected;}cursor+=got;left-=got;}
-            if(request.magic_value!=magic||request.version!=2||request.sequence<=last){transport_ok=false;break;}last=request.sequence;
+            if(request.magic_value!=magic||request.version!=3||request.sequence<=last){transport_ok=false;break;}last=request.sequence;
             if(request.kind==probe_nudge){if(request.position[0]!=0.5f||request.position[1]!=0||request.position[2]!=0||request.quaternion[3]!=1)transport_ok=false;++nudges;phase=observing;}
             if(request.kind==stop){++stops;phase=off;}
             Packet reply;reply.kind=status;reply.sequence=request.sequence;reply.flags=3;reply.state=phase;

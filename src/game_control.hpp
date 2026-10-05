@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include "player_action.hpp"
 #include <array>
 #include <atomic>
 #include <bit>
@@ -19,17 +20,17 @@ enum Phase : std::uint32_t { off=0, armed=1, observing=2, complete=3, error=4 };
 enum ReplayPhase : std::uint32_t { inactive=0, playing=1, paused=2, finished=3, replay_error=4 };
 struct Transform {std::array<float,3> position{};std::array<float,4> quaternion{0,0,0,1};};
 struct Packet {
-    std::uint32_t magic_value{magic}; std::uint16_t version{2},kind{};
+    std::uint32_t magic_value{magic}; std::uint16_t version{3},kind{};
     std::uint64_t sequence{},timestamp_ns{};
     float position[3]{},quaternion[4]{0,0,0,1};
     std::uint32_t state{},detail{},flags{};
     std::uint64_t replay_timestamp_ns{},session{};
     std::uint32_t replay_state{},replay_detail{};
-    std::uint64_t applied_sequence{};
+    std::uint64_t applied_sequence{};erplay::ActionState action;
 };
-static_assert(std::endian::native==std::endian::little && sizeof(Packet)==96);
+static_assert(std::endian::native==std::endian::little && sizeof(Packet)==128);
 static_assert(offsetof(Packet,position)==24 && offsetof(Packet,quaternion)==36 && offsetof(Packet,state)==52);
-static_assert(offsetof(Packet,replay_timestamp_ns)==64 && offsetof(Packet,session)==72 && offsetof(Packet,applied_sequence)==88);
+static_assert(offsetof(Packet,replay_timestamp_ns)==64 && offsetof(Packet,session)==72 && offsetof(Packet,applied_sequence)==88 && offsetof(Packet,action)==96);
 struct State {
     bool connected{},ready{},pending{}; std::uint32_t phase{off},detail{};
     std::uint64_t command_sequence{}; std::wstring diagnostic{L"Waiting for game sample connection"};
@@ -45,9 +46,9 @@ public:
     ~Client();
     void start(std::atomic<DWORD>& sample_process_id);
     bool nudge();
-    bool begin_replay(std::uint64_t session,Transform transform);
-    bool apply_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause);
-    bool finish_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform);
+    bool begin_replay(std::uint64_t session,Transform transform,erplay::ActionState action={},bool animation=false);
+    bool apply_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause,erplay::ActionState action={},bool animation=false);
+    bool finish_replay(std::uint64_t session,std::uint64_t replay_ns,Transform transform,erplay::ActionState action={},bool animation=false);
     void emergency_stop();
     void close();
     [[nodiscard]] State state() const;
@@ -58,7 +59,7 @@ private:
     std::mutex wake_mutex_; std::condition_variable wake_; std::thread worker_;
     std::optional<Packet> latest_request_;std::uint64_t active_session_{};
     std::atomic_bool replay_pending_{};
-    bool queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause);
+    bool queue_replay(std::uint16_t kind,std::uint64_t session,std::uint64_t replay_ns,Transform transform,bool pause,erplay::ActionState action={},bool animation=false);
     void run(std::atomic<DWORD>& sample_process_id);
     void disconnected(const std::wstring& reason);
 };

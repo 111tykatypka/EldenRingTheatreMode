@@ -17,7 +17,7 @@ class MockGame {
 public:
     explicit MockGame(game_control::Transform live):live_(live){
         name=L"\\\\.\\pipe\\TheaterMode.ReplayTest."+std::to_wstring(GetCurrentProcessId());
-        pipe_=CreateNamedPipeW(name.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,PIPE_TYPE_BYTE|PIPE_REJECT_REMOTE_CLIENTS,1,96,96,0,nullptr);
+        pipe_=CreateNamedPipeW(name.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,PIPE_TYPE_BYTE|PIPE_REJECT_REMOTE_CLIENTS,1,sizeof(game_control::Packet),sizeof(game_control::Packet),0,nullptr);
         assert(pipe_!=INVALID_HANDLE_VALUE);thread_=std::thread([this]{run();});
     }
     ~MockGame(){CancelSynchronousIo(thread_.native_handle());thread_.join();CloseHandle(pipe_);}
@@ -33,7 +33,7 @@ private:
         std::uint64_t sequence=0;
         while(true){game_control::Packet request;auto*cursor=reinterpret_cast<char*>(&request);DWORD left=sizeof(request);
             while(left){DWORD got=0;if(!ReadFile(pipe_,cursor,left,&got,nullptr)||!got)goto done;cursor+=got;left-=got;}
-            assert(request.version==2&&request.sequence>sequence);sequence=request.sequence;
+            assert(request.version==3&&request.sequence>sequence);sequence=request.sequence;
             game_control::Packet reply;
             {std::lock_guard lock(mutex_);commands_.push_back(request);
                 if(request.kind==game_control::stop){phase_=game_control::inactive;session_=0;}
@@ -54,15 +54,15 @@ private:
 int run_tests(int argc,wchar_t**argv){
     const auto dir=std::filesystem::temp_directory_path()/(L"TheaterMode-Игровой-replay-tests-"+std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(dir);const auto file=dir/L"coordinator.erplay";
-    {erplay::Metadata m;m.title="Mock coordinator test";erplay::Writer writer(file,m,100);
-        for(std::uint64_t i=0;i<=1000;++i){erplay::Sample s;s.index=i;s.replay_time_ns=i*20'000'000;s.source_time_ns=100+i*20'000'000;s.position={float(i)*0.004f,0,0};const double angle=double(i)*0.002;s.orientation={0,float(std::sin(angle)),0,float(std::cos(angle))};writer.append(s);}(void)writer.finalize();}
+    {erplay::Metadata m;m.title="Mock coordinator test";m.format_version=3;m.mod_version="0.3.0";erplay::Writer writer(file,m,100);
+        for(std::uint64_t i=0;i<=1000;++i){erplay::Sample s;s.index=i;s.replay_time_ns=i*20'000'000;s.source_time_ns=100+i*20'000'000;s.position={float(i)*0.004f,0,0};const double angle=double(i)*0.002;s.orientation={0,float(std::sin(angle)),0,float(std::cos(angle))};s.action=erplay::ActionState{};s.action->flags=erplay::animation_valid;s.action->animation_id=i<150?10:20;writer.append(s);}(void)writer.finalize();}
     auto player=std::make_unique<replay::Player>(file);
     MockGame game({});std::atomic<DWORD> sample_pid{GetCurrentProcessId()};game_control::Client client(game.name);client.start(sample_pid);
     assert(wait_for([&]{return client.state().connected&&client.state().ready;}));
-    in_game_replay::Controller controller(client,[&](const auto&line){if(argc>1)std::cerr<<line<<std::endl;});auto now=Clock::now();
+    in_game_replay::Controller controller(client,[&](const auto&line){if(argc>1)std::cerr<<line<<std::endl;});controller.enable_animation(true);auto now=Clock::now();
     assert(controller.play(*player,5'000'000'000,now));
     assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));
-    assert(player->state().timestamp_ns==0); // BEGIN acknowledgement precedes clock start.
+    assert(player->state().timestamp_ns==0);assert(game.last(game_control::replay_begin).action.animation_id==10&&game.last(game_control::replay_begin).flags==1); // BEGIN acknowledgement precedes clock start.
     controller.tick(now+1s);assert(player->state().timestamp_ns==1'000'000'000);
     assert(wait_for([&]{return game.last(game_control::replay_apply).replay_timestamp_ns==1'000'000'000;}));
     controller.pause(now+2s);assert(player->state().timestamp_ns==2'000'000'000);
@@ -71,7 +71,7 @@ int run_tests(int argc,wchar_t**argv){
     assert(controller.play(*player,5'000'000'000,now+10s));controller.tick(now+11s);
     assert(player->state().timestamp_ns==3'000'000'000); // One host clock, pause wall time excluded.
     assert(wait_for([&]{return game.last(game_control::replay_apply).replay_timestamp_ns==3'000'000'000;}));
-    const auto q=game.last(game_control::replay_apply);assert(std::abs(q.position[0]-0.6f)<0.001f&&std::abs(q.quaternion[1]-std::sin(0.3))<0.001f);
+    const auto q=game.last(game_control::replay_apply);assert(q.action.animation_id==20&&q.flags==1);assert(std::abs(q.position[0]-0.6f)<0.001f&&std::abs(q.quaternion[1]-std::sin(0.3))<0.001f);
     controller.restart(*player,5'000'000'000,now+12s);
     assert(wait_for([&]{controller.tick(now+12s);return controller.phase()==in_game_replay::Phase::playing;}));
     assert(player->state().timestamp_ns==0);
@@ -109,6 +109,16 @@ int run_tests(int argc,wchar_t**argv){
         assert(sent.quaternion[0]==state.orientation.x&&sent.quaternion[1]==state.orientation.y&&sent.quaternion[2]==state.orientation.z&&sent.quaternion[3]==state.orientation.w);
         std::cout<<"REAL_FIXTURE_MOCK_PASS samples="<<real->summary().sample_count<<" duration_ns="<<real->summary().duration_ns<<" chunks="<<real->summary().chunk_count<<" first=("<<first.position.x<<','<<first.position.y<<','<<first.position.z<<") first_5_seconds_only; not an in-game test\n";
         controller.stop();assert(wait_for([&]{return !client.state().pending;}));
+        now=Clock::now();assert(controller.play(*real,0,now));
+        assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));
+        controller.tick(now+7s);assert(real->state().sample_index>301);
+        controller.tick(now+14s);assert(real->state().sample_index>800);
+        controller.tick(now+std::chrono::nanoseconds(real->summary().duration_ns)+1s);
+        assert(wait_for([&]{controller.tick(now+std::chrono::nanoseconds(real->summary().duration_ns)+1s);return controller.phase()==in_game_replay::Phase::finished;}));
+        assert(game.last(game_control::replay_finish).replay_timestamp_ns==real->summary().duration_ns);
+        std::cout<<"REAL_FIXTURE_FULL_MOCK_PASS samples="<<real->summary().sample_count<<" final_ns="<<real->state().timestamp_ns<<"; NOT live game\n";
+        controller.stop();assert(wait_for([&]{return !client.state().pending;}));
+
     }
     game.live({});assert(wait_for([&]{return std::abs(client.state().live.position[0])<0.001f;}));
     now=Clock::now();assert(controller.play(*player,5'000'000'000,now));

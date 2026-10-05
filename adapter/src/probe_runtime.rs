@@ -94,19 +94,19 @@ fn read_packet(handle:*mut c_void)->Option<Vec<u8>> {
     let mut b=[0u8;wire::BYTES];let mut offset=0;
     while offset<wire::LEGACY_BYTES{let mut count=0;let ok=unsafe{ReadFile(handle,b[offset..].as_mut_ptr().cast(),(wire::LEGACY_BYTES-offset) as u32,&mut count,std::ptr::null_mut())};if ok==0||count==0{return None;}offset+=count as usize;}
     let version=u16::from_le_bytes([b[4],b[5]]);
-    if version==wire::VERSION {while offset<b.len(){let mut count=0;let ok=unsafe{ReadFile(handle,b[offset..].as_mut_ptr().cast(),(b.len()-offset) as u32,&mut count,std::ptr::null_mut())};if ok==0||count==0{return None;}offset+=count as usize;}}
-    Some(b[..if version==1 {wire::LEGACY_BYTES} else {wire::BYTES}].to_vec())
+    if matches!(version,2|3) {let size=if version==2{96}else{wire::BYTES};while offset<size{let mut count=0;let ok=unsafe{ReadFile(handle,b[offset..].as_mut_ptr().cast(),(size-offset) as u32,&mut count,std::ptr::null_mut())};if ok==0||count==0{return None;}offset+=count as usize;}}
+    Some(b[..if version==1 {wire::LEGACY_BYTES} else if version==2 {96}else{wire::BYTES}].to_vec())
 }
 fn status(version:u16)->wire::Packet {
     let sample=crate::latest().unwrap_or_default();
     let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
-    wire::Packet {version,replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
+    wire::Packet {version,player_action:Default::default(),replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:(if ready(){1}else{0}) | if version==wire::VERSION {2}else{0} }
+        flags:(if ready(){1}else{0}) | if version>=2 {2}else{0} }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;
-    crate::log_game("PHASE4B=TRANSFORM_REPLAY; REPLAY_STATE=INACTIVE; PROBE_STATE=OFF; animation unavailable");
+    crate::log_game("PHASE5=ACTION_OBSERVATION; REPLAY_STATE=INACTIVE; animation override EXPERIMENTAL / opt-in");
     let name=std::ffi::OsStr::new(wire::PIPE).encode_wide().chain(Some(0)).collect::<Vec<_>>();
     loop {
         // Duplex local-only control pipe; retain the original sample pipe unchanged.

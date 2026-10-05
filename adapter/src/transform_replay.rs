@@ -15,11 +15,13 @@ pub const ERR_TIME: u32 = 11;
 pub const ERR_TARGET_STALE: u32 = 12;
 pub const ERR_TARGET_STEP: u32 = 13;
 pub const INTERPOLATION_DELAY_NS:u64=8_333_333;
+pub const MAX_INTERPOLATION_DELAY_NS:u64=33_333_333;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Action { Begin, Apply, Finish }
 #[derive(Clone, Copy, Debug)]
 pub struct Request {
+    pub player_action:crate::player_action::State,pub animation_enabled:bool,
     pub action: Action, pub session: u64, pub sequence: u64, pub generation: u64,
     pub received_ns: u64, pub replay_ns: u64, pub paused: bool, pub target: Transform,
 }
@@ -48,7 +50,7 @@ impl Playback {
                 if !matches!(self.phase, PLAYING | PAUSED) || self.session != r.session || previous.generation != r.generation {
                     return self.fail(ERR_SESSION);
                 }
-                if r.sequence <= previous.sequence || r.replay_ns < previous.replay_ns { return self.fail(ERR_TIME); }
+                if r.sequence <= previous.sequence || r.replay_ns < previous.replay_ns || r.received_ns<previous.received_ns { return self.fail(ERR_TIME); }
                 if distance(previous.target, r.target) > MAX_TARGET_STEP { return self.fail(ERR_TARGET_STEP); }
             }
         }
@@ -66,8 +68,8 @@ impl Playback {
         }
         if self.finish_pending { self.phase = FINISHED; self.target = None; self.finish_pending = false; }
         else if self.phase==PLAYING {if let Some(previous)=self.previous {
-            if target.received_ns>previous.received_ns {let view_time=now_ns.saturating_sub(INTERPOLATION_DELAY_NS);let t=view_time.saturating_sub(previous.received_ns) as f64/(target.received_ns-previous.received_ns) as f64;
-                target.target=previous.target.interpolate(target.target,t);
+            if target.received_ns>previous.received_ns {let delay=(target.received_ns-previous.received_ns).clamp(INTERPOLATION_DELAY_NS,MAX_INTERPOLATION_DELAY_NS);let view_time=now_ns.saturating_sub(delay);let t=view_time.saturating_sub(previous.received_ns) as f64/(target.received_ns-previous.received_ns) as f64;
+                target.target=previous.target.interpolate(target.target,t);if t<1.0 {target.player_action=previous.player_action;}
                 target.replay_ns=previous.replay_ns+((target.replay_ns-previous.replay_ns) as f64*t.clamp(0.0,1.0)) as u64;
             }
         }}
@@ -78,7 +80,7 @@ impl Playback {
 #[cfg(test)] mod tests {
     use super::*;
     fn live() -> Transform { Transform { position: [1.0,2.0,3.0], quaternion: [0.0,0.0,0.0,1.0] } }
-    fn begin() -> Request { Request { action: Action::Begin, session: 4, sequence: 1, generation: 2,
+    fn begin() -> Request { Request {player_action:Default::default(),animation_enabled:false, action: Action::Begin, session: 4, sequence: 1, generation: 2,
         received_ns: 100, replay_ns: 0, paused: false, target: live() } }
     #[test] fn inactive_start_pause_resume_finish_stop() {
         let mut p = Playback::default(); assert!(p.frame(2,100).is_none());
@@ -112,7 +114,7 @@ impl Playback {
     #[test] fn bounded_interpolation_and_sign_equivalent_rotations(){
         let mut p=Playback::default();p.ingest(begin(),live()).unwrap();
         let next=Request {action:Action::Apply,sequence:2,received_ns:100+2*INTERPOLATION_DELAY_NS,replay_ns:20_000_000,target:Transform {position:[3.0,2.0,3.0],quaternion:[0.0,0.0,0.0,-1.0]},..begin()};p.ingest(next,live()).unwrap();
-        let middle=p.frame(2,next.received_ns).unwrap();assert!((middle.target.position[0]-2.0).abs()<0.0001);assert!(middle.target.valid());assert!(middle.target.quaternion[3].abs()>0.999);
+        let middle=p.frame(2,next.received_ns+INTERPOLATION_DELAY_NS).unwrap();assert!((middle.target.position[0]-2.0).abs()<0.0001);assert!(middle.target.valid());assert!(middle.target.quaternion[3].abs()>0.999);
         let held=p.frame(2,next.received_ns+100_000_000).unwrap();assert_eq!(held.target.position,next.target.position); // No extrapolation.
         for degrees in [0.0_f64,90.0,180.0,270.0,360.0] {let rad=degrees.to_radians()/2.0;let q=Transform {quaternion:[0.0,rad.sin() as f32,0.0,rad.cos() as f32],..live()};assert!(live().interpolate(q,0.5).valid());}
     }
