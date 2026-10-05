@@ -68,7 +68,29 @@ Release C++ and Rust build. CTest 5/5 pass, Rust 8/8 pass at the implementation 
 
 C++ tests preserve prior ERPLAY/ReplayPlayer/launcher/probe coverage and add an isolated mock pipe coordinator test: first-write ACK before clock start, position interpolation/SLERP transmission, Pause/Resume timing, Stop ACK before Restart, exact 5-second endpoint/Finish-once, STOP/disconnect and distant start refusal. Synthetic data is used **only in automated tests**, never supplied as real gameplay.
 
-The user confirmed deleting `replay_2026-10-05_022417.erplay` and requested a new actual gameplay recording. The replay folder is currently empty. An attempted integration test failed to open the deleted fixture; **real-file integration is not marked passed**. The next manual step is a new 10–15-second recording in a known flat location, using the existing recorder. After finalization, validate that new file and use its first 5 seconds for Stage 1. The optional automated integration command is `build\Release\in-game-replay-tests.exe <actual .erplay path>`; it does not load a game/DLL.
+The user confirmed deleting `replay_2026-10-05_022417.erplay` and requested a new actual gameplay recording. The replay folder was empty at the build checkpoint. The old fixture remains unavailable; its attempted integration test failed to open the file. The optional automated integration command is `build\Release\in-game-replay-tests.exe <actual .erplay path>`; it does not load a game/DLL.
+
+### New real recording: validated 2026-10-05
+
+The user completed recording with the staged Phase4B host. Host logs report finalization of `replay_2026-10-05_073848.erplay`: **881 samples, 14.656 seconds, 60.043668 Hz, 2 chunks**, 46,004 bytes. The existing ERPLAY Reader independently loaded and fully validated this new file in `in-game-replay-tests.exe`, including chunk CRCs, sample order, transforms and footer/header consistency. The isolated mock IPC test with this real file passed interpolation/SLERP transport, Pause/Resume, exact 5-second finish and STOP. **This is real-file integration PASS, not in-game transform replay verification.**
+
+Additional read-only sample analysis: all transforms finite; no source/replay timestamp regressions; replay intervals 15–31 ms, no zero intervals or gaps above 50 ms. Quaternion norm squared ranged 0.999999770–1.000000251. Maximum consecutive position change was 0.065710 units; first 5 seconds contain 301 samples and maximum displacement from start 4.359115 units. Full recording has genuine movement (maximum displacement 5.827549 units) and orientation change (up to 177.927479 degrees from first orientation).
+
+First sample Havok position: `(8.458280, 6.015267, -6.615375)`; quaternion XYZW: `(0, 0.5189684, 0, 0.8547934)`. File SHA-256: `FCE2AB35AC5D64CBE4CE65305D557B40DADC5C5872CC045B70385D159FC1B987`. Map/origin are still absent from v2; these numbers do not identify a map.
+
+The first sandboxed test invocation failed at the isolated mock-pipe handshake before opening the real fixture. Repeating the same test outside the sandbox passed (exit 0, `REAL_FIXTURE_MOCK_PASS`). Neither invocation connected to the production control pipe or wrote to the game.
+
+Current live logs confirm the new DLL profile `EldenRing_1_17` / 2.7.0.0, unique task signature, `ChrIns_PostPhysics` callback, main_player FOUND and READY. The running host path is the Phase4B output; generated YAFSML config selects its matching DLL. The user has been given the first-5-seconds visual test.
+
+### Live callback evidence during the new-file test
+
+Real DLL log sessions `26956062000001`, `26969687000002`, `26982484000003` subsequently show `REPLAY_START → REPLAY_STATE=1 → REPLAY_APPLY → REPLAY_STATE=3 replay_ns=5000000000 → REPLAY_FINISHED`. Host logs acknowledge FINISHED for all three. Initial starting displacement was 0.249371 units; subsequent starts from the 5-second endpoint were 4.359114 units. The native guard was retained.
+
+Logged requested position and quaternion changed with the recording. On sampled following callbacks the reported error relative to the previous target was 0 to approximately 0.000000477 units, including during movement. This establishes **real game-thread writes and sampled memory persistence**, not visible character/collision correctness. Logs state position/orientation ONLY; no proxy sync flags, velocity or input patches were applied. A fourth session also began; its log timestamp progression was slower. No Pause/Resume/Stop or user visual result has yet been confirmed at this checkpoint.
+
+The recording's first position change above 0.01 units is at **3.140 seconds**, and first orientation change above 1 degree is at **3.953 seconds**. The stationary beginning is recorded data, not a stall. Test at 1.0x; at 0.1x visible movement begins around 31.4 wall seconds.
+
+Physical movement/yaw, Pause/Resume, Stop, normal controls after Finish and collision stability remain **RUNTIME VALIDATION REQUIRED** until the user reports their observations. No animation phase is authorized by this partial evidence.
 
 ## Output / next gate
 
