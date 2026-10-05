@@ -1,5 +1,19 @@
 # EldenRingTheatreMode
 
+## Phase 6 external tester checkpoint
+
+Branch `codex/phase6-multicharacter-test`: retained player replay plus opt-in
+existing-character transform playback, sparse nearby actor/action tracks and
+capture-only equipment/face/HP snapshots. **IMPLEMENTED — RUNTIME VALIDATION
+REQUIRED**; NPC animation, combat, spawning and visual-state restoration are not
+implemented. This is not verified full encounter reproduction.
+
+Build/test/package: `powershell -ExecutionPolicy Bypass -File scripts\Build-Tester.ps1`.
+Output: `C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\TesterBuild`.
+The original Phase5 package remains preserved. Use the matching EXE/DLL pair.
+See [tester instructions](notes/TESTER_README.md), [limitations](notes/KNOWN_ISSUES.md)
+and [technical checkpoint](notes/PHASE6_TESTER_STATUS.md).
+
 ## Modern rebuild checkpoint
 
 Branch `modern-theater-rebuild`: C++ Dear ImGui docking/Win32/DX11 editor over the

@@ -41,6 +41,17 @@ Existing real replay `replay_2026-10-05_164335.erplay` was read and run to its f
 
 No new live game sampling, NPC writes, visual animation, Stop restoration, game FPS cost or control lock has been validated in this task. See package manifest for final test/build results and binary hashes.
 
+Actual serializer storage benchmark, **synthetic data only**, 60 seconds at 60 Hz with half the NPCs idle (1 Hz heartbeat), remaining NPCs moving, one initial visual snapshot each:
+
+| NPCs | Bytes | Actor transform records | Generate + finalize + validate seconds |
+| --- | --- | --- | --- |
+| 0 | 187532 | 0 | 0.0118 |
+| 5 | 1414116 | 10925 | 0.0690 |
+| 10 | 2243996 | 18310 | 0.1069 |
+| 20 | 4300332 | 36620 | 0.2071 |
+
+These are raw optional-track storage measurements, not compressed encounter-size forecasts, game overhead, capture rates or IPC capacity. Actual field churn and actors in a loaded scene must be measured by the tester. Optional compression has not been added.
+
 ## Next engineering decision
 
 Run TESTER_README in order: fallback player, nonlethal nearby-actor capture, first 5 seconds, Pause/Resume/F6, then 10 seconds/full duration. If native physics fields move but the model/proxy does not follow, use the request/actual diagnostics and exact pinned bindings to investigate synchronization. If native AI still wins, identify a safe native ownership API before adding more masks. These are materially different engine experiments; choosing writes blindly would risk the existing baseline.
