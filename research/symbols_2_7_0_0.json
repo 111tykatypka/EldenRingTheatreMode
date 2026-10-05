@@ -1,0 +1,239 @@
+{
+  "schema": 1,
+  "target": "EldenRing_1_17 / 2.7.0.0",
+  "disk_sha256": "D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134",
+  "sources": [
+    {
+      "name": "FreecamMod",
+      "commit": "a4628aaf50d88feeda56f79573cf2842eddec54a",
+      "url": "https://github.com/Logersnamed/FreecamMod.git",
+      "path": "C:\\Users\\user\\Documents\\ChatGPT\\elden ring theater mode\\research\\community-nightly\\FreecamMod"
+    },
+    {
+      "name": "EldenRingHKS",
+      "commit": "d88d6441f5fccfdd6a5fd10d493309b680181897",
+      "url": "https://github.com/soulsmods/EldenRingHKS.git",
+      "path": "C:\\Users\\user\\Documents\\ChatGPT\\elden ring theater mode\\research\\community-nightly\\EldenRingHKS"
+    },
+    {
+      "name": "Elden-Ring-CT-TGA",
+      "commit": "7926205c5a2ed236dd31278c4f5579c964ceec35",
+      "url": "https://github.com/The-Grand-Archives/Elden-Ring-CT-TGA.git",
+      "path": "C:\\Users\\user\\Documents\\ChatGPT\\elden ring theater mode\\research\\community-nightly\\Elden-Ring-CT-TGA"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "FieldArea",
+      "source": "FreecamMod/src/core/game_data_manager.h",
+      "pattern": "48 8B 3D ? ? ? ? 49 8B D8 48 8B F2 4C 8B F1 48 85 FF",
+      "hits": [
+        {
+          "site_va": "0x14061ef93",
+          "candidate_va": "0x143d6d248",
+          "candidate_rva": "0x3d6d248"
+        }
+      ],
+      "unique": true,
+      "status": "CROSS_CHECKED",
+      "runtime_read_verified": false,
+      "runtime_write_verified": false,
+      "abi": "UNKNOWN",
+      "limitation": "Unique bytes do not establish function entry, ABI, owner lifetime or safe call thread."
+    },
+    {
+      "name": "WorldChrMan_Freecam",
+      "source": "FreecamMod/src/core/game_data_manager.h",
+      "pattern": "48 8B 05 ? ? ? ? 48 85 C0 74 0F 48 39 88",
+      "hits": [
+        {
+          "site_va": "0x1403ffbf6",
+          "candidate_va": "0x143d69ff8",
+          "candidate_rva": "0x3d69ff8"
+        }
+      ],
+      "unique": true,
+      "status": "CROSS_CHECKED",
+      "runtime_read_verified": false,
+      "runtime_write_verified": false,
+      "abi": "UNKNOWN",
+      "limitation": "Unique bytes do not establish function entry, ABI, owner lifetime or safe call thread."
+    },
+    {
+      "name": "CSLuaEventManager",
+      "source": "Hexinton-v8.0.4.CT/[ Enable ]",
+      "pattern": "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 41 BE 01 00 00 00 44 89 75",
+      "hits": [
+        {
+          "site_va": "0x14065ba0d",
+          "candidate_va": "0x143d6beb8",
+          "candidate_rva": "0x3d6beb8"
+        },
+        {
+          "site_va": "0x140bbcfbb",
+          "candidate_va": "0x143d5f040",
+          "candidate_rva": "0x3d5f040"
+        }
+      ],
+      "unique": false,
+      "status": "REFERENCE",
+      "runtime_read_verified": false,
+      "runtime_write_verified": false,
+      "abi": "UNKNOWN",
+      "limitation": "Unique bytes do not establish function entry, ABI, owner lifetime or safe call thread."
+    },
+    {
+      "name": "W_Event",
+      "source": "Hexinton-v8.0.4.CT/PlayAnimation",
+      "pattern": "74 ?? 48 85 d2 74 ?? 48 8d 4c 24 50",
+      "hits": [
+        {
+          "site_va": "0x140c15a4d",
+          "candidate_va": "0x140c15a40",
+          "candidate_rva": "0xc15a40"
+        }
+      ],
+      "unique": true,
+      "status": "CROSS_CHECKED",
+      "runtime_read_verified": false,
+      "runtime_write_verified": false,
+      "abi": "UNKNOWN",
+      "limitation": "Unique bytes do not establish function entry, ABI, owner lifetime or safe call thread."
+    },
+    {
+      "name": "LuaWarp_01",
+      "source": "Hexinton-v8.0.4.CT/[ Fast Travel and Warp ]",
+      "pattern": "C3 ?? ?? ???????? 57 48 83 EC ?? 48 8B FA 44",
+      "hits": [
+        {
+          "site_va": "0x14059aa5e",
+          "candidate_va": "0x14059aa60",
+          "candidate_rva": "0x59aa60"
+        }
+      ],
+      "unique": true,
+      "status": "CROSS_CHECKED",
+      "runtime_read_verified": false,
+      "runtime_write_verified": false,
+      "abi": "UNKNOWN",
+      "limitation": "Unique bytes do not establish function entry, ABI, owner lifetime or safe call thread."
+    }
+  ],
+  "hkb_rtti": [
+    {
+      "va": "0x143c6ba80",
+      "name": ".?AVhkbCharacterSymbolLinker@@"
+    },
+    {
+      "va": "0x143c6bab0",
+      "name": ".?AV?$hkbSymbolLinkerContainer@W4Enum@hkbCharacterSymbolType@@$01@@"
+    },
+    {
+      "va": "0x143cfd1d0",
+      "name": ".?AVhkbCharacterControllerDriver@@"
+    },
+    {
+      "va": "0x143d164f0",
+      "name": ".?AVhkbCharacterSetup@@"
+    },
+    {
+      "va": "0x143d16518",
+      "name": ".?AVhkbCharacterData@@"
+    },
+    {
+      "va": "0x143d16728",
+      "name": ".?AVhkbCharacter@@"
+    },
+    {
+      "va": "0x143d16970",
+      "name": ".?AVhkbCharacterStringData@@"
+    },
+    {
+      "va": "0x143d16df0",
+      "name": ".?AVhkbCharacterControllerModifierInternalState@@"
+    },
+    {
+      "va": "0x143d17910",
+      "name": ".?AVhkbCharacterControllerSceneModifier@@"
+    },
+    {
+      "va": "0x143d17d88",
+      "name": ".?AVhkbCharacterControllerModifier@@"
+    },
+    {
+      "va": "0x143d191c8",
+      "name": ".?AVhkbCharacterControlCommand@@"
+    },
+    {
+      "va": "0x143d193a0",
+      "name": ".?AVhkbCharacterSkeletonChangedCommand@@"
+    },
+    {
+      "va": "0x143d19448",
+      "name": ".?AVhkbCharacterAddedInfo@@"
+    },
+    {
+      "va": "0x143d19478",
+      "name": ".?AVhkbCharacterInfo@@"
+    },
+    {
+      "va": "0x143d194a0",
+      "name": ".?AVhkbCharacterSteppedInfo@@"
+    },
+    {
+      "va": "0x143d194d0",
+      "name": ".?AVhkbCharacterSkinInfo@@"
+    },
+    {
+      "va": "0x143d19650",
+      "name": ".?AVhkbCharacterSelectedInfo@@"
+    },
+    {
+      "va": "0x143d19758",
+      "name": ".?AVhkbCharacterDebugData@@"
+    },
+    {
+      "va": "0x143d19968",
+      "name": ".?AVhkbCharacterViewer@@"
+    },
+    {
+      "va": "0x143d2bb50",
+      "name": ".?AVhkbCharacterController@@"
+    }
+  ],
+  "typed_sdk_reference": {
+    "revision": "3c8c1d7633a99309fb004c9f894ea10b7967d0e0",
+    "ChrDebugFlags": {
+      "noMove": 5,
+      "noAttack": 4,
+      "noUpdate": 8
+    },
+    "ChrCtrlChrProxyFlags": {
+      "position_sync_requested": 0,
+      "rotation_sync_requested": 1
+    },
+    "CSChrBehaviorModule.animation_speed": "0x17c8",
+    "ChrIns.debug_flags": {
+      "sdk_offset": "0x530",
+      "freecam_offset": "0x538",
+      "status": "CONFLICT; flag writes BLOCKED"
+    },
+    "status": "REFERENCE; bit semantics agree, enclosing member offset CONFLICTS; animationSpeed experiment UNVERIFIED"
+  },
+  "world_binding": {
+    "singleton": "CSLuaEventMan",
+    "type": "CSLuaEventManImp",
+    "source": "SDK cs/lua_event_man.rs; TGA .cea baseAliases",
+    "proxy_offset": "0x08",
+    "script_imitation_offset": "0x18",
+    "warp_bonfire_id_offset": "0x1c",
+    "status": "CROSS_CHECKED; READ-ONLY runtime instrumentation implemented, UNVERIFIED"
+  },
+  "unresolved": [
+    "W_Event ABI/hkbCharacter chain",
+    "warp ownership and request prerequisites",
+    "proxy sync consumers",
+    "native AI control ownership"
+  ],
+  "note": "Metadata only. No reference code, game binary, pseudocode or binaries bundled. Partial Ghidra is not ground truth."
+}
