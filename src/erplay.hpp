@@ -8,6 +8,7 @@
 #include <vector>
 #include <optional>
 #include "player_action.hpp"
+#include "character_track.hpp"
 
 namespace erplay {
 
@@ -40,6 +41,7 @@ struct Summary {
     std::uint64_t chunk_count{};
     std::uint64_t action_event_count{};
     bool animation_sync_observations{};
+    std::uint64_t character_count{},character_sample_count{};
 };
 enum class RecordingState { idle, recording, paused, saving, ready, error };
 
@@ -53,6 +55,7 @@ public:
     Writer(const Writer&) = delete;
     Writer& operator=(const Writer&) = delete;
     void append(Sample sample);
+    void append_character(CharacterRecord record);
     [[nodiscard]] Summary finalize(std::uint64_t paused_duration_ns = 0);
     [[nodiscard]] const std::filesystem::path& temporary_path() const noexcept;
 private:
@@ -67,6 +70,7 @@ public:
     explicit RecordingSession(Writer& writer) noexcept;
     void start();
     void ingest(Sample source_sample);
+    void ingest_character(CharacterRecord source_record);
     void pause(std::uint64_t source_time_ns);
     void resume(std::uint64_t source_time_ns);
     [[nodiscard]] Summary stop();
@@ -95,6 +99,9 @@ public:
     [[nodiscard]] std::pair<Sample, Sample> bracket(std::uint64_t replay_time_ns) const;
     [[nodiscard]] std::uint64_t lower_sample(std::uint64_t replay_time_ns) const;
     [[nodiscard]] const std::vector<ActionEvent>& action_events()const noexcept;
+    [[nodiscard]] std::vector<CharacterInfo> characters()const;
+    [[nodiscard]] std::vector<CharacterRecord> character_preview(std::uint64_t id,std::size_t maximum=3000)const;
+    [[nodiscard]] std::optional<CharacterRecord> character_at(std::uint64_t id,std::uint64_t time)const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

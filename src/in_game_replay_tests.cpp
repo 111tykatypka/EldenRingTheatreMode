@@ -91,7 +91,8 @@ int run_tests(int argc,wchar_t**argv){
     assert(!client.apply_replay(999,0,{},false));
     game_control::Transform bad;bad.position[0]=std::numeric_limits<float>::quiet_NaN();assert(!client.begin_replay(999,bad));
     game.live({{500,0,0},{0,0,0,1}});assert(wait_for([&]{return client.state().live.position[0]==500;}));
-    assert(!controller.play(*player,5'000'000'000,now));assert(controller.phase()==in_game_replay::Phase::error);
+    assert(controller.play(*player,5'000'000'000,now));
+    assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));controller.stop();
     assert(wait_for([&]{return !client.state().pending;}));
     if(argc>1){
         auto real=std::make_unique<replay::Player>(std::filesystem::path(argv[1]));const auto first=real->reader().sample(0);
