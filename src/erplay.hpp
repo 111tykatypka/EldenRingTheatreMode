@@ -6,6 +6,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <optional>
+#include "player_action.hpp"
 
 namespace erplay {
 
@@ -17,8 +19,10 @@ struct Sample {
     std::uint64_t source_time_ns{};
     Vec3 position{};
     Quaternion orientation{};
+    std::optional<ActionState> action;
 };
 struct Metadata {
+    std::uint32_t format_version{2};
     std::string title;
     std::string description;
     std::string tags;
@@ -34,6 +38,8 @@ struct Summary {
     std::uint64_t paused_duration_ns{};
     double actual_rate_hz{};
     std::uint64_t chunk_count{};
+    std::uint64_t action_event_count{};
+    bool animation_sync_observations{};
 };
 enum class RecordingState { idle, recording, paused, saving, ready, error };
 
@@ -88,6 +94,7 @@ public:
     [[nodiscard]] Sample sample(std::uint64_t index) const;
     [[nodiscard]] std::pair<Sample, Sample> bracket(std::uint64_t replay_time_ns) const;
     [[nodiscard]] std::uint64_t lower_sample(std::uint64_t replay_time_ns) const;
+    [[nodiscard]] const std::vector<ActionEvent>& action_events()const noexcept;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

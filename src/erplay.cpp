@@ -13,7 +13,7 @@
 namespace erplay {
 namespace {
 constexpr std::array<char, 8> magic{'E','R','P','L','A','Y','0','2'};
-constexpr std::uint32_t version = 2, chunk_marker = 0x4B4E4843, footer_marker = 0x544F4F46;
+constexpr std::uint32_t version = 2, track_marker=0x4B415254, action_track=2, chunk_marker = 0x4B4E4843, footer_marker = 0x544F4F46;
 constexpr std::uint64_t fixed_header_bytes = 8 + 4 + 4 + 8 + 8 + 8 + 8 + 8 + 8;
 static_assert(std::endian::native == std::endian::little, "ERPLAY v2 currently requires little-endian Windows/x64");
 
@@ -60,15 +60,20 @@ Sample decode(std::istream& in) {
     s.position={get<float>(in),get<float>(in),get<float>(in)};
     s.orientation={get<float>(in),get<float>(in),get<float>(in),get<float>(in)}; return s;
 }
+void encode_action(std::ostream& out,const ActionEvent& e){put(out,e.timestamp_ns);put(out,static_cast<std::uint32_t>(e.state.action));put(out,e.state.flags);put(out,e.state.raw_action_bits);put(out,e.state.animation_id);put(out,e.state.animation_time);put(out,e.state.animation_length);put(out,e.state.playback_rate);}
+ActionEvent decode_action(std::istream& in){ActionEvent e;e.timestamp_ns=get<std::uint64_t>(in);e.state.action=static_cast<PlayerAction>(get<std::uint32_t>(in));e.state.flags=get<std::uint32_t>(in);e.state.raw_action_bits=get<std::uint64_t>(in);e.state.animation_id=get<std::int32_t>(in);e.state.animation_time=get<float>(in);e.state.animation_length=get<float>(in);e.state.playback_rate=get<float>(in);return e;}
+struct TypedChunk{std::uint32_t type{},flags{},count{};std::uint64_t bytes{};std::uint32_t crc{};};
+TypedChunk read_typed_header(std::istream& in){TypedChunk h;h.type=get<std::uint32_t>(in);h.flags=get<std::uint32_t>(in);h.count=get<std::uint32_t>(in);h.bytes=get<std::uint64_t>(in);h.crc=get<std::uint32_t>(in);if(h.flags>1||h.count==0)throw std::runtime_error("invalid typed chunk flags/count");if(h.type==action_track&&h.bytes!=std::uint64_t(h.count)*40)throw std::runtime_error("invalid action chunk length");if(h.type!=action_track&&(h.flags&1))throw std::runtime_error("unknown required track");return h;}
+std::string read_payload(std::istream& in,std::uint64_t bytes,std::uint32_t checksum,std::uint64_t file_size){const auto pos=static_cast<std::uint64_t>(in.tellg());if(pos>file_size||bytes>file_size-pos||bytes>std::numeric_limits<std::size_t>::max())throw std::runtime_error("truncated/oversized track payload");std::string payload(static_cast<std::size_t>(bytes),'\0');in.read(payload.data(),static_cast<std::streamsize>(bytes));if(!in||crc32(reinterpret_cast<const unsigned char*>(payload.data()),payload.size())!=checksum)throw std::runtime_error("track checksum mismatch");return payload;}
 void write_header(std::ostream& o,const Metadata& m,std::uint64_t count,std::uint64_t duration,std::uint64_t paused,double rate) {
-    o.write(magic.data(), magic.size()); put(o,version); put(o,std::uint32_t{0});
+    auto header_magic=magic;header_magic[7]=m.format_version==3?'3':'2';o.write(header_magic.data(), header_magic.size()); put(o,m.format_version); put(o,std::uint32_t{0});
     put(o,m.recording_start_unix_ns); put(o,m.requested_rate_hz); put(o,rate); put(o,count); put(o,duration); put(o,paused);
     put_string(o,m.game_version); put_string(o,m.mod_version); put_string(o,m.title); put_string(o,m.description); put_string(o,m.tags);
 }
 Metadata read_header(std::istream& in, Summary& s) {
     std::array<char,8> got{}; in.read(got.data(),got.size());
-    if (!in || got!=magic) throw std::runtime_error("invalid ERPLAY magic");
-    if (get<std::uint32_t>(in)!=version) throw std::runtime_error("unsupported ERPLAY version");
+    if (!in || (got!=magic && got!=std::array<char,8>{'E','R','P','L','A','Y','0','3'})) throw std::runtime_error("invalid ERPLAY magic");
+    s.metadata.format_version=get<std::uint32_t>(in);if((s.metadata.format_version!=2&&s.metadata.format_version!=3)||got[7]!=char('0'+s.metadata.format_version))throw std::runtime_error("unsupported ERPLAY version/magic");
     (void)get<std::uint32_t>(in);
     s.metadata.recording_start_unix_ns=get<std::uint64_t>(in);
     s.metadata.requested_rate_hz=get<double>(in); s.actual_rate_hz=get<double>(in);
@@ -82,13 +87,14 @@ struct Writer::Impl {
     std::filesystem::path final_path, temp_path;
     Metadata metadata;
     std::ofstream out;
-    std::vector<Sample> pending;
+    std::vector<Sample> pending;std::vector<ActionEvent> pending_actions;std::optional<ActionEvent> last_action;std::uint64_t action_count{};
     std::uint32_t chunk_limit;
     std::uint64_t count{}, duration{}, chunks{};
     std::uint64_t first_source{}, last_source{}, last_replay{};
     bool has_sample{}, done{};
 
     Impl(std::filesystem::path p, Metadata m, std::uint32_t n):final_path(std::move(p)),metadata(std::move(m)),chunk_limit(n) {
+        if(metadata.format_version!=2&&metadata.format_version!=3)throw std::invalid_argument("unsupported writer version");
         if (!chunk_limit) throw std::invalid_argument("chunk sample count must be positive");
         if (!(std::isfinite(metadata.requested_rate_hz)&&metadata.requested_rate_hz>0)) throw std::invalid_argument("requested rate must be finite and positive");
         temp_path=final_path; temp_path += ".tmp";
@@ -109,6 +115,7 @@ struct Writer::Impl {
         out.write(payload.data(),static_cast<std::streamsize>(payload.size())); out.flush();
         if(!out) throw std::runtime_error("failed flushing replay chunk");
         ++chunks; pending.clear();
+        if(!pending_actions.empty()){std::ostringstream data(std::ios::out|std::ios::binary);for(const auto&e:pending_actions)encode_action(data,e);const auto actions=data.str();put(out,track_marker);put(out,action_track);put(out,std::uint32_t{0});put(out,static_cast<std::uint32_t>(pending_actions.size()));put(out,static_cast<std::uint64_t>(actions.size()));put(out,crc32(reinterpret_cast<const unsigned char*>(actions.data()),actions.size()));out.write(actions.data(),static_cast<std::streamsize>(actions.size()));out.flush();if(!out)throw std::runtime_error("action chunk write failed");pending_actions.clear();}
     }
 };
 
@@ -121,8 +128,14 @@ void Writer::append(Sample s) {
     if(s.index!=x.count) throw std::invalid_argument("sample indices must be contiguous from zero");
     if(x.has_sample && (s.replay_time_ns<x.last_replay || s.source_time_ns<x.last_source))
         throw std::invalid_argument("sample timestamps regress");
+    if(s.action && (x.metadata.format_version!=3 || !s.action->valid()))throw std::invalid_argument("invalid action observation/version");
     if(!x.has_sample) x.first_source=s.source_time_ns;
     x.has_sample=true; x.last_source=s.source_time_ns; x.last_replay=s.replay_time_ns; x.duration=s.replay_time_ns;
+    if(s.action){if(x.metadata.format_version!=3)throw std::invalid_argument("action track requires ERPLAY v3");if(!s.action->valid())throw std::invalid_argument("invalid action observation");
+        const bool changed=!x.last_action||!s.action->same_action(x.last_action->state)||((s.action->flags&time_valid)&&s.action->animation_time+0.1f<x.last_action->state.animation_time);
+        const bool sync=(s.action->flags&time_valid)&&(!x.last_action||s.replay_time_ns-x.last_action->timestamp_ns>=500'000'000);
+        if(changed||sync){ActionEvent e{s.replay_time_ns,*s.action};x.pending_actions.push_back(e);x.last_action=e;++x.action_count;}
+    }
     x.pending.push_back(s); ++x.count; if(x.pending.size()>=x.chunk_limit) x.flush_chunk();
 }
 RecordingSession::RecordingSession(Writer& writer) noexcept : writer_(writer) {}
@@ -159,7 +172,7 @@ Summary RecordingSession::stop() {
 Summary Writer::finalize(std::uint64_t paused_duration_ns) {
     auto& x=*impl_; if(x.done) throw std::logic_error("replay writer already finalized");
     x.flush_chunk();
-    put(x.out,footer_marker); put(x.out,x.chunks); put(x.out,x.count); put(x.out,x.duration); put(x.out,paused_duration_ns);
+    put(x.out,footer_marker); put(x.out,x.chunks); put(x.out,x.count); put(x.out,x.duration); put(x.out,paused_duration_ns);if(x.metadata.format_version==3)put(x.out,x.action_count);
     const double rate=x.count>1 && x.duration>0 ? double(x.count-1)*1e9/double(x.duration) : 0.0;
     x.out.seekp(0); write_header(x.out,x.metadata,x.count,x.duration,paused_duration_ns,rate);
     x.out.flush(); if(!x.out) throw std::runtime_error("failed finalizing replay header"); x.out.close();
@@ -171,21 +184,24 @@ Summary Writer::finalize(std::uint64_t paused_duration_ns) {
 
 Summary validate(const std::filesystem::path& p) {
     std::ifstream in(p,std::ios::binary); if(!in) throw std::runtime_error("cannot open replay for validation");
-    Summary s; read_header(in,s); std::uint64_t total=0, duration=0, chunks=0, previous_time=0, previous_source=0; bool first=true;
+    Summary s; read_header(in,s); std::uint64_t total=0, duration=0, chunks=0, previous_time=0, previous_source=0,action_total=0,previous_action_time=0; bool first=true,first_action=true;
     while(true) {
         const auto marker=get<std::uint32_t>(in);
         if(marker==footer_marker) {
             const auto footer_chunks=get<std::uint64_t>(in), footer_samples=get<std::uint64_t>(in), footer_duration=get<std::uint64_t>(in), footer_paused=get<std::uint64_t>(in);
             if(footer_chunks!=chunks || footer_samples!=total || footer_duration!=duration || footer_paused!=s.paused_duration_ns) throw std::runtime_error("replay footer mismatch");
+            if(s.metadata.format_version==3&&get<std::uint64_t>(in)!=action_total)throw std::runtime_error("action footer count mismatch");
+            if(!first_action&&previous_action_time>duration)throw std::runtime_error("action beyond replay duration");
             if(total!=s.sample_count || duration!=s.duration_ns) throw std::runtime_error("header summary mismatch");
             if(in.peek()!=std::char_traits<char>::eof()) throw std::runtime_error("unexpected bytes after replay footer");
-            s.chunk_count=chunks; return s;
+            s.chunk_count=chunks;s.action_event_count=action_total; return s;
         }
+        if(marker==track_marker&&s.metadata.format_version==3){const auto h=read_typed_header(in);const auto payload=read_payload(in,h.bytes,h.crc,std::filesystem::file_size(p));if(h.type==action_track){std::istringstream data(payload,std::ios::in|std::ios::binary);for(std::uint32_t j=0;j<h.count;++j){const auto e=decode_action(data);if(!e.state.valid()||(!first_action&&e.timestamp_ns<previous_action_time))throw std::runtime_error("invalid action data/order");previous_action_time=e.timestamp_ns;first_action=false;++action_total;s.animation_sync_observations|=(e.state.flags&time_valid)!=0;}}continue;}
         if(marker!=chunk_marker) throw std::runtime_error("invalid chunk marker");
         const auto n=get<std::uint32_t>(in); const auto bytes=get<std::uint64_t>(in); const auto expected=get<std::uint32_t>(in);
         constexpr std::uint64_t sample_size=52;
         if(!n || bytes!=std::uint64_t(n)*sample_size) throw std::runtime_error("invalid chunk length");
-        std::string payload(static_cast<std::size_t>(bytes),'\0'); in.read(payload.data(),static_cast<std::streamsize>(bytes));
+        const auto payload=read_payload(in,bytes,expected,std::filesystem::file_size(p));
         if(!in) throw std::runtime_error("truncated replay chunk");
         if(crc32(reinterpret_cast<const unsigned char*>(payload.data()),payload.size())!=expected) throw std::runtime_error("replay chunk checksum mismatch");
         std::istringstream data(payload,std::ios::in|std::ios::binary);
@@ -207,7 +223,7 @@ struct Reader::Impl {
     Summary info;
     mutable std::ifstream input;
     std::vector<Entry> index;
-    std::vector<Chunk> chunks;
+    std::vector<Chunk> chunks;std::vector<ActionEvent> actions;
     mutable std::uint32_t cached_chunk{std::numeric_limits<std::uint32_t>::max()};
     mutable std::vector<Sample> cache;
 
@@ -218,6 +234,7 @@ struct Reader::Impl {
         while(true) {
             const auto marker=get<std::uint32_t>(input);
             if(marker==footer_marker) break;
+            if(marker==track_marker&&info.metadata.format_version==3){const auto h=read_typed_header(input);if(h.type==action_track){for(std::uint32_t j=0;j<h.count;++j)actions.push_back(decode_action(input));}else input.seekg(static_cast<std::streamoff>(h.bytes),std::ios::cur);continue;}
             if(marker!=chunk_marker) throw std::runtime_error("invalid chunk marker while indexing replay");
             const auto n=get<std::uint32_t>(input); (void)get<std::uint64_t>(input); (void)get<std::uint32_t>(input);
             const auto start=static_cast<std::uint64_t>(input.tellg());
@@ -252,6 +269,7 @@ Reader::Reader(Reader&&) noexcept=default;
 Reader& Reader::operator=(Reader&&) noexcept=default;
 const Summary& Reader::summary() const noexcept{return impl_->info;}
 Sample Reader::sample(std::uint64_t i) const{return impl_->at(i);}
+const std::vector<ActionEvent>& Reader::action_events()const noexcept{return impl_->actions;}
 std::uint64_t Reader::lower_sample(std::uint64_t t) const {
     if(impl_->index.empty()) throw std::runtime_error("replay contains no samples");
     const auto it=std::upper_bound(impl_->index.begin(),impl_->index.end(),t,[](std::uint64_t v,const Impl::Entry&e){return v<e.time;});
@@ -271,12 +289,14 @@ Summary recover_incomplete(const std::filesystem::path& source,const std::filesy
     auto output_temp=final_path; output_temp += ".recovery.tmp";
     std::ofstream out(output_temp,std::ios::binary|std::ios::trunc); if(!out) throw std::runtime_error("cannot create recovered replay temporary file");
     write_header(out,summary.metadata,0,0,summary.paused_duration_ns,0.0);
-    std::uint64_t total=0,duration=0,chunks=0,previous_time=0,previous_source=0;bool first=true;
+    std::uint64_t total=0,duration=0,chunks=0,previous_time=0,previous_source=0,action_total=0,previous_action_time=0;bool first=true,first_action=true;
     constexpr std::uint64_t sample_size=52;
     while(in.peek()!=std::char_traits<char>::eof()) {
         std::array<char,4> marker_bytes{};in.read(marker_bytes.data(),marker_bytes.size());
         if(in.gcount()!=static_cast<std::streamsize>(marker_bytes.size())) break;
         std::uint32_t marker{};std::memcpy(&marker,marker_bytes.data(),sizeof(marker));
+        if(marker==track_marker&&summary.metadata.format_version==3){const auto header_start=in.tellg();if(std::filesystem::file_size(source)-static_cast<std::uint64_t>(header_start)<24)break;const auto h=read_typed_header(in);const auto payload_pos=static_cast<std::uint64_t>(in.tellg());if(h.bytes>std::filesystem::file_size(source)-payload_pos)break;const auto payload=read_payload(in,h.bytes,h.crc,std::filesystem::file_size(source));if(h.type==action_track){std::istringstream data(payload,std::ios::in|std::ios::binary);for(std::uint32_t j=0;j<h.count;++j){const auto e=decode_action(data);if(!e.state.valid()||e.timestamp_ns>duration||(!first_action&&e.timestamp_ns<previous_action_time))throw std::runtime_error("invalid recovered action data/order");previous_action_time=e.timestamp_ns;first_action=false;++action_total;}}
+            put(out,track_marker);put(out,h.type);put(out,h.flags);put(out,h.count);put(out,h.bytes);put(out,h.crc);out.write(payload.data(),static_cast<std::streamsize>(payload.size()));continue;}
         if(marker!=chunk_marker) throw std::runtime_error("unexpected record in incomplete replay");
         std::array<char,16> meta{};in.read(meta.data(),meta.size());
         if(in.gcount()!=static_cast<std::streamsize>(meta.size())) break;
@@ -284,6 +304,7 @@ Summary recover_incomplete(const std::filesystem::path& source,const std::filesy
         std::memcpy(&n,meta.data(),4);std::memcpy(&payload_size,meta.data()+4,8);std::memcpy(&checksum,meta.data()+12,4);
         if(!n||payload_size!=std::uint64_t(n)*sample_size) throw std::runtime_error("invalid incomplete chunk size");
         if(payload_size>std::numeric_limits<std::size_t>::max()) throw std::runtime_error("chunk exceeds addressable memory");
+        if(payload_size>std::filesystem::file_size(source)-static_cast<std::uint64_t>(in.tellg()))break;
         std::string payload(static_cast<std::size_t>(payload_size),'\0');in.read(payload.data(),static_cast<std::streamsize>(payload_size));
         if(in.gcount()!=static_cast<std::streamsize>(payload_size)) break;
         if(crc32(reinterpret_cast<const unsigned char*>(payload.data()),payload.size())!=checksum) throw std::runtime_error("incomplete replay contains a checksum failure");
@@ -292,7 +313,7 @@ Summary recover_incomplete(const std::filesystem::path& source,const std::filesy
         out.write(marker_bytes.data(),marker_bytes.size());out.write(meta.data(),meta.size());out.write(payload.data(),static_cast<std::streamsize>(payload.size()));if(!out)throw std::runtime_error("failed writing recovered chunks");++chunks;
     }
     if(!total) throw std::runtime_error("incomplete replay has no complete chunks to recover");
-    put(out,footer_marker);put(out,chunks);put(out,total);put(out,duration);put(out,summary.paused_duration_ns);
+    put(out,footer_marker);put(out,chunks);put(out,total);put(out,duration);put(out,summary.paused_duration_ns);if(summary.metadata.format_version==3)put(out,action_total);
     const double rate=total>1&&duration?double(total-1)*1e9/double(duration):0.0;
     out.seekp(0);write_header(out,summary.metadata,total,duration,summary.paused_duration_ns,rate);out.flush();if(!out)throw std::runtime_error("failed finalizing recovered replay");out.close();
     const auto verified=validate(output_temp);std::error_code ec;std::filesystem::rename(output_temp,final_path,ec);if(ec)throw std::filesystem::filesystem_error("recovered replay rename failed",output_temp,final_path,ec);return verified;

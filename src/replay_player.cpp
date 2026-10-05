@@ -30,7 +30,7 @@ Player::Player(const std::filesystem::path& file) {
     state_.status=Status::loading;
     reader_=std::make_unique<erplay::Reader>(file);
     if(reader_->summary().metadata.game_version!="2.7.0.0") {state_.status=Status::error;throw std::runtime_error("incompatible replay game version");}
-    if(reader_->summary().metadata.mod_version!="0.2.0") {state_.status=Status::error;throw std::runtime_error("incompatible replay mod version");}
+    if(reader_->summary().metadata.mod_version!="0.2.0"&&reader_->summary().metadata.mod_version!="0.3.0") {state_.status=Status::error;throw std::runtime_error("incompatible replay mod version");}
     if(reader_->summary().sample_count==0) {state_.status=Status::error;throw std::runtime_error("replay contains no samples");}
     state_.status=Status::ready; update_state();
 }
@@ -41,19 +41,22 @@ void Player::update_state() {
     const double t=span?double(clock_ns_-a.replay_time_ns)/double(span):0.0;
     state_.position={float(a.position.x+t*(b.position.x-a.position.x)),float(a.position.y+t*(b.position.y-a.position.y)),float(a.position.z+t*(b.position.z-a.position.z))};
     state_.orientation=slerp(a.orientation,b.orientation,t);
+    const auto& events=reader_->action_events();state_.has_action=false;state_.current_action={};
+    if(!events.empty()){if(!action_cursor_valid_||clock_ns_<previous_action_clock_){const auto it=std::upper_bound(events.begin(),events.end(),clock_ns_,[](std::uint64_t ns,const erplay::ActionEvent&e){return ns<e.timestamp_ns;});action_cursor_=static_cast<std::size_t>(it-events.begin());action_cursor_valid_=true;}else{while(action_cursor_<events.size()&&events[action_cursor_].timestamp_ns<=clock_ns_)++action_cursor_;}if(action_cursor_){state_.has_action=true;state_.current_action=events[action_cursor_-1].state;}}
+    previous_action_clock_=clock_ns_;
 }
 void Player::play(Clock::time_point now) {
     if(clock_ns_>=summary().duration_ns)clock_ns_=0;
     anchor_=now; state_.status=Status::playing; update_state();
 }
 void Player::pause(Clock::time_point now) { if(state_.status==Status::playing){advance(now);if(state_.status==Status::playing)state_.status=Status::paused;} }
-void Player::stop(){clock_ns_=0;state_.status=Status::stopped;update_state();}
-void Player::restart(Clock::time_point now){clock_ns_=0;anchor_=now;state_.status=Status::playing;update_state();}
+void Player::stop(){action_cursor_valid_=false;clock_ns_=0;state_.status=Status::stopped;update_state();}
+void Player::restart(Clock::time_point now){action_cursor_valid_=false;clock_ns_=0;anchor_=now;state_.status=Status::playing;update_state();}
 void Player::set_speed(double speed,Clock::time_point now) {
     if(!(speed==0.1||speed==0.25||speed==0.5||speed==1.0||speed==2.0||speed==4.0))throw std::invalid_argument("unsupported replay speed");
     const auto was=state_.status==Status::playing;if(was)advance(now);state_.speed=speed;if(was)anchor_=now;
 }
-void Player::seek(std::uint64_t t) {state_.status=Status::seeking;clock_ns_=std::min(t,summary().duration_ns);update_state();state_.status=Status::paused;}
+void Player::seek(std::uint64_t t) {action_cursor_valid_=false;state_.status=Status::seeking;clock_ns_=std::min(t,summary().duration_ns);update_state();state_.status=Status::paused;}
 void Player::step(int direction) {
     if(direction==0)return;state_.status=Status::paused;
     if(direction>0&&state_.sample_index+1<summary().sample_count)clock_ns_=reader_->sample(state_.sample_index+1).replay_time_ns;

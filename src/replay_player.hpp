@@ -13,6 +13,7 @@ struct State {
     erplay::Vec3 position{};
     erplay::Quaternion orientation{};
     double speed{1.0};
+    erplay::ActionState current_action;bool has_action{};
     Status status{Status::stopped};
 };
 class Player {
@@ -34,7 +35,7 @@ private:
     std::unique_ptr<erplay::Reader> reader_;
     State state_{};
     std::uint64_t clock_ns_{};
-    Clock::time_point anchor_{};
+    Clock::time_point anchor_{};std::size_t action_cursor_{};bool action_cursor_valid_{};std::uint64_t previous_action_clock_{};
     void update_state();
 };
 class BookmarkStore {
