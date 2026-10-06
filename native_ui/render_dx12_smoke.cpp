@@ -11,6 +11,8 @@ void emergency(){}
 // --preview: show the v3 UI in a 1600x900 window for a few seconds (for screenshots), no automated input.
 int main(int argc,char**argv){const bool preview=argc>1&&!strcmp(argv[1],"--preview");
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
+ // Never read or write the user's saved overlay layout from this test.
+ if(!GetEnvironmentVariableW(L"THEATER_SMOKE_KEEP_LAYOUT",nullptr,0))SetEnvironmentVariableW(L"THEATER_OVERLAY_NO_LAYOUT_FILE",L"1");
  if(!tm_render_start(emergency))return 1;
  HWND window=CreateWindowExW(0,L"STATIC",L"DX12 Theater smoke",WS_OVERLAPPEDWINDOW,0,0,640,480,nullptr,nullptr,nullptr,nullptr);
  ComPtr<ID3D12Device> device;ComPtr<ID3D12CommandQueue> queue;ComPtr<IDXGIFactory4> factory;ComPtr<IDXGISwapChain> chain;

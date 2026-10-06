@@ -121,6 +121,10 @@ private:
 
 // Full integrity scan. Throws with a diagnostic for malformed/truncated data.
 [[nodiscard]] Summary validate(const std::filesystem::path& path);
+// Replaces the metadata title (the replay's display name) of a finalized replay. The body is copied
+// byte for byte (readers index by scanning, so nothing stores absolute offsets), the result is
+// validated, then atomically replaces the original. Throws and leaves the original untouched on error.
+void set_title(const std::filesystem::path& path, const std::string& title);
 // Salvages complete checksum-valid chunks from an interrupted .tmp file.
 // The original remains untouched; recovered output is validated before rename.
 [[nodiscard]] Summary recover_incomplete(const std::filesystem::path& temporary_path,

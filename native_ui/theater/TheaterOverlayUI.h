@@ -14,9 +14,11 @@
 
 namespace TheaterUI
 {
-    using EmitFn = void (*)(void* user, std::uint32_t command, std::uint64_t value);
+    using EmitFn = void (*)(void* user, std::uint32_t command, std::uint64_t value, const char* text);
     // Not a pipe command: asks the backend to toggle F4 visibility (rail and toolbar buttons).
     inline constexpr std::uint32_t kCommandToggleUi = 0xFFFFFFFFu;
+    // Not a pipe command: set visibility (value: 0 shown, 1 hidden), used by the name box.
+    inline constexpr std::uint32_t kCommandSetVisibility = 0xFFFFFFFEu;
 
     struct OverlayFrame
     {
@@ -55,7 +57,12 @@ namespace TheaterUI
         void DrawRecordingPill(const OverlayFrame& f);
         void DrawHiddenHint(const OverlayFrame& f);
         void DrawCursor();
-        void Emit(std::uint32_t command, std::uint64_t value = 0);
+        void DrawMenuBar();
+        void DrawDialogs(const OverlayFrame& f);
+        void DrawLibrary(const OverlayFrame& f);
+        void OpenNameDialog(const OverlayFrame& f, bool restoreHidden);
+        bool BeginPanel(const char* id, const char* title, ImVec2 defMin, ImVec2 defMax, ImVec2 minSize, bool* open);
+        void Emit(std::uint32_t command, std::uint64_t value = 0, const char* text = nullptr);
         void PushFont(Theme::Font role, float extraScale = 1.0f);
         const char* T(Str s) const { return Tr(language, s); }
         void LoadSettings();
@@ -72,6 +79,21 @@ namespace TheaterUI
         std::string lastDiagnostic_, lastNative_;
         std::uint32_t lastRecording_ = theater_ui::record_idle;
         int  lastLinked_ = -1, lastConnected_ = -1, lastPlayer_ = -1, lastLoaded_ = -1;
+
+        // Panels and layout (Layout menu).
+        bool  showTools_ = true, showTimeline_ = true, resetLayout_ = false;
+        bool  savedTools_ = true, savedTimeline_ = true, savedPanel_ = true;
+        float menuH_ = 0.0f;
+
+        // "Name this replay" box (F5 or a Record button), and Replay Library dialogs.
+        bool  nameDialog_ = false, nameFocus_ = false, restoreHidden_ = false;
+        char  nameBuf_[128] = {};
+        std::uint32_t lastNameRequest_ = 0; bool nameRequestSeen_ = false;
+        int   selectedReplay_ = -1;           // library index of the selected row
+        int   pendingDialog_ = 0;             // 1 load, 2 rename, 3 delete (opened next frame)
+        char  renameBuf_[128] = {};
+        std::uint32_t lastMessageId_ = 0; double messageUntil_ = 0.0;
+        std::string message_; bool messageError_ = false;
 
         // Timeline interaction.
         std::uint64_t lastDuration_ = 0;

@@ -335,6 +335,24 @@ std::pair<Sample,Sample> Reader::bracket(std::uint64_t t) const {
     return {sample(lo),sample(lo+1)};
 }
 
+void set_title(const std::filesystem::path& path,const std::string& title) {
+    if(title.empty()||title.size()>1024)throw std::invalid_argument("replay title must be 1..1024 bytes");
+    Summary before=validate(path);
+    auto temporary=path;temporary+=L".rename.tmp";
+    {
+        std::ifstream in(path,std::ios::binary);if(!in)throw std::runtime_error("cannot open replay for rename");
+        Summary header;read_header(in,header);const auto body=in.tellg();if(body<0)throw std::runtime_error("cannot locate replay body");
+        std::ofstream out(temporary,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("cannot create rename temporary file");
+        auto metadata=header.metadata;metadata.title=title;
+        write_header(out,metadata,header.sample_count,header.duration_ns,header.paused_duration_ns,header.actual_rate_hz);
+        in.seekg(body);out<<in.rdbuf();out.flush();if(!out)throw std::runtime_error("rename temporary write failed");
+    }
+    try{
+        const auto after=validate(temporary);
+        if(after.sample_count!=before.sample_count||after.duration_ns!=before.duration_ns||after.metadata.title!=title)throw std::runtime_error("renamed replay does not match the original");
+    }catch(...){std::error_code ec;std::filesystem::remove(temporary,ec);throw;}
+    std::filesystem::rename(temporary,path); // same directory: atomic replace on NTFS
+}
 Summary recover_incomplete(const std::filesystem::path& source,const std::filesystem::path& final_path) {
     std::ifstream in(source,std::ios::binary); if(!in) throw std::runtime_error("cannot open incomplete replay");
     Summary summary; read_header(in,summary);

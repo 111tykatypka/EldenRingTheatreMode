@@ -1,6 +1,7 @@
 #include "ingame_editor_server.hpp"
 #include "editor_backend.hpp"
 #include "TheaterHotkeys.h"
+#include "replay_library.hpp"
 namespace theater {
 App app;
 constexpr UINT WM_REFRESH = WM_APP + 1;
@@ -100,7 +101,10 @@ bool handle_global_hotkey(UINT id) {
   if(id<1||id>2)return false;
   log_line("GLOBAL_HOTKEY received id="+std::to_string(id));
   if(id==2)emergency_stop();
-  else post_command(Command::start);
+  else if(ingame_editor::overlay_connected()){
+    // The overlay shows a "Name this replay" box; it sends record_named to start.
+    ++app.name_request;log_line("RECORD name requested from the overlay");
+  } else post_command(Command::start); // no overlay: start with the default name
   return true;
 }
 void post_command(Command c) {
@@ -153,9 +157,7 @@ std::vector<ReplayEntry> scan_replays() {
       log_line(std::string("Replay validation failed: ") + e.what());
     }
   }
-  std::sort(out.begin(), out.end(), [](const auto &a, const auto &b) {
-    return a.modified > b.modified;
-  });
+  library::sort(out, {static_cast<library::SortKey>(app.sort_key.load()), app.sort_descending.load()});
   return out;
 }
 void set_data(const Snapshot &s) {
@@ -489,17 +491,16 @@ void pipe_worker() {
           md.game_version = "2.7.0.0";
           md.recording_start_unix_ns = unix_ns();
           md.requested_rate_hz = 60.0;
-          md.title = "Elden Ring recording";
+          {
+            std::lock_guard names(app.names_mutex);
+            if (app.pending_record_name.empty()) app.pending_record_name = library::default_name();
+            md.title = app.pending_record_name;
+            app.recording_name = app.pending_record_name;
+            app.pending_record_name.clear();
+          }
           md.tags = "capture-fidelity-v1,raw-state,read-only";
           md.description = "Raw player tracks schema1. New fields REFERENCE; pose, HKS VM, full effect/queue data UNAVAILABLE. Animation reconstruction not implemented.";
-          auto stem = file_stem();
-          auto final = app.replays / (stem + L".erplay");
-          for (unsigned i = 1;
-               (fs::exists(final) ||
-                fs::exists(fs::path(final.wstring() + L".tmp")));
-               ++i)
-            final =
-                app.replays / (stem + L"_" + std::to_wstring(i) + L".erplay");
+          auto final = library::unique_replay_path(app.replays, library::safe_stem(md.title));
           writer = std::make_unique<erplay::Writer>(final, std::move(md), 600);
           session = std::make_unique<erplay::RecordingSession>(*writer);
           session->start();
@@ -844,6 +845,7 @@ void initialize(HWND window) {
   app.log.open(app.logs / L"TheaterModeRecorder.log",
                std::ios::binary | std::ios::app);
   load_loader_path();
+  {const auto order=library::load_sort(app.root);app.sort_key=static_cast<std::uint32_t>(order.key);app.sort_descending=order.descending;}
   app.game_replay =
       std::make_unique<in_game_replay::Controller>(app.control, log_line);
   using theater_hotkeys::Action;

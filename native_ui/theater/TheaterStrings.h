@@ -28,6 +28,12 @@ namespace TheaterUI
         LogRecStopped, LogRecStarted, LogRecPaused, LogRecSaving,
         // replay library
         Library, Open, NoReplays, LoadedTag, LogReplayOpenSent,
+        // layout menu, recording names, library actions
+        MenuLayout, ResetLayout, PanelTools, PanelSide, PanelTimeline,
+        NameTitle, NameHint, StartRecordingBtn, Cancel,
+        ColName, ColDate, ColDuration, ColSize, ColArea,
+        Load, Rename, Delete, LoadTitle, LoadTeleportNote, RenameTitle, Save, DeleteTitle, DeleteBody,
+        LoadedBlocked, NameEmpty, AreaUnknown, GameVersion, FileLabel,
         Count
     };
 
@@ -73,6 +79,21 @@ namespace TheaterUI
         { "Recording stopped", "Запись остановлена" }, { "Recording started", "Запись начата" }, { "Recording paused", "Запись на паузе" }, { "Saving recording", "Сохранение записи" },
         { "LIBRARY", "БИБЛИОТЕКА" }, { "Open", "Открыть" }, { "No replays yet. Record one with F5.", "Записей пока нет. Начните запись клавишей F5." },
         { "LOADED", "ЗАГРУЖЕНА" }, { "Opening replay", "Открытие записи" },
+        { "Layout", "Раскладка" }, { "Reset Layout", "Сбросить раскладку" }, { "Tools", "Инструменты" },
+        { "Tool panel", "Панель инструмента" }, { "Timeline", "Шкала времени" },
+        { "Name this replay", "Название записи" }, { "Enter starts recording. Esc cancels.", "Enter начинает запись. Esc отменяет." },
+        { "Start recording", "Начать запись" }, { "Cancel", "Отмена" },
+        { "Name", "Название" }, { "Date / Time", "Дата / время" }, { "Duration", "Длительность" }, { "Size", "Размер" }, { "Map / Area", "Карта / область" },
+        { "Load", "Загрузить" }, { "Rename", "Переименовать" }, { "Delete", "Удалить" },
+        { "Load replay?", "Загрузить запись?" },
+        { "Teleporting to the recording location comes with Milestone 3. For now loading does not move you; the replay plays from your current position.",
+          "Перемещение к месту записи появится в этапе 3. Пока загрузка вас не перемещает; запись воспроизводится с текущей позиции." },
+        { "Rename replay", "Переименовать запись" }, { "Save", "Сохранить" }, { "Delete replay?", "Удалить запись?" },
+        { "Delete '%s'? It will be moved to the Recycle Bin together with its bookmarks.",
+          "Удалить «%s»? Запись и её закладки будут перемещены в корзину." },
+        { "This replay is loaded. Load another replay first, then try again.", "Эта запись загружена. Сначала загрузите другую запись." },
+        { "The name can't be empty.", "Название не может быть пустым." },
+        { "Not recorded yet (Milestone 3)", "Пока не записывается (этап 3)" }, { "Game version", "Версия игры" }, { "File", "Файл" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

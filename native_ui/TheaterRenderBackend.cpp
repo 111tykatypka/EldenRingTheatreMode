@@ -79,11 +79,16 @@ public:
  std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
- void command(std::uint32_t kind,std::uint64_t value=0){if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
+ void command(std::uint32_t kind,std::uint64_t value=0,const char*text=nullptr){if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
+  if(kind==TheaterUI::kCommandSetVisibility){set_visibility(value==0?TheaterUI::UiVisibility::Shown:TheaterUI::UiVisibility::Hidden);return;}
   if(kind==theater_ui::stop&&emergency)emergency();std::lock_guard lock(ipc);
   // A scrub produces many seeks and the pipe sends one request per round trip, so only the newest pending seek matters.
   if(kind==theater_ui::seek&&!commands.empty()&&commands.back().command==theater_ui::seek){commands.back().value=value;return;}
-  if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;commands.push_back(r);}}
+  if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;if(text)strncpy_s(r.text,text,_TRUNCATE);commands.push_back(r);}}
+ void set_visibility(TheaterUI::UiVisibility next){if(next!=TheaterUI::UiVisibility::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==TheaterUI::UiVisibility::Shown?2:0;
+  if(next==TheaterUI::UiVisibility::Shown)ClipCursor(nullptr);}
+ // True while an ImGui text field has keyboard focus: F4 and Space then type instead of acting.
+ std::atomic_bool text_input{};
  // F4 toggles Shown/Hidden. Shift+F4 toggles the clean mode that also hides the REC pill.
  void toggle_ui(bool clean){using V=TheaterUI::UiVisibility;const auto current=V(visibility.load());V next;
   if(clean)next=current==V::HiddenClean?V::Hidden:V::HiddenClean;else next=current==V::Shown?V::Hidden:V::Shown;
@@ -156,7 +161,8 @@ public:
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
   if(native_status_visible.load()){std::lock_guard lock(native_status_mutex);frame.nativeStatus=native_status;}
   auto&io=ImGui::GetIO();const bool shown=frame.visibility==TheaterUI::UiVisibility::Shown;io.MouseDrawCursor=false; // the overlay draws its own cursor (TheaterOverlayUI)
-  const auto rects=overlay.Draw(frame,[](void*user,std::uint32_t kind,std::uint64_t value){static_cast<TheaterRenderBackend*>(user)->command(kind,value);},this);
+  const auto rects=overlay.Draw(frame,[](void*user,std::uint32_t kind,std::uint64_t value,const char*text){static_cast<TheaterRenderBackend*>(user)->command(kind,value,text);},this);
+  text_input=shown&&ImGui::GetIO().WantTextInput;
   capture_mouse=shown&&io.WantCaptureMouse;capture_keyboard=shown&&io.WantCaptureKeyboard;return rects;
  }
  void render(IDXGISwapChain*sc,UINT flags){if(flags&DXGI_PRESENT_TEST)return;std::lock_guard lock(graphics);if(failed||!chain||sc!=static_cast<IDXGISwapChain*>(chain.Get()))return;
@@ -217,9 +223,9 @@ LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
  // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
  using theater_hotkeys::Action;using theater_hotkeys::Key;
- if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==Key(Action::ToggleOverlay)){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
+ if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==Key(Action::ToggleOverlay)&&!b.text_input.load()){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
  if(m==WM_KEYDOWN&&w==Key(Action::StopRecording)){b.command(theater_ui::stop);return 0;}
- if((m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR)&&w==Key(Action::TogglePlayback)&&b.owns_playback_key()){
+ if((m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR)&&w==Key(Action::TogglePlayback)&&b.owns_playback_key()&&!b.text_input.load()){
   if(m==WM_KEYDOWN&&!(l&(1LL<<30)))b.toggle_playback();return 0;}
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
  if(m==WM_MOUSEMOVE)b.os_mouse_tick=GetTickCount64();
@@ -323,7 +329,8 @@ extern "C" void tm_render_shutdown(){auto&b=backend();b.running=false;if(b.clien
 extern "C" int tm_render_test_ui(){
  auto&b=backend();auto*c=ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.DeltaTime=1.f/60;
  // No renderer backend here: let the atlas build on the CPU as the legacy path does.
- b.overlay.Init(io);unsigned char*p=nullptr;int w=0,h=0;io.Fonts->GetTexDataAsRGBA32(&p,&w,&h);
+ b.overlay.Init(io);io.IniFilename=nullptr; // never touch the user's saved layout from a test
+ unsigned char*p=nullptr;int w=0,h=0;io.Fonts->GetTexDataAsRGBA32(&p,&w,&h);
  {std::lock_guard lock(b.ipc);b.snapshot={};b.snapshot.loaded=1;b.snapshot.connected=1;b.snapshot.player_found=1;b.snapshot.duration_ns=134'500'000'000;b.snapshot.time_ns=26'300'000'000;
   b.snapshot.count=16;b.snapshot.total=40;b.snapshot.phase=2;b.snapshot.recording_state=theater_ui::record_recording;b.snapshot.recording_ns=83'400'000'000;b.snapshot.recording_samples=2502;
   for(unsigned i=0;i<16;++i)b.snapshot.actors[i].id=i+1;

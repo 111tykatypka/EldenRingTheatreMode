@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iterator>
 #include <vector>
@@ -16,6 +17,8 @@ namespace
 {
     using namespace Theme;
 
+    // Movable, resizable panels with a title bar (the grab area). Scrolling is handled inside.
+    constexpr ImGuiWindowFlags kPanel = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     constexpr ImGuiWindowFlags kRegion = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking |
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
@@ -95,6 +98,17 @@ void Overlay::Init(ImGuiIO& io)
 {
     // The overlay draws its own cursor; the platform backend must not call SetCursor.
     io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+    // Panel positions, sizes, collapsed and docked state are saved by ImGui in their own file.
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
+    {
+        static std::string layoutIni;
+        const auto settings = SettingsPath();
+        wchar_t off[4]{};
+        const bool disabled = GetEnvironmentVariableW(L"THEATER_OVERLAY_NO_LAYOUT_FILE", off, 4) > 0; // tests
+        if (disabled) io.IniFilename = nullptr;
+        else if (!settings.empty()) { layoutIni = (settings.parent_path() / L"TheaterOverlayLayout.ini").string(); io.IniFilename = layoutIni.c_str(); }
+    }
     ui_.fonts = LoadFonts(io);
     iconFont_ = LoadIconFont(io);
     ui_.visibility = UiVisibility::Hidden;
@@ -116,6 +130,8 @@ void Overlay::LoadSettings()
         else if (key == "ui_scale") ui_.layout.uiScaleUser = std::clamp(value, 0.75f, 1.5f);
         else if (key == "panel_open") ui_.layout.panelOpen = value != 0;
         else if (key == "tool" && value >= 0 && value <= (float)Tool::Settings) ui_.activeTool = (Tool)(int)value;
+        else if (key == "show_tools") showTools_ = value != 0;
+        else if (key == "show_timeline") showTimeline_ = value != 0;
     }
 }
 
@@ -128,12 +144,14 @@ void Overlay::SaveSettings() const
     out << "language " << (language == Lang::Russian ? 1 : 0) << "\n"
         << "ui_scale " << ui_.layout.uiScaleUser << "\n"
         << "panel_open " << (ui_.layout.panelOpen ? 1 : 0) << "\n"
-        << "tool " << (int)ui_.activeTool << "\n";
+        << "tool " << (int)ui_.activeTool << "\n"
+        << "show_tools " << (showTools_ ? 1 : 0) << "\n"
+        << "show_timeline " << (showTimeline_ ? 1 : 0) << "\n";
 }
 
-void Overlay::Emit(std::uint32_t command, std::uint64_t value)
+void Overlay::Emit(std::uint32_t command, std::uint64_t value, const char* text)
 {
-    if (emit_) emit_(emitUser_, command, value);
+    if (emit_) emit_(emitUser_, command, value, text);
 }
 
 void Overlay::PushFont(Font role, float extraScale)
@@ -207,12 +225,25 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     }
 
     Observe(f);
+    // F5 on the host asks for a name; the first linked snapshot only sets the baseline. Works while
+    // hidden too: the name box shows the overlay, and hides it again when it closes.
+    if (!nameRequestSeen_) { if (f.hostLinked) { nameRequestSeen_ = true; lastNameRequest_ = f.snapshot.name_request; } }
+    else if (f.snapshot.name_request != lastNameRequest_)
+    {
+        lastNameRequest_ = f.snapshot.name_request;
+        if (!IsRecording(f.snapshot)) OpenNameDialog(f, f.visibility != UiVisibility::Shown);
+    }
     if (ui_.visibility == UiVisibility::Shown)
     {
         PushFont(Font::Body);
-        DrawRail(f);
+        DrawMenuBar();
+        if (showTools_) DrawRail(f);
         if (ui_.layout.panelOpen) DrawPanel(f);
-        DrawSequencer(f);
+        if (showTimeline_) DrawSequencer(f);
+        DrawDialogs(f);
+        if (resetLayout_) { resetLayout_ = false; SaveSettings(); }
+        if (showTools_ != savedTools_ || showTimeline_ != savedTimeline_ || ui_.layout.panelOpen != savedPanel_)
+        { savedTools_ = showTools_; savedTimeline_ = showTimeline_; savedPanel_ = ui_.layout.panelOpen; SaveSettings(); }
         ImGui::PopFont();
         DrawCursor();
     }
@@ -221,18 +252,68 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     return ui_.rects;
 }
 
+// Panels start at their solved default rect (below the menu bar) the first time, or every time
+// Layout > Reset Layout is chosen. After Begin the window is clamped so its title bar stays
+// reachable, which also repairs saved layouts after a resolution change.
+bool Overlay::BeginPanel(const char* id, const char* title, ImVec2 defMin, ImVec2 defMax, ImVec2 minSize, bool* open)
+{
+    ImVec2 pos = defMin, size(defMax.x - defMin.x, defMax.y - defMin.y);
+    if (pos.y < menuH_) { size.y -= menuH_ - pos.y; pos.y = menuH_; }
+    size.x = std::max(size.x, minSize.x); size.y = std::max(size.y, minSize.y);
+    const ImGuiCond cond = resetLayout_ ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+    ImGui::SetNextWindowPos(pos, cond);
+    ImGui::SetNextWindowSize(size, cond);
+    if (resetLayout_) { ImGui::SetNextWindowDockID(0, ImGuiCond_Always); ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always); }
+    ImGui::SetNextWindowSizeConstraints(minSize, ImVec2(FLT_MAX, FLT_MAX));
+    char label[128];
+    snprintf(label, sizeof(label), "%s%s", title, id);
+    const bool shown = ImGui::Begin(label, open, kPanel);
+    if (!ImGui::IsWindowDocked())
+    {
+        const ImVec2 display = ImGui::GetIO().DisplaySize, p = ImGui::GetWindowPos(), sz = ImGui::GetWindowSize();
+        // At least `keep` px of the title bar stay on screen (the whole width for narrow panels).
+        const float keep = std::min(sz.x, Px(96, ui_.rects.uiScale)), titleH = ImGui::GetFrameHeight();
+        ImVec2 c(std::clamp(p.x, keep - sz.x, std::max(keep - sz.x, display.x - keep)),
+                 std::clamp(p.y, menuH_, std::max(menuH_, display.y - titleH)));
+        if (c.x != p.x || c.y != p.y) ImGui::SetWindowPos(c);
+    }
+    return shown;
+}
+
+void Overlay::DrawMenuBar()
+{
+    menuH_ = 0.0f;
+    if (!ImGui::BeginMainMenuBar()) return;
+    menuH_ = ImGui::GetWindowHeight();
+    if (ImGui::BeginMenu(T(Str::MenuLayout)))
+    {
+        if (ImGui::MenuItem(T(Str::ResetLayout)))
+        { resetLayout_ = true; showTools_ = true; showTimeline_ = true; ui_.layout.panelOpen = true; }
+        ImGui::Separator();
+        ImGui::MenuItem(T(Str::PanelTools), nullptr, &showTools_);
+        ImGui::MenuItem(T(Str::PanelSide), nullptr, &ui_.layout.panelOpen);
+        ImGui::MenuItem(T(Str::PanelTimeline), nullptr, &showTimeline_);
+        ImGui::EndMenu();
+    }
+    const char* hint = T(Str::HideUiHint);
+    const float w = ImGui::CalcTextSize(hint).x + ImGui::GetStyle().ItemSpacing.x * 2;
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - w);
+    ImGui::TextDisabled("%s", hint);
+    ImGui::EndMainMenuBar();
+}
+
 void Overlay::DrawRail(const OverlayFrame& f)
 {
     const float s = ui_.rects.uiScale;
-    ImGui::SetNextWindowPos(ui_.rects.railMin);
-    ImGui::SetNextWindowSize(ImVec2(ui_.rects.railMax.x - ui_.rects.railMin.x, ui_.rects.railMax.y - ui_.rects.railMin.y));
+    const float btn = Px(Metric::RailButton, s);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, Color::PanelBgSolid.Vec4());
-    ImGui::Begin("##theater_rail", nullptr, kRegion);
+    const bool visible = BeginPanel("###tools", T(Str::PanelTools), ui_.rects.railMin, ui_.rects.railMax,
+        ImVec2(btn + Px(8, s), (btn + Px(4, s)) * 9 + Px(60, s)), &showTools_);
+    if (!visible) { ImGui::End(); ImGui::PopStyleColor(); ImGui::PopStyleVar(); return; }
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 o = ImGui::GetWindowPos();
-    const float w = ui_.rects.railMax.x - ui_.rects.railMin.x, btn = Px(Metric::RailButton, s);
-    dl->AddLine(ImVec2(o.x + w - 1, o.y), ImVec2(o.x + w - 1, ui_.rects.railMax.y), Color::BorderSubtle.U32());
+    const ImVec2 o(ImGui::GetWindowPos().x, ImGui::GetCursorScreenPos().y);
+    const float w = ImGui::GetWindowWidth(), railBottom = ImGui::GetWindowPos().y + ImGui::GetWindowHeight();
 
     // Brand diamond.
     const ImVec2 c(o.x + w * 0.5f, o.y + Px(26, s));
@@ -282,7 +363,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     for (const auto& it : top) { railButton(it, y, false); y += btn + Px(4, s); }
 
     const bool nativeWarning = f.nativeStatus.find("ERROR") != std::string::npos;
-    float yb = ui_.rects.railMax.y - Px(12, s) - (btn + Px(4, s)) * 3;
+    float yb = std::max(y + Px(8, s), railBottom - Px(12, s) - (btn + Px(4, s)) * 3);
     for (const auto& it : bottom) { railButton(it, yb, it.tool == Tool::Debug && nativeWarning); yb += btn + Px(4, s); }
 
     // Hide UI sits at the very bottom of the rail; the same action as F4.
@@ -314,26 +395,15 @@ void Overlay::DrawPanel(const OverlayFrame& f)
 {
     const float s = ui_.rects.uiScale;
     const auto& snap = f.snapshot;
-    ImGui::SetNextWindowPos(ui_.rects.panelMin);
-    ImGui::SetNextWindowSize(ImVec2(ui_.rects.panelMax.x - ui_.rects.panelMin.x, ui_.rects.panelMax.y - ui_.rects.panelMin.y));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(Space::LG, s), 0));
-    ImGui::Begin("##theater_panel", nullptr, kRegion);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 o = ImGui::GetWindowPos(), sz = ImGui::GetWindowSize();
-    dl->AddLine(ImVec2(o.x + sz.x - 1, o.y), ImVec2(o.x + sz.x - 1, o.y + sz.y), Color::BorderSubtle.U32());
-
-    // Header: tool name in PanelTitle caps.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(Space::LG, s), Px(Space::MD, s)));
+    // The title bar shows the tool name and is the grab area; the window id stays the same per tool.
     const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings };
-    const float header = Px(Metric::PanelHeaderHeight, s);
-    dl->AddRectFilled(o, ImVec2(o.x + sz.x - 1, o.y + header), Color::HeaderBg.U32());
-    dl->AddLine(ImVec2(o.x, o.y + header), ImVec2(o.x + sz.x - 1, o.y + header), Color::BorderSubtle.U32());
-    PushFont(Font::PanelTitle);
-    ImGui::SetCursorScreenPos(ImVec2(o.x + Px(Space::LG, s), o.y + (header - ImGui::GetFontSize()) * 0.5f));
-    ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
-    ImGui::TextUnformatted(T(titles[std::min<int>((int)ui_.activeTool, 6)]));
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
-    ImGui::SetCursorScreenPos(ImVec2(o.x + Px(Space::LG, s), o.y + header + Px(Space::MD, s)));
+    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 6)]), ui_.rects.panelMin, ui_.rects.panelMax,
+        ImVec2(Px(260, s), Px(320, s)), &ui_.layout.panelOpen);
+    if (!visible) { ImGui::End(); ImGui::PopStyleVar(); return; }
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 sz = ImGui::GetWindowSize();
+    (void)dl;
 
     auto section = [&](const char* title)
     {
@@ -414,69 +484,8 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     case Tool::Look: section(T(Str::NotYetAvailable)); note(Str::LookNotes); break;
     case Tool::Export: section(T(Str::NotYetAvailable)); note(Str::ExportNotes); break;
     case Tool::Replays:
-    {
-        section(T(Str::Replays));
-        row(T(Str::Replays), T(snap.loaded ? Str::ReplayLoaded : Str::NoReplay), snap.loaded ? Color::AccentGreen : Color::TextSecondary);
-        char d[32]; FormatTime(snap.duration_ns / 1e9, d, sizeof(d));
-        PushFont(Font::Mono); row(T(Str::Duration), d, Color::TextPrimary); ImGui::PopFont();
-        note(Str::ReplaysNotes);
-        const bool rec = IsRecording(snap);
-        ImGui::Dummy(ImVec2(0, Px(Space::SM, s)));
-        char label[96]; char icon[4];
-        snprintf(label, sizeof(label), "%s  %s", IconUtf8(rec ? Glyph::Stop : Glyph::Record, icon), T(rec ? Str::StopRecording : Str::Record));
-        if (FlatButton("rec_panel", label, ImVec2(-1, Px(Metric::TextButtonHeight, s)), rec ? Color::TintRed : Color::FrameBg, rec ? Color::AccentRed : Color::TextPrimary, f.hostLinked))
-            Emit(rec ? theater_ui::record_stop : theater_ui::record_start);
-
-        // Library: newest first, one page at a time from the host. Click a row to open it.
-        section(T(Str::Library));
-        const unsigned shown = std::min<std::uint32_t>(snap.replay_count, theater_ui::replay_page_size);
-        if (!shown) note(Str::NoReplays);
-        const float rowH = Px(Metric::ListRowHeight, s) + Px(8, s);
-        const bool canOpen = f.hostLinked && !snap.active && !rec;
-        for (unsigned i = 0; i < shown; ++i)
-        {
-            const auto& e = snap.replays[i];
-            const ImVec2 p0 = ImGui::GetCursorScreenPos();
-            const float w = ImGui::GetContentRegionAvail().x;
-            ImGui::PushID((int)e.index);
-            ImGui::BeginDisabled(!canOpen);
-            const bool clicked = ImGui::Selectable("##replay", e.loaded != 0, 0, ImVec2(w, rowH));
-            ImGui::EndDisabled();
-            ImGui::PopID();
-            ImDrawList* dl2 = ImGui::GetWindowDrawList();
-            dl2->PushClipRect(p0, ImVec2(p0.x + w, p0.y + rowH), true);
-            PushFont(Font::BodyStrong);
-            dl2->AddText(ImVec2(p0.x + Px(6, s), p0.y + Px(3, s)), (canOpen ? Color::TextPrimary : Color::TextMuted).U32(), e.name);
-            ImGui::PopFont();
-            char meta[96], dur[32];
-            FormatTime(e.duration_ns / 1e9, dur, sizeof(dur));
-            snprintf(meta, sizeof(meta), "%s   %.1f MB", dur, e.bytes / (1024.0 * 1024.0));
-            PushFont(Font::MonoSmall);
-            dl2->AddText(ImVec2(p0.x + Px(6, s), p0.y + rowH * 0.5f + Px(1, s)), Color::TextMuted.U32(), meta);
-            if (e.loaded)
-            {
-                const char* tag = T(Str::LoadedTag);
-                const ImVec2 tsz = ImGui::CalcTextSize(tag);
-                dl2->AddText(ImVec2(p0.x + w - tsz.x - Px(8, s), p0.y + rowH * 0.5f + Px(1, s)), Color::AccentGreen.U32(), tag);
-            }
-            ImGui::PopFont();
-            dl2->PopClipRect();
-            if (clicked && canOpen && !e.loaded) { Emit(theater_ui::replay_open, e.index); }
-        }
-        if (snap.replay_total > theater_ui::replay_page_size)
-        {
-            ImGui::BeginDisabled(snap.replay_offset == 0);
-            if (ImGui::Button(T(Str::Previous))) Emit(theater_ui::replay_page, snap.replay_offset >= theater_ui::replay_page_size ? snap.replay_offset - theater_ui::replay_page_size : 0);
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled(snap.replay_offset + theater_ui::replay_page_size >= snap.replay_total);
-            if (ImGui::Button(T(Str::NextPage))) Emit(theater_ui::replay_page, snap.replay_offset + theater_ui::replay_page_size);
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::TextDisabled("%u-%u / %u", snap.replay_offset + 1, snap.replay_offset + shown, snap.replay_total);
-        }
+        DrawLibrary(f);
         break;
-    }
     case Tool::Debug:
     {
         section(T(Str::NativeGhost));
@@ -558,18 +567,313 @@ void Overlay::DrawEventLog(float height)
     ImGui::PopStyleColor();
 }
 
+// ---------------------------------------------------------------------------
+// Replay Library and dialogs
+// ---------------------------------------------------------------------------
+namespace
+{
+    void FormatDate(std::uint64_t unix, char* out, size_t n)
+    {
+        if (!unix) { snprintf(out, n, "-"); return; }
+        const std::time_t t = (std::time_t)unix;
+        std::tm local{};
+        localtime_s(&local, &t);
+        std::strftime(out, n, "%Y-%m-%d %H:%M", &local);
+    }
+    void FormatSize(std::uint64_t bytes, char* out, size_t n)
+    {
+        if (bytes >= 1024ull * 1024ull) snprintf(out, n, "%.1f MB", bytes / (1024.0 * 1024.0));
+        else snprintf(out, n, "%.0f KB", bytes / 1024.0);
+    }
+    const theater_ui::Replay* FindReplay(const theater_ui::Snapshot& s, int index)
+    {
+        for (unsigned i = 0; i < std::min<std::uint32_t>(s.replay_count, theater_ui::replay_page_size); ++i)
+            if ((int)s.replays[i].index == index) return &s.replays[i];
+        return nullptr;
+    }
+    std::uint64_t RecordedUnix(const theater_ui::Replay& r) { return r.recorded_unix ? r.recorded_unix : r.modified_unix; }
+}
+
+void Overlay::OpenNameDialog(const OverlayFrame& f, bool restoreHidden)
+{
+    if (nameDialog_) return;
+    nameDialog_ = true;
+    nameFocus_ = true;
+    restoreHidden_ = restoreHidden;
+    const char* suggested = f.snapshot.default_name[0] ? f.snapshot.default_name : "Replay";
+    strncpy_s(nameBuf_, suggested, _TRUNCATE);
+    if (restoreHidden) Emit(kCommandSetVisibility, 0); // typing needs the overlay (and its input block)
+}
+
+void Overlay::DrawLibrary(const OverlayFrame& f)
+{
+    const float s = ui_.rects.uiScale;
+    const auto& snap = f.snapshot;
+    const bool rec = IsRecording(snap);
+
+    // Record (with the name box first).
+    char label[96]; char icon[4];
+    snprintf(label, sizeof(label), "%s  %s", IconUtf8(rec ? Glyph::Stop : Glyph::Record, icon), T(rec ? Str::StopRecording : Str::Record));
+    if (FlatButton("rec_panel", label, ImVec2(-1, Px(Metric::TextButtonHeight, s)), rec ? Color::TintRed : Color::FrameBg, rec ? Color::AccentRed : Color::TextPrimary, f.hostLinked))
+    {
+        if (rec) Emit(theater_ui::record_stop);
+        else OpenNameDialog(f, false);
+    }
+    if (rec && snap.recording_name[0])
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, Color::AccentRed.Vec4());
+        ImGui::TextUnformatted(snap.recording_name);
+        ImGui::PopStyleColor();
+    }
+    ImGui::Dummy(ImVec2(0, Px(Space::SM, s)));
+
+    // Sortable list. Sorting happens on the host so paging stays consistent.
+    const unsigned shown = std::min<std::uint32_t>(snap.replay_count, theater_ui::replay_page_size);
+    if (!shown)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+        ImGui::TextWrapped("%s", T(Str::NoReplays));
+        ImGui::PopStyleColor();
+    }
+    const float listH = std::max(Px(140, s), ImGui::GetContentRegionAvail().y * 0.55f);
+    const ImGuiTableFlags flags = ImGuiTableFlags_Sortable | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+        ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit;
+    if (shown && ImGui::BeginTable("##library", 5, flags, ImVec2(0, listH)))
+    {
+        const auto defaultSort = [&](int column) {
+            const bool active = (int)snap.sort_key == column;
+            return (active ? ImGuiTableColumnFlags_DefaultSort : 0) |
+                   (active && !snap.sort_descending ? ImGuiTableColumnFlags_PreferSortAscending : ImGuiTableColumnFlags_PreferSortDescending);
+        };
+        // Columns map to the host sort keys: 0 date, 1 size, 2 name, 3 duration; area is not sortable yet.
+        ImGui::TableSetupScrollFreeze(1, 1);
+        ImGui::TableSetupColumn(T(Str::ColName), defaultSort(2) | ImGuiTableColumnFlags_WidthFixed, Px(170, s), 2);
+        ImGui::TableSetupColumn(T(Str::ColDate), defaultSort(0), Px(120, s), 0);
+        ImGui::TableSetupColumn(T(Str::ColDuration), defaultSort(3), Px(70, s), 3);
+        ImGui::TableSetupColumn(T(Str::ColSize), defaultSort(1), Px(70, s), 1);
+        ImGui::TableSetupColumn(T(Str::ColArea), ImGuiTableColumnFlags_NoSort, Px(110, s), 4);
+        ImGui::TableHeadersRow();
+        if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs(); specs && specs->SpecsDirty && specs->SpecsCount > 0)
+        {
+            const auto& spec = specs->Specs[0];
+            const std::uint32_t key = spec.ColumnUserID;
+            const bool descending = spec.SortDirection == ImGuiSortDirection_Descending;
+            if (key < theater_ui::sort_key_count && (key != snap.sort_key || descending != (snap.sort_descending != 0)))
+                Emit(theater_ui::replay_sort, key * 2 + (descending ? 1 : 0));
+            specs->SpecsDirty = false;
+        }
+        for (unsigned i = 0; i < shown; ++i)
+        {
+            const auto& e = snap.replays[i];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID((int)e.index);
+            const bool selected = selectedReplay_ == (int)e.index;
+            if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+            {
+                selectedReplay_ = (int)e.index;
+                if (ImGui::IsMouseDoubleClicked(0)) pendingDialog_ = 1;
+            }
+            ImGui::SameLine(0, 0);
+            if (e.loaded) ImGui::PushStyleColor(ImGuiCol_Text, Color::AccentGreen.Vec4());
+            ImGui::TextUnformatted(e.name);
+            if (e.loaded) ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s", e.name, e.file);
+            ImGui::PopID();
+            char text[48];
+            ImGui::TableSetColumnIndex(1); FormatDate(RecordedUnix(e), text, sizeof(text)); ImGui::TextUnformatted(text);
+            ImGui::TableSetColumnIndex(2); FormatTime(e.duration_ns / 1e9, text, sizeof(text)); ImGui::TextUnformatted(text);
+            ImGui::TableSetColumnIndex(3); FormatSize(e.bytes, text, sizeof(text)); ImGui::TextUnformatted(text);
+            ImGui::TableSetColumnIndex(4); ImGui::TextDisabled("%s", e.area[0] ? e.area : "-");
+        }
+        ImGui::EndTable();
+    }
+    if (snap.replay_total > theater_ui::replay_page_size)
+    {
+        ImGui::BeginDisabled(snap.replay_offset == 0);
+        if (ImGui::Button(T(Str::Previous))) Emit(theater_ui::replay_page, snap.replay_offset >= theater_ui::replay_page_size ? snap.replay_offset - theater_ui::replay_page_size : 0);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(snap.replay_offset + theater_ui::replay_page_size >= snap.replay_total);
+        if (ImGui::Button(T(Str::NextPage))) Emit(theater_ui::replay_page, snap.replay_offset + theater_ui::replay_page_size);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("%u-%u / %u", snap.replay_offset + 1, snap.replay_offset + shown, snap.replay_total);
+    }
+
+    // Actions for the selected replay. The loaded or recording replay can't be renamed or deleted.
+    const theater_ui::Replay* sel = FindReplay(snap, selectedReplay_);
+    const bool busy = rec || snap.active;
+    ImGui::BeginDisabled(!sel || !f.hostLinked || busy);
+    if (ImGui::Button(T(Str::Load))) pendingDialog_ = 1;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!sel || !f.hostLinked);
+    if (ImGui::Button(T(Str::Rename)))
+    {
+        if (sel->loaded) { message_ = T(Str::LoadedBlocked); messageError_ = true; messageUntil_ = f.now + 6; }
+        else { strncpy_s(renameBuf_, sel->name, _TRUNCATE); pendingDialog_ = 2; }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T(Str::Delete)))
+    {
+        if (sel->loaded) { message_ = T(Str::LoadedBlocked); messageError_ = true; messageUntil_ = f.now + 6; }
+        else pendingDialog_ = 3;
+    }
+    ImGui::EndDisabled();
+
+    // Result of the last host action, or a local refusal.
+    if (snap.library_message_id != lastMessageId_)
+    {
+        lastMessageId_ = snap.library_message_id;
+        if (snap.library_message[0]) { message_ = snap.library_message; messageError_ = snap.library_message_error != 0; messageUntil_ = f.now + 8; }
+    }
+    if (!message_.empty() && f.now < messageUntil_)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, (messageError_ ? Color::AccentRed : Color::AccentGreen).Vec4());
+        ImGui::TextWrapped("%s", message_.c_str());
+        ImGui::PopStyleColor();
+    }
+}
+
+void Overlay::DrawDialogs(const OverlayFrame& f)
+{
+    const float s = ui_.rects.uiScale;
+    const auto& snap = f.snapshot;
+
+    const ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.45f);
+    auto centerNext = [&](float width) {
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(Px(width, s), 0), ImGuiCond_Appearing);
+    };
+    auto closeName = [&](bool start) {
+        if (start)
+        {
+            std::string name(nameBuf_);
+            if (name.find_first_not_of(" \t") == std::string::npos) name = snap.default_name;
+            Emit(theater_ui::record_named, 0, name.c_str());
+        }
+        nameDialog_ = false;
+        ImGui::CloseCurrentPopup();
+        if (restoreHidden_) { restoreHidden_ = false; Emit(kCommandSetVisibility, 1); }
+    };
+
+    // Name this replay.
+    if (nameDialog_ && !ImGui::IsPopupOpen("###name")) ImGui::OpenPopup("###name");
+    centerNext(420);
+    char title[96];
+    snprintf(title, sizeof(title), "%s###name", T(Str::NameTitle));
+    if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+        ImGui::TextUnformatted(T(Str::NameHint));
+        ImGui::PopStyleColor();
+        if (nameFocus_) { ImGui::SetKeyboardFocusHere(); nameFocus_ = false; }
+        ImGui::SetNextItemWidth(Px(380, s));
+        const bool enter = ImGui::InputText("##name", nameBuf_, sizeof(nameBuf_), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        if (enter) closeName(true);
+        else if (ImGui::Button(T(Str::StartRecordingBtn), ImVec2(Px(180, s), 0))) closeName(true);
+        else
+        {
+            ImGui::SameLine();
+            if (ImGui::Button(T(Str::Cancel), ImVec2(Px(120, s), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) closeName(false);
+        }
+        ImGui::EndPopup();
+    }
+
+    // Library dialogs, opened from the Replays panel (next frame, outside its window).
+    const char* ids[] = { "", "###load", "###rename", "###delete" };
+    if (pendingDialog_) { ImGui::OpenPopup(ids[pendingDialog_]); pendingDialog_ = 0; }
+    const theater_ui::Replay* sel = FindReplay(snap, selectedReplay_);
+
+    centerNext(460);
+    snprintf(title, sizeof(title), "%s###load", T(Str::LoadTitle));
+    if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        if (!sel) ImGui::CloseCurrentPopup();
+        else
+        {
+            char date[48], dur[32], size[32];
+            FormatDate(RecordedUnix(*sel), date, sizeof(date)); FormatTime(sel->duration_ns / 1e9, dur, sizeof(dur)); FormatSize(sel->bytes, size, sizeof(size));
+            PushFont(Font::BodyStrong); ImGui::TextUnformatted(sel->name); ImGui::PopFont();
+            auto row = [&](Str label, const char* value) {
+                ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4()); ImGui::TextUnformatted(T(label)); ImGui::PopStyleColor();
+                ImGui::SameLine(Px(150, s)); ImGui::TextUnformatted(value);
+            };
+            row(Str::ColDate, date); row(Str::ColDuration, dur); row(Str::ColSize, size);
+            row(Str::ColArea, sel->area[0] ? sel->area : T(Str::AreaUnknown));
+            row(Str::GameVersion, sel->game_version[0] ? sel->game_version : "-");
+            row(Str::FileLabel, sel->file);
+            ImGui::Dummy(ImVec2(0, Px(4, s)));
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::AccentAmber.Vec4());
+            ImGui::PushTextWrapPos(Px(440, s));
+            ImGui::TextUnformatted(T(Str::LoadTeleportNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            if (ImGui::Button(T(Str::Load), ImVec2(Px(140, s), 0))) { Emit(theater_ui::replay_open, (std::uint64_t)sel->index); ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine();
+            if (ImGui::Button(T(Str::Cancel), ImVec2(Px(120, s), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    centerNext(420);
+    snprintf(title, sizeof(title), "%s###rename", T(Str::RenameTitle));
+    if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        if (!sel) ImGui::CloseCurrentPopup();
+        else
+        {
+            if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+            ImGui::SetNextItemWidth(Px(380, s));
+            const bool enter = ImGui::InputText("##rename", renameBuf_, sizeof(renameBuf_), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+            const bool empty = std::string(renameBuf_).find_first_not_of(" \t") == std::string::npos;
+            if (empty) { ImGui::PushStyleColor(ImGuiCol_Text, Color::AccentRed.Vec4()); ImGui::TextUnformatted(T(Str::NameEmpty)); ImGui::PopStyleColor(); }
+            ImGui::BeginDisabled(empty);
+            if ((enter && !empty) || ImGui::Button(T(Str::Save), ImVec2(Px(140, s), 0)))
+            { Emit(theater_ui::replay_rename, (std::uint64_t)sel->index, renameBuf_); ImGui::CloseCurrentPopup(); }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button(T(Str::Cancel), ImVec2(Px(120, s), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    centerNext(420);
+    snprintf(title, sizeof(title), "%s###delete", T(Str::DeleteTitle));
+    if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        if (!sel) ImGui::CloseCurrentPopup();
+        else
+        {
+            char body[256];
+            snprintf(body, sizeof(body), T(Str::DeleteBody), sel->name);
+            ImGui::PushTextWrapPos(Px(400, s));
+            ImGui::TextUnformatted(body);
+            ImGui::PopTextWrapPos();
+            ImGui::PushStyleColor(ImGuiCol_Button, Color::TintRed.Vec4());
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::AccentRed.Vec4());
+            if (ImGui::Button(T(Str::Delete), ImVec2(Px(140, s), 0)))
+            { Emit(theater_ui::replay_delete, (std::uint64_t)sel->index); selectedReplay_ = -1; ImGui::CloseCurrentPopup(); }
+            ImGui::PopStyleColor(2);
+            ImGui::SameLine();
+            if (ImGui::Button(T(Str::Cancel), ImVec2(Px(120, s), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
 void Overlay::DrawSequencer(const OverlayFrame& f)
 {
     const float s = ui_.rects.uiScale;
-    const ImVec2 min = ui_.rects.sequencerMin, max = ui_.rects.sequencerMax;
-    ImGui::SetNextWindowPos(min);
-    ImGui::SetNextWindowSize(ImVec2(max.x - min.x, max.y - min.y));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, Color::TimelineBg.Alpha(255).Vec4());
-    ImGui::Begin("##theater_sequencer", nullptr, kRegion);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddLine(min, ImVec2(max.x, min.y), Color::Border.U32());
     const float toolbar = Px(Layout.SequencerToolbar, s);
+    const bool visible = BeginPanel("###timeline", T(Str::PanelTimeline), ui_.rects.sequencerMin, ui_.rects.sequencerMax,
+        ImVec2(Px(820, s), toolbar + Px(Layout.RulerHeight + Layout.NavigatorHeight + Metric::TrackRowHeight * 2, s) + ImGui::GetFrameHeight()), &showTimeline_);
+    if (!visible) { ImGui::End(); ImGui::PopStyleColor(); ImGui::PopStyleVar(); return; }
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const ImVec2 max(ImGui::GetWindowPos().x + ImGui::GetWindowWidth(), ImGui::GetWindowPos().y + ImGui::GetWindowHeight());
     DrawToolbar(f, toolbar);
     DrawTimeline(f, ImVec2(min.x, min.y + toolbar), max);
     ImGui::End();
@@ -581,7 +885,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
 {
     const float s = ui_.rects.uiScale;
     const auto& snap = f.snapshot;
-    const ImVec2 o = ImGui::GetWindowPos();
+    const ImVec2 o(ImGui::GetWindowPos().x, ImGui::GetCursorScreenPos().y); // below the title bar
     const float w = ImGui::GetWindowSize().x;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(o, ImVec2(o.x + w, o.y + height), Color::HeaderBg.U32());
@@ -666,7 +970,10 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     rx -= recW + Px(Space::MD, s);
     ImGui::SetCursorScreenPos(ImVec2(rx, y));
     if (FlatButton("rec", recLabel, ImVec2(recW, bh), rec ? Color::TintRed : Color::FrameBg, rec ? Color::AccentRed : Color::TextPrimary, f.hostLinked))
-        Emit(rec ? theater_ui::record_stop : theater_ui::record_start);
+    {
+        if (rec) Emit(theater_ui::record_stop);
+        else OpenNameDialog(f, false);
+    }
     Tooltip(rec ? "F6" : "F5");
 }
 

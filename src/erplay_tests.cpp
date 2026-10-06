@@ -65,6 +65,17 @@ int main() {
     { std::fstream f(damaged,std::ios::binary|std::ios::in|std::ios::out); f.seekp(-16,std::ios::end); char c{}; f.write(&c,1); }
     rejected=false; try { (void)validate(damaged); } catch(const std::runtime_error&) { rejected=true; }
     assert(rejected);
+    // Display-name rename: longer and shorter titles, body unchanged, samples still readable.
+    {
+        const auto renamed=dir/"rename.erplay";std::filesystem::copy_file(file,renamed);
+        set_title(renamed,"Длинное новое имя записи для проверки заголовка");
+        auto r=validate(renamed);assert(r.sample_count==5&&r.duration_ns==66'800'000&&r.metadata.title=="Длинное новое имя записи для проверки заголовка");
+        assert(r.metadata.description=="Unicode metadata"&&r.metadata.tags=="test,player");
+        set_title(renamed,"x");r=validate(renamed);assert(r.metadata.title=="x"&&r.sample_count==5);
+        Reader reader(renamed);assert(reader.sample(4).position.x==4.0f);
+        rejected=false;try{set_title(renamed,"");}catch(const std::invalid_argument&){rejected=true;}assert(rejected&&validate(renamed).metadata.title=="x");
+        assert(!std::filesystem::exists(dir/"rename.erplay.rename.tmp"));
+    }
     std::filesystem::remove_all(dir);
     std::cout << "ERPLAY tests passed\n";
 }

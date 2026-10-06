@@ -62,6 +62,16 @@ struct App {
   game_launcher::Launcher launcher;
   fs::path loader_path, game_path;
   std::atomic_bool show_debug_console{}; // launcher checkbox; YAFSML console window
+  // Named recordings: F5 asks the overlay for a name (name_request) when it is connected;
+  // the next START uses pending_record_name (display name + file name), then clears it.
+  std::mutex names_mutex;
+  std::string pending_record_name, recording_name;
+  std::atomic<std::uint32_t> name_request{};
+  // Replay Library sort (persisted in Library.settings) and the last library message for the overlay.
+  std::atomic<std::uint32_t> sort_key{0};
+  std::atomic_bool sort_descending{true};
+  std::string library_message;
+  std::uint32_t library_message_id{}, library_message_error{};
   std::atomic_bool sample_pipe_ready{};
   game_control::Client control;
   std::unique_ptr<in_game_replay::Controller> game_replay;
