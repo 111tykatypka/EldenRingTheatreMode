@@ -273,8 +273,15 @@ void matchPlayerShadowFlags(U actor) {
  U gi=get<U>(gm+0x10),pi=get<U>(pm+0x10);if(!gi||!pi)return;
  static constexpr U flags[]{0x6AC,0x6AD,0x6B6};unsigned written=0;
  for(U o:flags){uint8_t g{},p{};if(read(gi+o,&g,1)&&read(pi+o,&p,1)&&g==0&&p==1&&writeByte(gi+o,1))++written;}
+ // Draw-pass words of the model display entity. Live diff: +0x20 is 0x01 on the ghost and 0xBF on
+ // the player (looks like a pass mask: the ghost draws in one pass only, no shadow pass), and
+ // +0x94/+0x280 are 8 on the ghost and 6 on the player (looks like the translucent vs opaque
+ // draw type). M0e copied only the model item flags and the ghost still had no shadow.
+ U gd=get<U>(gm+0x18),pd=get<U>(pm+0x18);unsigned passWords=0;
+ if(gd&&pd){static constexpr U words[]{0x20,0x94,0x280};
+  for(U o:words){uint32_t g{},p{};if(read(gd+o,&g,4)&&read(pd+o,&p,4)&&g!=p){SIZE_T n{};if(WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(gd+o),&p,4,&n)&&n==4)++passWords;}}}
  const auto epoch=snapshot().epoch;
- if(written&&loggedEpoch!=epoch){loggedEpoch=epoch;log("GHOST_RENDER: copied %u player shadow flag(s) to the ghost model (CSFD4ModelItem +0x6AC/+0x6AD/+0x6B6)",written);}
+ if((written||passWords)&&loggedEpoch!=epoch){loggedEpoch=epoch;log("GHOST_RENDER: copied %u model item flag(s) and %u draw-pass word(s) from the player to the ghost (ModelDispEntity +0x20/+0x94/+0x280)",written,passWords);}
 }
 void renderDiff(U actor) {
  U w=world(),player{},recorder{};if(!ready(w,player,recorder)){log("GHOST_RENDER_DIFF: player not ready");return;}
