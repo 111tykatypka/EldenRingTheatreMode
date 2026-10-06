@@ -34,6 +34,7 @@ namespace TheaterUI
         ColName, ColDate, ColDuration, ColSize, ColArea,
         Load, Rename, Delete, LoadTitle, LoadTeleportNote, RenameTitle, Save, DeleteTitle, DeleteBody,
         LoadedBlocked, NameEmpty, AreaUnknown, GameVersion, FileLabel,
+        CopyAll, CopyErrors, Copied, ClickToCopy,
         Count
     };
 
@@ -94,6 +95,8 @@ namespace TheaterUI
         { "This replay is loaded. Load another replay first, then try again.", "Эта запись загружена. Сначала загрузите другую запись." },
         { "The name can't be empty.", "Название не может быть пустым." },
         { "Not recorded yet (Milestone 3)", "Пока не записывается (этап 3)" }, { "Game version", "Версия игры" }, { "File", "Файл" },
+        { "Copy all", "Копировать всё" }, { "Copy errors", "Копировать ошибки" }, { "Copied", "Скопировано" },
+        { "Click to copy this line", "Нажмите, чтобы скопировать строку" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

@@ -542,8 +542,25 @@ void Overlay::DrawPanel(const OverlayFrame& f)
 void Overlay::DrawEventLog(float height)
 {
     const float s = ui_.rects.uiScale;
+    auto lineText = [&](const LogLine& l) {
+        return std::string(l.clock) + "  " + (l.id == Str::Count ? l.text : std::string(T(l.id)));
+    };
+    auto copy = [&](bool errorsOnly) {
+        std::string all;
+        for (const auto& l : log_)
+            if (!errorsOnly || l.tone == Tone::Error || l.tone == Tone::Warning) { all += lineText(l); all += "\r\n"; }
+        ImGui::SetClipboardText(all.c_str());
+        copiedUntil_ = ImGui::GetTime() + 2.0;
+    };
+    // Copy buttons: the whole log, or only warnings and errors (for pasting into a bug report).
+    if (ImGui::SmallButton(T(Str::CopyAll))) copy(false);
+    ImGui::SameLine();
+    if (ImGui::SmallButton(T(Str::CopyErrors))) copy(true);
+    if (ImGui::GetTime() < copiedUntil_) { ImGui::SameLine(); ImGui::TextColored(Color::AccentGreen.Vec4(), "%s", T(Str::Copied)); }
+    height = std::max(Px(40, s), height - ImGui::GetFrameHeightWithSpacing());
+
     ImGui::PushStyleColor(ImGuiCol_ChildBg, Color::ChildBg.Vec4());
-    ImGui::BeginChild("##log", ImVec2(0, height), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("##log", ImVec2(0, height), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
     PushFont(Font::MonoSmall);
     if (log_.empty()) ImGui::TextDisabled("%s", T(Str::EventLogEmpty));
     ImGuiListClipper clip;
@@ -552,6 +569,14 @@ void Overlay::DrawEventLog(float height)
         for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i)
         {
             const auto& l = log_[(size_t)i];
+            ImGui::PushID(i);
+            // Each line is selectable: click copies it to the clipboard.
+            const ImVec2 start = ImGui::GetCursorPos();
+            if (ImGui::Selectable("##line", false, ImGuiSelectableFlags_AllowOverlap,
+                                  ImVec2(std::max(ImGui::GetContentRegionAvail().x, ImGui::CalcTextSize(lineText(l).c_str()).x + Px(8, s)), 0)))
+            { ImGui::SetClipboardText(lineText(l).c_str()); copiedUntil_ = ImGui::GetTime() + 2.0; }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) ImGui::SetTooltip("%s", T(Str::ClickToCopy));
+            ImGui::SetCursorPos(start);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextMuted.Vec4());
             ImGui::TextUnformatted(l.clock);
             ImGui::PopStyleColor();
@@ -559,6 +584,7 @@ void Overlay::DrawEventLog(float height)
             ImGui::PushStyleColor(ImGuiCol_Text, ColorsFor(l.tone).fg.Vec4());
             ImGui::TextUnformatted(l.id == Str::Count ? l.text.c_str() : T(l.id));
             ImGui::PopStyleColor();
+            ImGui::PopID();
         }
     // Stay pinned to the newest line unless the user scrolled up.
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - Px(Metric::LogLineHeight, s)) ImGui::SetScrollHereY(1.0f);

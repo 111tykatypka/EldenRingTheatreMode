@@ -14,7 +14,9 @@ int main(int argc,char**argv){const bool preview=argc>1&&!strcmp(argv[1],"--prev
  // Never read or write the user's saved overlay layout from this test.
  if(!GetEnvironmentVariableW(L"THEATER_SMOKE_KEEP_LAYOUT",nullptr,0))SetEnvironmentVariableW(L"THEATER_OVERLAY_NO_LAYOUT_FILE",L"1");
  if(!tm_render_start(emergency))return 1;
- HWND window=CreateWindowExW(0,L"STATIC",L"DX12 Theater smoke",WS_OVERLAPPEDWINDOW,0,0,640,480,nullptr,nullptr,nullptr,nullptr);
+ // A real window class (not STATIC, which is mouse-transparent) so preview mode receives mouse input.
+ WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpszClassName=L"TheaterSmokeWindow";RegisterClassW(&wc);
+ HWND window=CreateWindowExW(0,L"TheaterSmokeWindow",L"DX12 Theater smoke",WS_OVERLAPPEDWINDOW,0,0,640,480,nullptr,nullptr,nullptr,nullptr);
  ComPtr<ID3D12Device> device;ComPtr<ID3D12CommandQueue> queue;ComPtr<IDXGIFactory4> factory;ComPtr<IDXGISwapChain> chain;
  D3D12_COMMAND_QUEUE_DESC q{};q.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;
  DXGI_SWAP_CHAIN_DESC d{};d.BufferCount=2;d.BufferDesc.Width=640;d.BufferDesc.Height=480;d.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;

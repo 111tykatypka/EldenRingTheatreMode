@@ -94,6 +94,7 @@ namespace TheaterUI
         char  renameBuf_[128] = {};
         std::uint32_t lastMessageId_ = 0; double messageUntil_ = 0.0;
         std::string message_; bool messageError_ = false;
+        double copiedUntil_ = 0.0;           // "Copied" feedback in the event log
 
         // Timeline interaction.
         std::uint64_t lastDuration_ = 0;
