@@ -1,5 +1,9 @@
 # Phase7 known issues
 
+- Hotfix1 now user-verified to load world/display Overlay, but RMB terminates game.
+  The isolated DX12 test reproduced termination and passed after Hotfix2 input fix.
+  Hotfix2 mouse handling still requires Elden Ring validation.
+
 - User reported two startup crashes of original Phase7_Runtime_UI on Oct6, after
   DX12 initialization and before PLAYER_FOUND. Exact cause is unresolved.
   Hotfix1 is a diagnostic mitigation, not a verified fix. See PHASE7_CRASH_DIAGNOSTIC.md.

@@ -1,5 +1,37 @@
 # Phase7 crash investigation — 2026-10-06
 
+## Hotfix2 — mouse-input regression
+
+User verified Hotfix1 loads into the world and Insert displays Overlay, then right
+mouse button terminates the game. No exception-observer entry was produced.
+
+[CONFIRMED] Added RMB down/up in both Overlay and Editor to the actual DX12 smoke
+test. The pre-fix backend terminated with exit 0xC0000409 (-1073740791). Changing
+only the queue draining to swap under lock and process outside it made the same
+test pass. The final version also passes with direct button-event ingestion.
+
+[CONFIRMED] Old render input drain held input_mutex while calling the Win32 backend.
+Its button handling calls SetCapture/ReleaseCapture, which can re-enter our WndProc,
+which also locks input_mutex. This is a reentrancy hazard. [HIGH CONFIDENCE] This
+path caused the reproduced failure; exact fail-fast subcode/call stack was not
+captured. Runtime causation in Elden Ring must still be verified.
+
+Fix: drain to a local deque under a short lock; process without that lock. Deliver
+button events with ImGuiIO::AddMouseButtonEvent instead of the Win32 backend's
+capture calls. The game retains ownership of native window capture; injected
+render thread does not SetCapture/ReleaseCapture. Queue only input/focus messages,
+not arbitrary messages containing transient native pointers.
+
+Next test: close game/old host, start **Phase7_Runtime_UI_Hotfix2** host and launch
+through its Launcher (sibling DLL selected automatically). Load world, walk 15s,
+Insert to Overlay; right-click and release several times. Repeat in Editor, then
+Clean. Check left/right/middle click, wheel and normal gameplay after returning to
+Clean. No replay needed. Report mode and action on any failure; use logs below.
+
+Hotfix1 and original Phase7 outputs are preserved. Hotfix2 is not yet in-game verified.
+
+## Historical Hotfix1 investigation
+
 Status: **CRASH REPORTED; exact cause unresolved; diagnostic mitigation implemented.**
 This is not a verified in-game crash fix.
 

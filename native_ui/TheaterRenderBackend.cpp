@@ -104,7 +104,24 @@ public:
   if(mode.load()==0&&!context)return; // No ImGui resources or draws until explicit Insert.
   const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
   if(!context&&!initialize_resources()){log("DX12_RESOURCE_INIT_FAILED; overlay disabled; replay integration unchanged");release_resources();failed=true;return;}
-  ImGui::SetCurrentContext(context);{std::lock_guard lock(input_mutex);while(!inputs.empty()){auto m=inputs.front();inputs.pop_front();ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);}}
+  ImGui::SetCurrentContext(context);std::deque<Input> pending;
+  {std::lock_guard lock(input_mutex);pending.swap(inputs);}
+  // Win32 input dispatch can synchronously re-enter our WndProc (mouse capture).
+  // Never hold the queue lock across backend/Win32 calls.
+  for(const auto&m:pending){
+   int button=-1;bool down=false;
+   switch(m.msg){
+   case WM_LBUTTONDOWN:case WM_LBUTTONDBLCLK:button=0;down=true;break;case WM_LBUTTONUP:button=0;break;
+   case WM_RBUTTONDOWN:case WM_RBUTTONDBLCLK:button=1;down=true;break;case WM_RBUTTONUP:button=1;break;
+   case WM_MBUTTONDOWN:case WM_MBUTTONDBLCLK:button=2;down=true;break;case WM_MBUTTONUP:button=2;break;
+   case WM_XBUTTONDOWN:case WM_XBUTTONDBLCLK:button=HIWORD(m.w)==XBUTTON1?3:4;down=true;break;
+   case WM_XBUTTONUP:button=HIWORD(m.w)==XBUTTON1?3:4;break;
+   }
+   // The game owns HWND capture. The render thread must not SetCapture/ReleaseCapture
+   // on that window. Forward button data to ImGui without the backend's capture calls.
+   if(button>=0)ImGui::GetIO().AddMouseButtonEvent(button,down);
+   else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
+  }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
   stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");if(mode.load()!=0)draw();else{capture_mouse=false;capture_keyboard=false;}ImGui::Render();if(mode.load()==0)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
@@ -134,7 +151,8 @@ LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
  if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==VK_INSERT){b.mode=(b.mode.load()+1)%3;return 0;}
  if(m==WM_KEYDOWN&&w==VK_F6){b.command(theater_ui::stop);return 0;}
- if(b.mode.load()){std::lock_guard lock(b.input_mutex);if(b.inputs.size()<256)b.inputs.push_back({h,m,w,l});}
+ const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
+ if(b.mode.load()&&input){std::lock_guard lock(b.input_mutex);if(b.inputs.size()<256)b.inputs.push_back({h,m,w,l});}
  if(b.mode.load()&&((b.capture_mouse&&(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST))||(b.capture_keyboard&&(m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR))))return 0;
  auto previous=b.forward_proc.load(std::memory_order_acquire);return previous?CallWindowProcW(previous,h,m,w,l):DefWindowProcW(h,m,w,l);
 }

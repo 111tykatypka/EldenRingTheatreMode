@@ -16,6 +16,6 @@ int main(){
  DXGI_SWAP_CHAIN_DESC d{};d.BufferCount=2;d.BufferDesc.Width=640;d.BufferDesc.Height=480;d.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
  d.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;d.OutputWindow=window;d.SampleDesc.Count=1;d.Windowed=TRUE;d.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;
  if(FAILED(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)))||FAILED(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)))||FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))||FAILED(factory->CreateSwapChain(queue.Get(),&d,&chain)))return 2;
- for(int i=0;i<120;++i){MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}if(i==30||i==60||i==90)SendMessageW(window,WM_KEYDOWN,VK_INSERT,0);if(i==75&&FAILED(chain->ResizeBuffers(2,800,600,DXGI_FORMAT_R8G8B8A8_UNORM,0)))return 4;if(FAILED(chain->Present(0,0)))return 3;Sleep(5);}
- tm_render_shutdown();DestroyWindow(window);std::cout<<"DX12 real-device hook/first-frame/Overlay/Editor/Clean PASS\n";
+ for(int i=0;i<120;++i){MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}if(i==30||i==60||i==90)SendMessageW(window,WM_KEYDOWN,VK_INSERT,0);if(i==35||i==65)SendMessageW(window,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(30,30));if(i==36||i==66)SendMessageW(window,WM_RBUTTONUP,0,MAKELPARAM(30,30));if(i==75&&FAILED(chain->ResizeBuffers(2,800,600,DXGI_FORMAT_R8G8B8A8_UNORM,0)))return 4;if(FAILED(chain->Present(0,0)))return 3;Sleep(5);}
+ tm_render_shutdown();DestroyWindow(window);std::cout<<"DX12 real-device hook/first-frame/Overlay/Editor/Clean, RMB down/up, resize PASS\n";
 }

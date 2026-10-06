@@ -1,5 +1,8 @@
 # Phase7 — точный порядок проверки
 
+**Hotfix2:** сначала проверяйте правую кнопку в Overlay/Editor по
+PHASE7_CRASH_DIAGNOSTIC.md; запуск через Phase7_Runtime_UI_Hotfix2. Replay пока не нужен.
+
 **После вылета 2026-10-06 используйте сначала PHASE7_CRASH_DIAGNOSTIC.md.**
 Hotfix1 стартует в Clean: Insert включает Overlay, следующий — Editor, следующий — Clean.
 До завершения проверки без replay остальные тесты ниже отложены.
