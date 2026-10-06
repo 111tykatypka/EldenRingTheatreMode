@@ -12,12 +12,13 @@
 #include <thread>
 #include <mutex>
 #include "NativeGhostFingerprints.h"
+extern "C" void tm_render_native_status(const char*);
 
 namespace {
 using U=uintptr_t;
 U base{}, layout[7]{};
 void(*logger)(const char*){};
-void log(const char* fmt,...) { char text[2048];va_list a;va_start(a,fmt);vsnprintf(text,sizeof(text),fmt,a);va_end(a);logger(text); }
+void log(const char* fmt,...) { char text[2048];va_list a;va_start(a,fmt);vsnprintf(text,sizeof(text),fmt,a);va_end(a);logger(text);if(strncmp(text,"NATIVE_GHOST",12)==0)tm_render_native_status(text); }
 bool read(U address,void* out,size_t bytes) { SIZE_T n{};return address>=0x10000 && address<=UINTPTR_MAX-bytes && ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes; }
 template<class T> T get(U a) { T v{};read(a,&v,sizeof(v));return v; }
 template<class F> F fn(U rva) {return reinterpret_cast<F>(base+rva);}

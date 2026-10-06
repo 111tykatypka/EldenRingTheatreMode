@@ -12,6 +12,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <thread>
@@ -30,6 +31,7 @@ struct Input{HWND hwnd;UINT msg;WPARAM w;LPARAM l;};
 class TheaterRenderBackend {
 public:
  std::recursive_mutex graphics;std::mutex ipc,input_mutex;
+ std::mutex native_status_mutex;char native_status[2048]{};ULONGLONG native_status_tick{};std::atomic_bool native_status_visible{};
  BOOL (WINAPI* set_cursor_pos)(int,int){};Present present{};Resize resize{};Create create{};CreateHwnd create_hwnd{};
  std::vector<void*> targets;ComPtr<IDXGISwapChain3> chain;ComPtr<ID3D12CommandQueue> queue;ComPtr<ID3D12Device> device;
  ComPtr<ID3D12DescriptorHeap> rtvs,srvs;ComPtr<ID3D12GraphicsCommandList> list;ComPtr<ID3D12Fence> fence;
@@ -84,6 +86,19 @@ public:
   dx12_ready=ImGui_ImplDX12_Init(&info);if(!dx12_ready)return false;
   ui_ready=true;log("DX12_IMGUI_INITIALIZED; Insert cycles Overlay/Editor/Clean; runtime visuals require user verification");return true;
  }
+ void draw_native_status(){
+  char text[2048];ULONGLONG tick;{std::lock_guard lock(native_status_mutex);memcpy(text,native_status,sizeof(text));tick=native_status_tick;}
+  auto*v=ImGui::GetMainViewport();const float dpi=GetDpiForWindow(hwnd)/96.f;
+  ImGui::SetNextWindowPos(ImVec2(v->WorkPos.x+v->WorkSize.x-16*dpi,v->WorkPos.y+16*dpi),ImGuiCond_Always,ImVec2(1,0));
+  ImGui::SetNextWindowBgAlpha(.90f);
+  ImGui::Begin("Native Ghost Status",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoDocking);
+  ImGui::TextUnformatted("NATIVE REPLAY GHOST — EXPERIMENTAL");ImGui::TextUnformatted("F10: Create once | F11: Remove / Cancel");
+  bool waiting=strstr(text,"REQUESTED; waiting")||strstr(text,"queued for native");
+  ImVec4 color=strstr(text,"ERROR")?ImVec4(1,.35f,.3f,1):waiting?ImVec4(1,.8f,.25f,1):ImVec4(.45f,.9f,1,1);
+  ImGui::PushTextWrapPos(std::min(460*dpi,v->WorkSize.x*.65f));ImGui::PushStyleColor(ImGuiCol_Text,color);ImGui::TextUnformatted(text);ImGui::PopStyleColor();ImGui::PopTextWrapPos();
+  if(waiting){double remaining=std::max(0.0,60.0-double(GetTickCount64()-tick)/1000.0);ImGui::Text("Waiting for native context: %.1f seconds remaining",remaining);ImGui::TextUnformatted("Do not press F11 yet — it cancels pending Create.");}
+  ImGui::End();
+ }
  void draw(){theater_ui::Snapshot s;{std::lock_guard lock(ipc);s=snapshot;}auto&io=ImGui::GetIO();io.MouseDrawCursor=mode.load()==2;
   const bool editor=mode.load()==2;ImGui::SetNextWindowPos(ImVec2(10,10),ImGuiCond_FirstUseEver);ImGui::SetNextWindowSize(ImVec2(editor?560.f:460.f,editor?380.f:180.f),ImGuiCond_FirstUseEver);
   ImGui::Begin(editor?"Theater Editor — experimental":"Theater Transport — experimental");
@@ -101,7 +116,7 @@ public:
   }ImGui::End();capture_mouse=io.WantCaptureMouse;capture_keyboard=io.WantCaptureKeyboard;
  }
  void render(IDXGISwapChain*sc,UINT flags){if(flags&DXGI_PRESENT_TEST)return;std::lock_guard lock(graphics);if(failed||!chain||sc!=static_cast<IDXGISwapChain*>(chain.Get()))return;
-  if(mode.load()==0&&!context)return; // No ImGui resources or draws until explicit Insert.
+  if(mode.load()==0&&!context&&!native_status_visible.load())return; // Prototype HUD is noninteractive and independent of Insert.
   const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
   if(!context&&!initialize_resources()){log("DX12_RESOURCE_INIT_FAILED; overlay disabled; replay integration unchanged");release_resources();failed=true;return;}
   ImGui::SetCurrentContext(context);std::deque<Input> pending;
@@ -123,7 +138,7 @@ public:
    else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
-  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");if(mode.load()!=0)draw();else{capture_mouse=false;capture_keyboard=false;}ImGui::Render();if(mode.load()==0)return;
+  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");if(mode.load()!=0)draw();else{ImGui::GetIO().MouseDrawCursor=false;capture_mouse=false;capture_keyboard=false;}if(native_status_visible.load())draw_native_status();ImGui::Render();if(mode.load()==0&&!native_status_visible.load())return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
   D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={f.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET};list->ResourceBarrier(1,&barrier);
   list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvs.Get();list->SetDescriptorHeaps(1,&heap);stage("FRAME_RENDER_DRAW_DATA");ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
@@ -165,6 +180,7 @@ HRESULT STDMETHODCALLTYPE on_resize(IDXGISwapChain*s,UINT n,UINT w,UINT h,DXGI_F
 HRESULT STDMETHODCALLTYPE on_create(IDXGIFactory*f,IUnknown*q,DXGI_SWAP_CHAIN_DESC*d,IDXGISwapChain**out){auto hr=backend().create(f,q,d,out);if(SUCCEEDED(hr))backend().adopt(*out,q);return hr;}
 HRESULT STDMETHODCALLTYPE on_create_hwnd(IDXGIFactory2*f,IUnknown*q,HWND w,const DXGI_SWAP_CHAIN_DESC1*d,const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*full,IDXGIOutput*o,IDXGISwapChain1**out){auto hr=backend().create_hwnd(f,q,w,d,full,o,out);if(SUCCEEDED(hr))backend().adopt(*out,q);return hr;}
 }
+extern "C" void tm_render_native_status(const char* text){auto&b=backend();{std::lock_guard lock(b.native_status_mutex);strncpy_s(b.native_status,text,_TRUNCATE);b.native_status_tick=GetTickCount64();}b.native_status_visible=true;}
 extern "C" int tm_render_start(void(*emergency)()){
  auto&b=backend();b.emergency=emergency;b.exception_observer=AddVectoredExceptionHandler(0,observe_exception);b.log("DIAGNOSTIC_BUILD CLEAN startup; UI opt-in; exception observer does not handle faults");ComPtr<ID3D12Device>d;ComPtr<ID3D12CommandQueue>q;ComPtr<IDXGIFactory4>factory;ComPtr<IDXGISwapChain>swap;
  HWND dummy=CreateWindowExW(0,L"STATIC",L"Theater DX12 discovery",WS_POPUP,0,0,1,1,nullptr,nullptr,nullptr,nullptr);if(!dummy)return 0;

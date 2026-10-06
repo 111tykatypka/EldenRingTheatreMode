@@ -4,6 +4,14 @@ Status: **IMPLEMENTED — RUNTIME VALIDATION REQUIRED**. Compilation is not life
 
 Release x64 EXE, DLL and compatibility probe build succeeded with MSVC 19.51 and the locked, offline Cargo dependencies. Existing warnings: shared GameProfile C4530; Rust unused import/dead code/crate naming. Automated tests were not run for this native lifecycle milestone. Runtime success remains entirely unverified.
 
+## First user attempt and status HUD update
+
+Observed log from PID33112: hooks installed, bridge initialization=1, native local callsite observed, PLAYER_RECORDER_READY, F10 REQUESTED, then F11 cancelled pending create. A subsequent F10 was refused by the one-attempt guard. No owned ghost/create/teardown is confirmed by this attempt.
+
+Added a noninteractive native status HUD in the top-right corner, independent of Insert. Native command messages appear immediately; pending commands show a 60-second countdown. Errors/cancellation stay visible. Existing controls and lifetime guards are unchanged. The HUD does not capture mouse/keyboard when the editor is closed. Graphics/runtime appearance still requires user verification.
+
+Updated package is staged in `../outputs/EldenRingTheaterMode/NativeReplayGhostPrototypeHUD`, because the initial prototype EXE/DLL are still running and cannot be replaced. Use the HUD package's EXE and sibling DLL after exiting the current game/host.
+
 ## Scope and isolation
 
 Branch: `codex/native-bloodstain-replay-research`. Rust adapter, pinned SDK/Cargo.lock, shared exact-build guard, host/launcher/YAFSML and recorder remain in place. New Cargo feature: `native-replay-ghost-create-remove` (includes the existing read-only feature to block legacy replay writes). Existing EXE UI is reused without changes. F10/F11 are developer commands inside the DLL, scoped to game foreground; the payload-capture feature must NOT also be enabled.
