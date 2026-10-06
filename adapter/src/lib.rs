@@ -31,6 +31,7 @@ mod world_observation;
 mod research_readonly;
 mod native_bloodstain;
 mod native_ghost_prototype;
+mod ghost_look;
 mod actor_replay;
 mod visual_capture;
 mod fidelity_capture;
@@ -185,6 +186,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     world_observation.tick(now);
                     research.tick(now);
                     native_replay.tick(now);
+                    if std::panic::catch_unwind(ghost_look::tick).is_err(){log_game("GHOST_LOOK: tick panicked; ignored");}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
                     if !cfg!(feature="native-bloodstain-readonly") {
                       if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}

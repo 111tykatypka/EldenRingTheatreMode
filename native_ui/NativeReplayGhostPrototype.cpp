@@ -16,7 +16,7 @@ extern "C" void tm_render_native_status(const char*);
 
 namespace {
 using U=uintptr_t;
-U base{}, layout[7]{};
+U base{}, layout[8]{}; // [7] = ChrIns::phantom_param_override (SDK offset)
 void(*logger)(const char*){};
 void log(const char* fmt,...) { char text[2048];va_list a;va_start(a,fmt);vsnprintf(text,sizeof(text),fmt,a);va_end(a);logger(text);if(strncmp(text,"NATIVE_GHOST",12)==0)tm_render_native_status(text); }
 bool read(U address,void* out,size_t bytes) { SIZE_T n{};return address>=0x10000 && address<=UINTPTR_MAX-bytes && ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes; }
@@ -31,6 +31,11 @@ std::atomic<U> retiredActor{},retiredManipulator{},retiredData{};
 std::atomic<uint64_t> retiredEpoch{};
 std::atomic<unsigned> command{}; // 0=OFF, 1=create, 2=remove
 std::atomic<bool> used{}, contextSeen{}, readyLogged{};
+// A new create is allowed only after the previous ghost finished the full native teardown
+// (deleter returned and the replay data's final reference released). Any other ending keeps
+// the one-attempt rule until restart.
+std::atomic<bool> deleterDone{}, dataReleased{};
+std::atomic<int> ghostPhantomOverride{-1};
 std::atomic<ULONGLONG> deadline{};
 std::atomic<uint64_t> stepCount{},buildCount{},requestStepCount{};
 std::atomic<ULONGLONG> lastStepTick{};
@@ -77,6 +82,7 @@ void observe(U actor,const char* prefix) {
  U entry=get<U>(actor+0x10), ctrl=get<U>(actor+0x58), manip=get<U>(actor+0x588), data=get<U>(actor+0x740);
  U primary=get<U>(ctrl+0x18),modules=get<U>(actor+layout[1]),physics=get<U>(modules+layout[2]);
  float p[3]{},q[4]{};bool transforms=physics&&read(physics+layout[3],p,sizeof(p))&&read(physics+layout[4],q,sizeof(q));
+ {int32_t phantom=-1;if(read(actor+layout[7],&phantom,sizeof(phantom))){ghostPhantomOverride.store(phantom);log("%s: phantom_param_override=%d (ChrIns+0x%llX)",prefix,phantom,static_cast<unsigned long long>(layout[7]));}}
  uint64_t handle=get<uint64_t>(actor+8);
  log("%s: literal_manipulator_type=%d (read getter instructions, not incompatible SDK reference-return ABI) ctrl_owner_matches=%u manip_owner_matches=%u",prefix,kindLiteral(manip),get<U>(ctrl+0x10)==actor,get<U>(manip+0xa8)==actor);
  log("%s: actor=0x%llX entry=0x%llX entry_actor_matches=%u handle=0x%llX ChrType=%u ChrCtrl=0x%llX primary=0x%llX ReplayManipulator=0x%llX vtable=0x%llX expected_vtable=%u ManipulatorType=%s gate132=%u ReplayData=0x%llX refcount=%d primary_count=%u primary_cursor=%u secondary_count=%u secondary_cursor=%u BlockId=0x%X slot=%u transform_read=%u position=(%.3f,%.3f,%.3f) rotation=(%.5f,%.5f,%.5f,%.5f)",
@@ -217,12 +223,12 @@ U onDisable(U manip) {U result=disableOriginal(manip);if(retired(manip,retiredMa
 void onEnqueue(U manager,U actor) {bool ours=retired(actor,retiredActor);enqueueOriginal(manager,actor);if(ours)log("NATIVE_GHOST_DELAYDELETE: native enqueue returned epoch=%llu",retiredEpoch.load());}
 U onGhostDestroy(U actor) {auto live=snapshot();if(live.active&&live.actor==actor){log("NATIVE_GHOST_ERROR: destructor reached before observed world removal; retiring epoch without cleanup fallback");retire(actor,"unexpected-direct-destruction");}bool ours=retired(actor,retiredActor);if(ours)log("NATIVE_GHOST_DESTROY: ReplayGhost destructor entered epoch=%llu",retiredEpoch.load());U r=ghostDestroyOriginal(actor);if(ours){log("NATIVE_GHOST_DESTROY: ReplayGhost destructor returned (no post-destroy dereference)");retiredActor.store(0);}return r;}
 U onManipDestroy(U manip) {auto live=snapshot();if(live.active&&live.manipulator==manip){log("NATIVE_GHOST_ERROR: manipulator destroyed while runtime record active; retiring epoch");retire(live.actor,"unexpected-manipulator-destruction");}bool ours=retired(manip,retiredManipulator);if(ours)log("NATIVE_GHOST_DESTROY: ReplayManipulator destructor entered epoch=%llu",retiredEpoch.load());U r=manipDestroyOriginal(manip);if(ours){log("NATIVE_GHOST_DESTROY: ReplayManipulator destructor returned (no post-destroy dereference)");retiredManipulator.store(0);}return r;}
-int32_t onRelease(U counter) {U identity=retiredData.load();bool ours=identity!=0&&counter==identity+8;int32_t old=releaseOriginal(counter);if(ours){log("NATIVE_REPLAY_DATA: native release old=%d new=%d final_release=%u epoch=%llu",old,old-1,old==1,retiredEpoch.load());if(old==1)retiredData.compare_exchange_strong(identity,0);}return old;}
+int32_t onRelease(U counter) {U identity=retiredData.load();bool ours=identity!=0&&counter==identity+8;int32_t old=releaseOriginal(counter);if(ours){log("NATIVE_REPLAY_DATA: native release old=%d new=%d final_release=%u epoch=%llu",old,old-1,old==1,retiredEpoch.load());if(old==1){retiredData.compare_exchange_strong(identity,0);dataReleased.store(true);}}return old;}
 void onDeleter(U deleter,U payload) {
  U actor=get<U>(payload);bool ours=retired(actor,retiredActor);
  if(ours)log("NATIVE_GHOST_DELAYDELETE: native actor deleter entered epoch=%llu",retiredEpoch.load());
  deleterOriginal(deleter,payload);
- if(ours)log("NATIVE_GHOST_DESTROY: native deleter returned; synchronous actor destructor+allocator-free path completed; no freed-pointer reads");
+ if(ours){log("NATIVE_GHOST_DESTROY: native deleter returned; synchronous actor destructor+allocator-free path completed; no freed-pointer reads");deleterDone.store(true);}
 }
 void keys() {
  bool lastCreate=false,lastRemove=false;
@@ -233,9 +239,9 @@ void keys() {
   if(c&&!lastCreate) {
    U player{},recorder{};auto s=snapshot();
    if(s.active||command.load())log("NATIVE_GHOST_ERROR: create rejected: active/pending command");
-   else if(used.exchange(true))log("NATIVE_GHOST_ERROR: one create attempt per process; restart before another test");
+   else if(used.load()&&!(deleterDone.load()&&dataReleased.load()))log("NATIVE_GHOST_ERROR: previous ghost did not finish native teardown; restart before another create");
    else if(!ready(world(),player,recorder))log("NATIVE_GHOST_ERROR: CREATE refused: player/recorder/world/block not ready; restart required before retry");
-   else {requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
+   else {used.store(true);deleterDone.store(false);dataReleased.store(false);ghostPhantomOverride.store(-1);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
   }
   if(r&&!lastRemove) {
    unsigned pending=1;
@@ -244,12 +250,13 @@ void keys() {
    else log("NATIVE_GHOST_ERROR: REMOVE refused: no active Theater-owned ghost");
   }
   if(command.load()&&GetTickCount64()>deadline.load()) {auto kind=command.exchange(0);uint32_t raw=timerBits.load();float timer;memcpy(&timer,&raw,4);if(kind)log("NATIVE_GHOST_ERROR: command=%u TIMEOUT; steps_since_request=%llu periodic_build_calls=%llu last_step_age_ms=%llu native_timer=%.3f context_seen=%u; no arbitrary callback mutation",kind,stepCount.load()-requestStepCount.load(),buildCount.load(),lastStepTick.load()?GetTickCount64()-lastStepTick.load():UINT64_MAX,timer,contextSeen.load());}
-  U p{},rec{};if(!readyLogged.load()&&ready(world(),p,rec)&&!readyLogged.exchange(true))log("NATIVE_GHOST: PLAYER_RECORDER_READY; F10 CREATE ONCE, F11 REMOVE ONCE (game focus); existing payload/legacy write controls disabled in this feature");
+  U p{},rec{};if(!readyLogged.load()&&ready(world(),p,rec)&&!readyLogged.exchange(true))log("NATIVE_GHOST: PLAYER_RECORDER_READY; F10 create, F11 remove, F9 toggle ghost look; F10 again only after a full native teardown");
   lastCreate=c;lastRemove=r;Sleep(25);
  }
 }
 }
 
+extern "C" int tm_native_ghost_phantom_override(){return ghostPhantomOverride.load();}
 extern "C" int tm_native_ghost_start(void(*logCallback)(const char*),const size_t* sdkLayout) {
  logger=logCallback;base=reinterpret_cast<U>(GetModuleHandleW(nullptr));memcpy(layout,sdkLayout,sizeof(layout));
  // Caller already passed the shared file/version/AMD64/SHA guard. Also reject

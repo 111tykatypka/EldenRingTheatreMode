@@ -47,6 +47,18 @@ public:
  TheaterUI::Overlay overlay;
  // Game input is blocked only while the UI is shown AND actually rendering, so a failed overlay never traps the player.
  bool blocking() const {return mode.load()==2&&ui_ready.load()&&!failed;}
+ // Virtual cursor. Elden Ring can hold the mouse through DirectInput so Windows never moves
+ // the cursor or sends WM_MOUSEMOVE. While the UI is shown, the blocked game mouse deltas and
+ // buttons drive the ImGui cursor instead, unless real window mouse messages are arriving.
+ std::atomic<long> mouse_dx{},mouse_dy{};std::atomic<unsigned> mouse_buttons{};std::atomic<ULONGLONG> os_mouse_tick{};
+ ImVec2 virtual_mouse{-1,-1};unsigned applied_buttons{};
+ void feed_virtual_mouse(){auto&io=ImGui::GetIO();const long dx=mouse_dx.exchange(0),dy=mouse_dy.exchange(0);const unsigned buttons=mouse_buttons.load();
+  if(mode.load()!=2){virtual_mouse={-1,-1};applied_buttons=0;return;}
+  if(GetTickCount64()-os_mouse_tick.load()<250){virtual_mouse=io.MousePos;return;} // Windows is delivering the mouse; use it.
+  if(virtual_mouse.x<0||virtual_mouse.y<0)virtual_mouse={io.DisplaySize.x*.5f,io.DisplaySize.y*.5f};
+  virtual_mouse.x=std::clamp(virtual_mouse.x+float(dx),0.f,std::max(0.f,io.DisplaySize.x-1));virtual_mouse.y=std::clamp(virtual_mouse.y+float(dy),0.f,std::max(0.f,io.DisplaySize.y-1));
+  io.AddMousePosEvent(virtual_mouse.x,virtual_mouse.y);
+  for(unsigned i=0;i<3;++i){const bool down=(buttons>>i)&1;if(down!=(((applied_buttons>>i)&1)!=0))io.AddMouseButtonEvent(int(i),down);}applied_buttons=buttons;}
  std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
@@ -157,7 +169,7 @@ public:
    else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
-  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");const auto rects=draw();
+  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();feed_virtual_mouse();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");const auto rects=draw();
   if(native_status_visible.load()){const bool shown=vis==TheaterUI::UiVisibility::Shown;draw_native_status(shown?rects.areaMax.x:ImGui::GetIO().DisplaySize.x,0.f);}
   ImGui::Render();if(!needed)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
@@ -189,6 +201,7 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==VK_F4){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
  if(m==WM_KEYDOWN&&w==VK_F6){b.command(theater_ui::stop);return 0;}
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
+ if(m==WM_MOUSEMOVE)b.os_mouse_tick=GetTickCount64();
  if(b.mode.load()&&input){std::lock_guard lock(b.input_mutex);if(b.inputs.size()<256)b.inputs.push_back({h,m,w,l});}
  // While the UI is shown the game gets no mouse or keyboard at all; ImGui already has its copy above.
  // WM_SYS* keys still pass, so Alt+F4 and Alt+Tab keep working.
@@ -200,10 +213,23 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
 using GetDeviceState=HRESULT(STDMETHODCALLTYPE*)(IDirectInputDevice8W*,DWORD,LPVOID);
 using GetDeviceData=HRESULT(STDMETHODCALLTYPE*)(IDirectInputDevice8W*,DWORD,LPDIDEVICEOBJECTDATA,LPDWORD,DWORD);
 GetDeviceState original_state[2]{};GetDeviceData original_data[2]{};
+// DIMOUSESTATE (16 bytes) or DIMOUSESTATE2 (20 bytes): lX, lY, lZ, then button bytes.
+void capture_mouse_state(const void*data,DWORD size){auto&b=backend();if(size!=sizeof(DIMOUSESTATE)&&size!=sizeof(DIMOUSESTATE2))return;
+ const auto*m=static_cast<const DIMOUSESTATE*>(data);b.mouse_dx+=m->lX;b.mouse_dy+=m->lY;
+ b.mouse_buttons=(m->rgbButtons[0]&0x80?1u:0u)|(m->rgbButtons[1]&0x80?2u:0u)|(m->rgbButtons[2]&0x80?4u:0u);}
+// Buffered data has no size hint, so the device type is asked once per device and cached.
+bool is_mouse(IDirectInputDevice8W*d){static std::mutex lock;static std::vector<std::pair<void*,bool>> known;std::lock_guard g(lock);
+ for(auto&k:known)if(k.first==d)return k.second;DIDEVCAPS caps{};caps.dwSize=sizeof(caps);const bool mouse=SUCCEEDED(d->GetCapabilities(&caps))&&GET_DIDEVICE_TYPE(caps.dwDevType)==DI8DEVTYPE_MOUSE;
+ if(known.size()<16)known.push_back({d,mouse});return mouse;}
+void capture_mouse_data(IDirectInputDevice8W*d,DWORD object_size,const DIDEVICEOBJECTDATA*data,DWORD count){auto&b=backend();if(!data||object_size<sizeof(DIDEVICEOBJECTDATA)||!is_mouse(d))return;
+ auto*bytes=reinterpret_cast<const unsigned char*>(data);for(DWORD i=0;i<count;++i){auto&e=*reinterpret_cast<const DIDEVICEOBJECTDATA*>(bytes+size_t(i)*object_size);
+  if(e.dwOfs==DIMOFS_X)b.mouse_dx+=LONG(e.dwData);else if(e.dwOfs==DIMOFS_Y)b.mouse_dy+=LONG(e.dwData);
+  else if(e.dwOfs>=DIMOFS_BUTTON0&&e.dwOfs<=DIMOFS_BUTTON2){const unsigned bit=1u<<(e.dwOfs-DIMOFS_BUTTON0);if(e.dwData&0x80)b.mouse_buttons|=bit;else b.mouse_buttons&=~bit;}}}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_state(IDirectInputDevice8W*d,DWORD size,LPVOID data){
- const HRESULT hr=original_state[N](d,size,data);if(SUCCEEDED(hr)&&data&&backend().blocking())memset(data,0,size);return hr;}
+ const HRESULT hr=original_state[N](d,size,data);if(SUCCEEDED(hr)&&data&&backend().blocking()){capture_mouse_state(data,size);memset(data,0,size);}return hr;}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_data(IDirectInputDevice8W*d,DWORD object_size,LPDIDEVICEOBJECTDATA data,LPDWORD count,DWORD flags){
- const HRESULT hr=original_data[N](d,object_size,data,count,flags);if(SUCCEEDED(hr)&&count&&backend().blocking())*count=0;return hr;}
+ const HRESULT hr=original_data[N](d,object_size,data,count,flags);
+ if(SUCCEEDED(hr)&&count&&backend().blocking()){if(!(flags&DIGDD_PEEK))capture_mouse_data(d,object_size,data,*count);*count=0;}return hr;}
 // Hooks the shared device vtables through throwaway devices. Failure leaves the overlay working
 // with window-message blocking only, and is logged.
 void install_dinput_hooks(){auto&b=backend();
