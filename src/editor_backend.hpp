@@ -61,6 +61,7 @@ struct App {
   character_capture::Client characters;
   game_launcher::Launcher launcher;
   fs::path loader_path, game_path;
+  std::atomic_bool show_debug_console{}; // launcher checkbox; YAFSML console window
   std::atomic_bool sample_pipe_ready{};
   game_control::Client control;
   std::unique_ptr<in_game_replay::Controller> game_replay;

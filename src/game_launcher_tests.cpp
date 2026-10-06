@@ -42,6 +42,15 @@ int wmain(int argc, wchar_t** argv) {
     assert(rejects([&] { prepare_config(source + "[dll]\nother=TheaterMode.dll", directory, dll); }));
     assert(rejects([&] { prepare_config(source + "[mod]\nmod1=C:relative", directory, dll); }));
     assert(rejects([&] { wide(std::string(1, '\xff')); }));
+    {
+        const auto off = set_console(source, false);
+        assert(off.find("console=1") == std::string::npos && off.find("[log]\r\nconsole=0\r\n") != std::string::npos);
+        assert(set_console(source, true).find("[log]\r\nconsole=1\r\n") != std::string::npos);
+        const auto missing = set_console("game=eldenring\n[dll]\ntheater_mode=x.dll\n", false);
+        assert(missing.find("[log]\nconsole=0\n") != std::string::npos);
+        const auto empty_log = set_console("game=eldenring\n[log]\nlog_file=1\n[dll]\n", false);
+        assert(empty_log.find("[log]\nlog_file=1\nconsole=0\n[dll]") != std::string::npos);
+    }
     assert(wide(utf8(L"Русский filename 😀")) == L"Русский filename 😀");
     Paths paths{directory / L"YAFSML.exe", L"C:\\Game with spaces\\eldenring.exe", dll, L"C:\\Запуск\\YAFSML.ini"};
     auto command = quote_argument(paths.loader.wstring()) + launch_arguments(paths);

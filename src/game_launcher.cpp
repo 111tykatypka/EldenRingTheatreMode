@@ -96,6 +96,32 @@ std::wstring quote_argument(const std::wstring& value) {
     result.append(slashes * 2, L'\\');
     return result + L'\"';
 }
+std::string set_console(const std::string& config, bool show) {
+    std::istringstream input(config);
+    std::string output, line;
+    bool in_log = false, seen_log = false, written = false;
+    const bool crlf = config.find("\r\n") != std::string::npos;
+    const std::string eol = crlf ? "\r\n" : "\n", value = std::string("console=") + (show ? "1" : "0");
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const auto normalized = trim(line);
+        if (normalized.starts_with("[") && normalized.ends_with("]")) {
+            if (in_log && !written) { output += value + eol; written = true; }
+            in_log = lower(normalized.substr(1, normalized.size() - 2)) == "log";
+            seen_log = seen_log || in_log;
+        } else if (in_log && !normalized.empty() && normalized.front() != ';' && normalized.front() != '#') {
+            const auto equal = line.find('=');
+            if (equal != std::string::npos && lower(trim(line.substr(0, equal))) == "console") {
+                if (!written) { output += value + eol; written = true; }
+                continue;
+            }
+        }
+        output += line + eol;
+    }
+    if (in_log && !written) output += value + eol;
+    if (!seen_log) output += "[log]" + eol + value + eol;
+    return output;
+}
 std::string prepare_config(const std::string& source, const fs::path& directory, const fs::path& dll) {
     if (!directory.is_absolute() || !dll.is_absolute()) throw std::runtime_error("Launch config requires absolute paths");
     (void)wide(source);
@@ -184,7 +210,10 @@ void Launcher::run(std::stop_token stop, const Paths& paths, const RuntimeReader
         if (!runtime().host_ready) throw std::runtime_error("Host pipe or F6 is unavailable. Close other hosts and reopen this application.");
         if (find_game_process()) throw std::runtime_error("Elden Ring is already running. Close it before launching a new DLL session.");
         validate_dependencies(paths);
-        const auto config = prepare_config(read_config(paths.loader.parent_path() / L"YAFSML.ini"), paths.loader.parent_path(), paths.dll);
+        // The user's YAFSML.ini may enable YAFSML's debug console (console=1). Theater Mode launches
+        // without any console window unless "Show debug console" is ticked in the launcher.
+        const auto config = set_console(prepare_config(read_config(paths.loader.parent_path() / L"YAFSML.ini"), paths.loader.parent_path(), paths.dll), paths.show_console);
+        logger(std::string("LAUNCHER YAFSML console=") + (paths.show_console ? "1 (debug console requested)" : "0 (no console window)"));
         TmValidationReport report{};
         const auto result = tm_validate_profile(paths.game.c_str(), 0, &report);
         std::ostringstream validation;

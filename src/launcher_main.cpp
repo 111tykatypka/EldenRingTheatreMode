@@ -60,14 +60,17 @@ fs::path overlay_settings() {
   if (!n || n >= MAX_PATH) return {};
   return fs::path(base) / L"EldenRingTheaterMode" / L"TheaterOverlay.ini";
 }
-void load_language() {
+// Launcher settings shared with the overlay file: language, debug_console. Other keys are kept.
+void load_settings() {
   std::ifstream in(overlay_settings());
   std::string key;
   float value = 0;
-  while (in >> key >> value)
+  while (in >> key >> value) {
     if (key == "language") russian = value >= 1;
+    else if (key == "debug_console") theater::app.show_debug_console = value >= 1;
+  }
 }
-void save_language() {
+void save_settings() {
   const auto path = overlay_settings();
   if (path.empty()) return;
   std::stringstream kept;
@@ -75,33 +78,56 @@ void save_language() {
     std::ifstream in(path);
     std::string key, value;
     while (in >> key >> value)
-      if (key != "language") kept << key << ' ' << value << '\n';
+      if (key != "language" && key != "debug_console") kept << key << ' ' << value << '\n';
   }
   std::error_code ec;
   fs::create_directories(path.parent_path(), ec);
   std::ofstream out(path, std::ios::trunc);
-  out << "language " << (russian ? 1 : 0) << '\n' << kept.str();
+  out << "language " << (russian ? 1 : 0) << '\n'
+      << "debug_console " << (theater::app.show_debug_console.load() ? 1 : 0) << '\n'
+      << kept.str();
 }
 
 const char *tr(const char *en, const char *ru) { return russian ? ru : en; }
 std::string text(const std::wstring &w) { return game_launcher::utf8(w); }
 void open_path(const fs::path &p) { ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }
 
+// Launcher type scale, in logical px at 100% Windows scaling (multiplied by the monitor DPI).
+// About 30% larger than the overlay's dense editor sizes, so it reads at a glance.
+namespace Type {
+constexpr float Title = 26, Subtitle = 15, Section = 14, Body = 16, Small = 15, Button = 20;
+}
+// Readable colours on PanelBgSolid: primary for values, secondary (not muted) for labels.
+constexpr Rgba LabelText{178, 184, 193, 255};
+
 Fonts fonts;
-void push(Font role, float extra = 1.0f) { ImGui::PushFont(fonts[role], fonts.size[(int)role] * dpi * extra); }
+void push(Font role, float px) { ImGui::PushFont(fonts[role], px * dpi); }
+float S(float v) { return Px(v, dpi); }
+
+void section_title(const char *title) {
+  push(Font::PanelTitle, Type::Section);
+  ImGui::PushStyleColor(ImGuiCol_Text, LabelText.Vec4());
+  ImGui::TextUnformatted(title);
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, S(4)));
+}
 
 // A status line: coloured dot, label, value.
 void status_row(const char *label, const char *value, Rgba dot) {
+  push(Font::Body, Type::Body);
   auto *dl = ImGui::GetWindowDrawList();
   const ImVec2 p = ImGui::GetCursorScreenPos();
   const float h = ImGui::GetTextLineHeight();
-  dl->AddCircleFilled(ImVec2(p.x + Px(4, dpi), p.y + h * 0.5f), Px(3.5f, dpi), dot.U32());
-  ImGui::SetCursorScreenPos(ImVec2(p.x + Px(16, dpi), p.y));
-  ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+  dl->AddCircleFilled(ImVec2(p.x + S(5), p.y + h * 0.5f), S(5), dot.U32());
+  ImGui::SetCursorScreenPos(ImVec2(p.x + S(20), p.y));
+  ImGui::PushStyleColor(ImGuiCol_Text, LabelText.Vec4());
   ImGui::TextUnformatted(label);
   ImGui::PopStyleColor();
-  ImGui::SameLine(Px(150, dpi));
+  ImGui::SameLine(S(200));
   ImGui::TextUnformatted(value);
+  ImGui::PopFont();
+  ImGui::Dummy(ImVec2(0, S(2)));
 }
 
 void draw_launcher() {
@@ -110,148 +136,158 @@ void draw_launcher() {
   const auto control = app.control.state();
   const bool game_running = app.game_pid.load() != 0;
   const bool ready = app.stop_hotkey && app.sample_pipe_ready.load();
-  const float s = dpi;
+  const float pad = S(32);
 
   const ImGuiViewport *vp = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->Pos);
   ImGui::SetNextWindowSize(vp->Size);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(28, s), Px(24, s)));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, S(26)));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(S(12), S(7)));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(S(10), S(10)));
   ImGui::Begin("##launcher", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                    ImGuiWindowFlags_NoBringToFrontOnFocus);
   auto *dl = ImGui::GetWindowDrawList();
   const ImVec2 o = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+  const float right = o.x + size.x - pad;
 
   // Header: brand diamond, title, game version; language switch on the right.
-  const ImVec2 c(o.x + Px(36, s), o.y + Px(40, s));
-  const float r = Px(9, s);
-  dl->AddQuadFilled(ImVec2(c.x, c.y - r), ImVec2(c.x + r, c.y), ImVec2(c.x, c.y + r), ImVec2(c.x - r, c.y),
-                    Color::AccentGold.U32());
-  ImGui::SetCursorScreenPos(ImVec2(o.x + Px(56, s), o.y + Px(24, s)));
-  push(Font::BodyStrong, 1.35f);
+  const float r = S(11);
+  const ImVec2 c(o.x + pad + r, o.y + S(26) + S(20));
+  dl->AddQuadFilled(ImVec2(c.x, c.y - r), ImVec2(c.x + r, c.y), ImVec2(c.x, c.y + r), ImVec2(c.x - r, c.y), Color::AccentGold.U32());
+  ImGui::SetCursorScreenPos(ImVec2(c.x + r + S(14), o.y + S(22)));
+  ImGui::BeginGroup();
+  push(Font::BodyStrong, Type::Title);
   ImGui::TextUnformatted("THEATER MODE");
   ImGui::PopFont();
-  ImGui::SetCursorScreenPos(ImVec2(o.x + Px(56, s), ImGui::GetCursorScreenPos().y - Px(2, s)));
-  push(Font::Meta);
-  ImGui::PushStyleColor(ImGuiCol_Text, Color::TextMuted.Vec4());
+  push(Font::Body, Type::Subtitle);
+  ImGui::PushStyleColor(ImGuiCol_Text, LabelText.Vec4());
   ImGui::TextUnformatted("Elden Ring 1.17");
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  ImGui::EndGroup();
+  const float header_bottom = ImGui::GetItemRectMax().y;
   {
-    const float w = Px(44, s);
-    ImGui::SetCursorScreenPos(ImVec2(o.x + size.x - Px(28, s) - w * 2 - Px(4, s), o.y + Px(28, s)));
-    ImGui::PushStyleColor(ImGuiCol_Button, Rgba{0, 0, 0, 0}.Vec4());
+    push(Font::BodyStrong, Type::Small);
+    const float w = S(52), h = S(34);
+    ImGui::SetCursorScreenPos(ImVec2(right - w * 2 - S(6), o.y + S(30)));
     for (int i = 0; i < 2; ++i) {
       const bool active = russian == (i == 1);
-      ImGui::PushStyleColor(ImGuiCol_Text, (active ? Color::TextPrimary : Color::TextMuted).Vec4());
-      if (active) ImGui::PushStyleColor(ImGuiCol_Button, Color::SelectedBg.Vec4());
-      if (ImGui::Button(i ? "RU" : "EN", ImVec2(w, Px(26, s))) && !active) {
+      ImGui::PushStyleColor(ImGuiCol_Button, (active ? Color::SelectedBg : Color::FrameBg).Vec4());
+      ImGui::PushStyleColor(ImGuiCol_Text, (active ? Color::TextPrimary : LabelText).Vec4());
+      if (ImGui::Button(i ? "RU" : "EN", ImVec2(w, h)) && !active) {
         russian = i == 1;
-        save_language();
+        save_settings();
       }
-      if (active) ImGui::PopStyleColor();
-      ImGui::PopStyleColor();
-      if (!i) ImGui::SameLine(0, Px(4, s));
+      ImGui::PopStyleColor(2);
+      if (!i) ImGui::SameLine(0, S(6));
     }
-    ImGui::PopStyleColor();
+    ImGui::PopFont();
   }
-  const float divider = o.y + Px(76, s);
-  dl->AddLine(ImVec2(o.x, divider), ImVec2(o.x + size.x, divider), Color::BorderSubtle.U32());
+  const float divider = header_bottom + S(18);
+  dl->AddLine(ImVec2(o.x, divider), ImVec2(o.x + size.x, divider), Color::Border.U32());
 
-  // Status card.
-  ImGui::SetCursorScreenPos(ImVec2(o.x + Px(28, s), divider + Px(18, s)));
-  push(Font::PanelTitle);
-  ImGui::PushStyleColor(ImGuiCol_Text, Color::TextMuted.Vec4());
-  ImGui::TextUnformatted(tr("STATUS", "СОСТОЯНИЕ"));
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-  ImGui::Dummy(ImVec2(0, Px(2, s)));
+  // Status.
+  ImGui::SetCursorScreenPos(ImVec2(o.x + pad, divider + S(20)));
+  section_title(tr("STATUS", "СОСТОЯНИЕ"));
   const bool starting = launch.busy() && !game_running;
-  status_row(tr("Elden Ring", "Elden Ring"),
+  status_row("Elden Ring",
              game_running ? tr("Running", "Запущена") : starting ? tr("Starting", "Запуск") : tr("Not running", "Не запущена"),
-             game_running ? Color::AccentGreen : starting ? Color::AccentAmber : Color::TextDisabled);
-  status_row(tr("Theater Mode", "Theater Mode"),
+             game_running ? Color::AccentGreen : starting ? Color::AccentAmber : Color::TextMuted);
+  status_row("Theater Mode",
              control.connected ? tr("Injected", "Внедрён") : game_running ? tr("Waiting", "Ожидание") : "-",
-             control.connected ? Color::AccentGreen : game_running ? Color::AccentAmber : Color::TextDisabled);
+             control.connected ? Color::AccentGreen : game_running ? Color::AccentAmber : Color::TextMuted);
   status_row(tr("Player", "Игрок"), control.ready ? tr("Found", "Найден") : "-",
-             control.ready ? Color::AccentGreen : Color::TextDisabled);
+             control.ready ? Color::AccentGreen : Color::TextMuted);
 
   // The one button.
-  ImGui::Dummy(ImVec2(0, Px(14, s)));
+  ImGui::Dummy(ImVec2(0, S(8)));
   const bool can_launch = !launch.busy() && !game_running && ready;
   const char *label = game_running ? tr("Elden Ring is running", "Elden Ring запущена")
                       : launch.busy() ? tr("Starting...", "Запуск...")
                                       : tr("Launch Elden Ring", "Запустить Elden Ring");
-  push(Font::BodyStrong, 1.2f);
+  push(Font::BodyStrong, Type::Button);
   ImGui::PushStyleColor(ImGuiCol_Button, (can_launch ? Color::AccentBlue : Color::FrameBg).Vec4());
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgba{104, 164, 228, 255}.Vec4());
   ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgba{70, 128, 190, 255}.Vec4());
-  ImGui::PushStyleColor(ImGuiCol_Text, (can_launch ? Color::TextOnAccent : Color::TextSecondary).Vec4());
+  ImGui::PushStyleColor(ImGuiCol_Text, (can_launch ? Color::TextOnAccent : LabelText).Vec4());
   ImGui::BeginDisabled(!can_launch);
-  if (ImGui::Button(label, ImVec2(-1, Px(52, s)))) launch_game();
+  if (ImGui::Button(label, ImVec2(-1, S(60)))) launch_game();
   ImGui::EndDisabled();
   ImGui::PopStyleColor(4);
   ImGui::PopFont();
 
-  // Launcher diagnostic: what it is doing, or why it failed.
-  push(Font::Meta);
+  // What the launcher is doing, or why it failed.
+  push(Font::Body, Type::Small);
   const bool error = launch.phase == game_launcher::Phase::error;
-  ImGui::PushStyleColor(ImGuiCol_Text, (error ? Color::AccentRed : Color::TextMuted).Vec4());
+  ImGui::PushStyleColor(ImGuiCol_Text, (error ? Rgba{236, 118, 110, 255} : LabelText).Vec4());
   ImGui::PushTextWrapPos(0.0f);
-  if (!ready)
-    ImGui::TextUnformatted(tr("Preparing the recorder and the F5/F6 hotkeys...", "Подготовка записи и клавиш F5/F6..."));
-  else
-    ImGui::TextUnformatted(text(launch.diagnostic).c_str());
+  ImGui::TextUnformatted(ready ? text(launch.diagnostic).c_str()
+                               : tr("Preparing the recorder and the F5/F6 hotkeys...", "Подготовка записи и клавиш F5/F6..."));
   ImGui::PopTextWrapPos();
   ImGui::PopStyleColor();
   ImGui::PopFont();
 
-  // Paths and folders, compact, at the bottom.
-  const float footer = o.y + size.y - Px(148, s);
-  dl->AddLine(ImVec2(o.x, footer), ImVec2(o.x + size.x, footer), Color::BorderSubtle.U32());
-  ImGui::SetCursorScreenPos(ImVec2(o.x + Px(28, s), footer + Px(14, s)));
+  // Settings at the bottom: paths, folders, debug console, hotkeys.
+  push(Font::Body, Type::Small);
+  const float row = ImGui::GetFrameHeight();
+  const float footer_h = S(20) + row * 4 + S(10) * 3 + ImGui::GetTextLineHeight() + S(26);
+  const float footer = std::max(ImGui::GetCursorScreenPos().y + S(12), o.y + size.y - footer_h);
+  dl->AddLine(ImVec2(o.x, footer), ImVec2(o.x + size.x, footer), Color::Border.U32());
+  ImGui::SetCursorScreenPos(ImVec2(o.x + pad, footer + S(20)));
+  const bool idle = !launch.busy() && !game_running;
+  const float button_w = ImGui::CalcTextSize(tr("Change...", "Изменить...")).x + S(28);
   auto path_row = [&](const char *name, const fs::path &value, void (*change)(), bool enabled) {
     ImGui::PushID(name);
-    push(Font::Meta);
-    ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+    ImGui::AlignTextToFramePadding();
+    ImGui::PushStyleColor(ImGuiCol_Text, LabelText.Vec4());
     ImGui::TextUnformatted(name);
     ImGui::PopStyleColor();
-    ImGui::SameLine(Px(130, s));
-    const float button_w = Px(84, s);
-    const float avail = ImGui::GetContentRegionAvail().x - button_w - Px(8, s);
+    ImGui::SameLine(S(150));
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float avail = right - button_w - S(12) - at.x;
     const std::string v = value.empty() ? std::string(tr("Not set", "Не задано")) : text(value.wstring());
+    // Long paths keep their end (the file name) visible.
+    std::string shown = v;
+    while (shown.size() > 4 && ImGui::CalcTextSize(shown.c_str()).x > avail) shown = "..." + shown.substr(std::min<size_t>(shown.size(), 4));
     ImGui::PushStyleColor(ImGuiCol_Text, (value.empty() ? Color::AccentAmber : Color::TextPrimary).Vec4());
-    ImGui::PushClipRect(ImGui::GetCursorScreenPos(),
-                        ImVec2(ImGui::GetCursorScreenPos().x + avail, ImGui::GetCursorScreenPos().y + Px(30, s)), true);
-    ImGui::TextUnformatted(v.c_str());
-    ImGui::PopClipRect();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", v.c_str());
+    ImGui::TextUnformatted(shown.c_str());
     ImGui::PopStyleColor();
-    ImGui::SameLine((ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x) - button_w);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", v.c_str());
+    ImGui::SameLine();
+    ImGui::SetCursorScreenPos(ImVec2(right - button_w, at.y));
     ImGui::BeginDisabled(!enabled);
     if (ImGui::Button(tr("Change...", "Изменить..."), ImVec2(button_w, 0))) change();
     ImGui::EndDisabled();
-    ImGui::PopFont();
     ImGui::PopID();
   };
-  const bool idle = !launch.busy() && !game_running;
   path_row(tr("Game", "Игра"), app.game_path, choose_game, idle);
   path_row(tr("Mod loader", "Загрузчик"), app.loader_path, choose_loader, idle);
-  push(Font::Meta);
   if (ImGui::Button(tr("Replays folder", "Папка записей"))) open_path(app.replays);
   ImGui::SameLine();
   if (ImGui::Button(tr("Logs", "Журналы"))) open_path(app.logs);
-  ImGui::SameLine();
-  ImGui::PushStyleColor(ImGuiCol_Text, Color::TextMuted.Vec4());
-  ImGui::SetCursorPosX((ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x) -
-                       ImGui::CalcTextSize(tr("In game: F4 Theater Mode   F5 record   F6 stop   Space play/pause",
-                                              "В игре: F4 Theater Mode   F5 запись   F6 стоп   Пробел пуск/пауза")).x);
-  ImGui::TextUnformatted(tr("In game: F4 Theater Mode   F5 record   F6 stop   Space play/pause", "В игре: F4 Theater Mode   F5 запись   F6 стоп   Пробел пуск/пауза"));
+  ImGui::SameLine(0, S(24));
+  bool console = app.show_debug_console.load();
+  ImGui::BeginDisabled(!idle);
+  if (ImGui::Checkbox(tr("Show debug console", "Показывать консоль отладки"), &console)) {
+    app.show_debug_console = console;
+    save_settings();
+  }
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    ImGui::SetTooltip("%s", tr("Off: no console window. YAFSML still writes its own log file.",
+                               "Выкл.: окна консоли нет. YAFSML всё равно пишет свой файл журнала."));
+  ImGui::Dummy(ImVec2(0, S(2)));
+  ImGui::PushStyleColor(ImGuiCol_Text, LabelText.Vec4());
+  ImGui::PushTextWrapPos(0.0f);
+  ImGui::TextUnformatted(tr("In game:  F4 Theater Mode    F5 record    F6 stop    Space play/pause",
+                            "В игре:  F4 Theater Mode    F5 запись    F6 стоп    Пробел пуск/пауза"));
+  ImGui::PopTextWrapPos();
   ImGui::PopStyleColor();
   ImGui::PopFont();
 
   ImGui::End();
-  ImGui::PopStyleVar();
+  ImGui::PopStyleVar(3);
 }
 } // namespace
 
@@ -294,8 +330,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     CloseHandle(single);
     return 0;
   }
-  ImGui_ImplWin32_EnableDpiAwareness();
-  dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint({}, MONITOR_DEFAULTTOPRIMARY));
+  // Per-monitor DPI awareness v2: Windows never bitmap-stretches the window, so text stays sharp,
+  // and WM_DPICHANGED arrives when the window moves to a monitor with different scaling.
+  if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) ImGui_ImplWin32_EnableDpiAwareness();
+  POINT cursor{};
+  GetCursorPos(&cursor);
+  dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY));
   WNDCLASSW wc{};
   wc.lpfnWndProc = launcher_proc;
   wc.hInstance = instance;
@@ -304,8 +344,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   wc.lpszClassName = L"EldenRingTheaterModeWindow";
   RegisterClassW(&wc);
   const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-  RECT rect{0, 0, int(560 * dpi), int(440 * dpi)};
-  AdjustWindowRect(&rect, style, FALSE);
+  RECT rect{0, 0, int(680 * dpi), int(640 * dpi)};
+  AdjustWindowRectExForDpi(&rect, style, FALSE, 0, UINT(dpi * 96 + 0.5f));
   HWND window = CreateWindowW(wc.lpszClassName, L"Elden Ring Theater Mode", style, CW_USEDEFAULT, CW_USEDEFAULT,
                               rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, instance, nullptr);
   if (!window || !create_device(window)) {
@@ -326,7 +366,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   ImGui_ImplDX11_Init(device.Get(), context.Get());
   theater::initialize(window);
   theater::refresh_library();
-  load_language();
+  load_settings();
   ShowWindow(window, SW_SHOWNORMAL);
   float applied_dpi = 0;
   bool failed = false;
@@ -362,7 +402,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
-    push(Font::Body);
+    push(Font::Body, Type::Body);
     draw_launcher();
     ImGui::PopFont();
     ImGui::Render();

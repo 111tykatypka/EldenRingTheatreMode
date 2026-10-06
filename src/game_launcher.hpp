@@ -9,6 +9,7 @@
 namespace game_launcher {
 struct Paths {
     std::filesystem::path loader, game, dll, config;
+    bool show_console{}; // YAFSML debug console; off unless the user ticks "Show debug console"
 };
 struct Runtime {
     bool host_ready{};
@@ -28,6 +29,9 @@ std::wstring quote_argument(const std::wstring& value);
 // Preserve loader settings; rebase DLL/mod paths when moving the config.
 std::string prepare_config(const std::string& source, const std::filesystem::path& source_directory,
                            const std::filesystem::path& theater_dll);
+// Forces YAFSML's [log] console= setting in a prepared config (adds it if missing).
+// YAFSML's console output still goes to its own log file (log_file=1 is kept).
+std::string set_console(const std::string& config, bool show);
 std::wstring launch_arguments(const Paths& paths);
 void validate_dependencies(const Paths& paths);
 DWORD find_game_process();

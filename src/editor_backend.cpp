@@ -368,7 +368,7 @@ void launch_game() {
     const game_launcher::Paths paths{app.loader_path, app.game_path,
                                      executable_directory() /
                                          L"TheaterMode.dll",
-                                     app.root / L"launch" / L"YAFSML.ini"};
+                                     app.root / L"launch" / L"YAFSML.ini", app.show_debug_console.load()};
     app.launcher.start(
         paths,
         [] {
