@@ -4,10 +4,11 @@ add_subdirectory(shared)
 add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
  native_ui/NativeReplayGhostPrototype.cpp
+ native_ui/theater/TheaterOverlayUI.cpp
  third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
  third_party/imgui/backends/imgui_impl_win32.cpp third_party/imgui/backends/imgui_impl_dx12.cpp
  third_party/minhook_vendor/src/buffer.c third_party/minhook_vendor/src/hook.c third_party/minhook_vendor/src/trampoline.c third_party/minhook_vendor/src/hde/hde64.c)
-target_include_directories(TheaterRenderBackend PRIVATE shared third_party/imgui third_party/imgui/backends third_party/minhook_vendor/include)
+target_include_directories(TheaterRenderBackend PRIVATE shared native_ui native_ui/theater third_party/imgui third_party/imgui/backends third_party/minhook_vendor/include)
 target_compile_features(TheaterRenderBackend PRIVATE cxx_std_20)
 target_compile_definitions(TheaterRenderBackend PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 if(MSVC)
@@ -43,7 +44,7 @@ if(BUILD_TESTING)
   add_test(NAME ingame-editor-tests COMMAND ingame-editor-tests)
   set_tests_properties(ingame-editor-tests PROPERTIES TIMEOUT 20)
   add_executable(render-backend-tests native_ui/render_backend_tests.cpp)
-  target_include_directories(render-backend-tests PRIVATE shared)
+  target_include_directories(render-backend-tests PRIVATE shared native_ui/theater third_party/imgui)
   target_compile_features(render-backend-tests PRIVATE cxx_std_20)
   target_link_libraries(render-backend-tests PRIVATE TheaterRenderBackend d3d12 dxgi d3dcompiler user32 gdi32 dwmapi imm32)
   add_test(NAME render-backend-tests COMMAND render-backend-tests)

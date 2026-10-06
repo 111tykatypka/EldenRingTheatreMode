@@ -26,12 +26,15 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  case theater_ui::speed:{std::lock_guard lock(app.replay_mutex);if(app.replay_player)app.replay_player->set_speed(double(r.value)/100.);break;}
  case theater_ui::select:if(!app.game_replay->active())app.selected_replay_actor=r.value;break;
  case theater_ui::page:offset=static_cast<std::uint32_t>(std::min<std::uint64_t>(r.value,UINT32_MAX));break;
+ // Same recorder path as F5 and the host Start button; post_command refuses while a replay is active.
+ case theater_ui::record_start:post_command(Command::start);break;case theater_ui::record_stop:post_command(Command::stop);break;
  default:break;}}
  const auto view=playback_view();const auto remote=app.control.state();theater_ui::Snapshot s;
  s.loaded=view.loaded;s.active=view.active;s.phase=static_cast<std::uint32_t>(view.phase);s.time_ns=view.state.timestamp_ns;s.duration_ns=view.summary.duration_ns;s.playback_speed=view.state.speed;
  s.selected=app.selected_replay_actor;s.connected=remote.connected;s.player_found=remote.ready;std::copy(remote.live.position.begin(),remote.live.position.end(),s.live_position);
  auto diagnostic=game_launcher::utf8(view.diagnostic);memcpy(s.diagnostic,diagnostic.data(),std::min(diagnostic.size(),sizeof(s.diagnostic)-1));
  s.total=static_cast<std::uint32_t>(app.character_views.size());s.offset=std::min(offset,s.total);s.count=std::min(16u,s.total-s.offset);
+ {std::lock_guard lock(app.mutex);const auto rs=app.data.state;s.recording_state=rs==erplay::RecordingState::recording?theater_ui::record_recording:rs==erplay::RecordingState::paused?theater_ui::record_paused:rs==erplay::RecordingState::saving?theater_ui::record_saving:theater_ui::record_idle;s.recording_ns=app.data.active_ns;s.recording_samples=app.data.samples;}
  for(unsigned i=0;i<s.count;++i){const auto&r=app.character_views[s.offset+i].info.registry;s.actors[i]={r.id,r.native_handle,r.entity_id,r.character_type,r.npc_param,0};}
  {std::lock_guard lock(mutex);cached=s;}
 }

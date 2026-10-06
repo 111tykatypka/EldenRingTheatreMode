@@ -9,6 +9,7 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 #include "TheaterUiProtocol.h"
+#include "theater/TheaterOverlayUI.h"
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
@@ -38,18 +39,29 @@ public:
  std::vector<Frame> frames;UINT64 fence_value{};HANDLE fence_event{};HWND hwnd{};WNDPROC previous_proc{};
  ImGuiContext* context{};bool win32_ready{},dx12_ready{},failed{};std::vector<bool> descriptors;
  std::deque<Input> inputs;std::deque<theater_ui::Request> commands;theater_ui::Snapshot snapshot;
- std::atomic_int mode{0};std::atomic_bool running{true},ui_ready{},capture_mouse{},capture_keyboard{};std::thread client;
+ // mode 2 = v3 UI shown (cursor + input capture), 0 = hidden. visibility holds TheaterUI::UiVisibility.
+ std::atomic_int mode{0},visibility{int(TheaterUI::UiVisibility::Hidden)};std::atomic<ULONGLONG> hidden_tick{0};
+ std::atomic_bool running{true},ui_ready{},capture_mouse{},capture_keyboard{},host_linked{};std::thread client;
+ TheaterUI::Overlay overlay;
  std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
- void command(std::uint32_t kind,std::uint64_t value=0){if(kind==theater_ui::stop&&emergency)emergency();std::lock_guard lock(ipc);if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;commands.push_back(r);}}
+ void command(std::uint32_t kind,std::uint64_t value=0){if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
+  if(kind==theater_ui::stop&&emergency)emergency();std::lock_guard lock(ipc);
+  // A scrub produces many seeks and the pipe sends one request per round trip, so only the newest pending seek matters.
+  if(kind==theater_ui::seek&&!commands.empty()&&commands.back().command==theater_ui::seek){commands.back().value=value;return;}
+  if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;commands.push_back(r);}}
+ // F4 toggles Shown/Hidden. Shift+F4 toggles the clean mode that also hides the REC pill.
+ void toggle_ui(bool clean){using V=TheaterUI::UiVisibility;const auto current=V(visibility.load());V next;
+  if(clean)next=current==V::HiddenClean?V::Hidden:V::HiddenClean;else next=current==V::Shown?V::Hidden:V::Shown;
+  if(next!=V::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==V::Shown?2:0;}
  bool transfer(HANDLE h,void*p,DWORD n,bool write){auto*c=static_cast<char*>(p);while(n){DWORD got=0;if(!(write?WriteFile(h,c,n,&got,nullptr):ReadFile(h,c,n,&got,nullptr))||!got)return false;c+=got;n-=got;}return true;}
  void ipc_worker(){HANDLE h=INVALID_HANDLE_VALUE;std::uint64_t sequence=0;while(running){
   if(h==INVALID_HANDLE_VALUE){h=CreateFileW(theater_ui::pipe,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE){Sleep(100);continue;}}
   theater_ui::Request r;{std::lock_guard lock(ipc);if(!commands.empty()){r=commands.front();commands.pop_front();}}r.sequence=++sequence;theater_ui::Snapshot s;
-  if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=1||s.sequence!=r.sequence||s.count>16||!std::isfinite(s.playback_speed)){
-   CloseHandle(h);h=INVALID_HANDLE_VALUE;{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
-  {std::lock_guard lock(ipc);snapshot=s;}Sleep(50);
+  if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=theater_ui::version||s.sequence!=r.sequence||s.count>16||!std::isfinite(s.playback_speed)){
+   CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
+  {std::lock_guard lock(ipc);snapshot=s;}host_linked=true;Sleep(50);
  }if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
  void adopt(IDXGISwapChain*sc,IUnknown*unknown){ComPtr<ID3D12CommandQueue> q;ComPtr<IDXGISwapChain3> c;
   if(FAILED(unknown->QueryInterface(IID_PPV_ARGS(&q)))||q->GetDesc().Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||FAILED(sc->QueryInterface(IID_PPV_ARGS(&c))))return;
@@ -78,18 +90,21 @@ public:
   for(UINT i=0;i<desc.BufferCount;++i){auto&f=frames[i];if(FAILED(chain->GetBuffer(i,IID_PPV_ARGS(&f.buffer)))||FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&f.allocator))))return false;f.rtv={cpu.ptr+i*stride};device->CreateRenderTargetView(f.buffer.Get(),nullptr,f.rtv);}
   if(FAILED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,frames[0].allocator.Get(),nullptr,IID_PPV_ARGS(&list)))||FAILED(list->Close())||FAILED(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence))))return false;
   fence_value=0;fence_event=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!fence_event)return false;
-  context=ImGui::CreateContext();ImGui::SetCurrentContext(context);auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.ConfigFlags|=ImGuiConfigFlags_DockingEnable;ImGui::StyleColorsDark();auto dpi=GetDpiForWindow(hwnd)/96.f;ImGui::GetStyle().FontScaleDpi=dpi;ImGui::GetStyle().ScaleAllSizes(dpi);
+  context=ImGui::CreateContext();ImGui::SetCurrentContext(context);auto&io=ImGui::GetIO();io.IniFilename=nullptr;
+  // The v3 theme scales from the swap-chain size (TheaterLayout.h), not from window DPI.
+  overlay.Init(io);
   win32_ready=ImGui_ImplWin32_Init(hwnd);if(!win32_ready)return false;
   ImGui_ImplDX12_InitInfo info;info.Device=device.Get();info.CommandQueue=queue.Get();info.NumFramesInFlight=static_cast<int>(desc.BufferCount);info.RTVFormat=desc.BufferDesc.Format;info.SrvDescriptorHeap=srvs.Get();info.UserData=this;
   info.SrvDescriptorAllocFn=[](ImGui_ImplDX12_InitInfo*i,D3D12_CPU_DESCRIPTOR_HANDLE*c,D3D12_GPU_DESCRIPTOR_HANDLE*g){auto*b=static_cast<TheaterRenderBackend*>(i->UserData);auto stride=b->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);for(UINT n=0;n<b->descriptors.size();++n)if(!b->descriptors[n]){b->descriptors[n]=true;c->ptr=b->srvs->GetCPUDescriptorHandleForHeapStart().ptr+n*stride;g->ptr=b->srvs->GetGPUDescriptorHandleForHeapStart().ptr+n*stride;return;}*c={};*g={};b->failed=true;};
   info.SrvDescriptorFreeFn=[](ImGui_ImplDX12_InitInfo*i,D3D12_CPU_DESCRIPTOR_HANDLE c,D3D12_GPU_DESCRIPTOR_HANDLE){auto*b=static_cast<TheaterRenderBackend*>(i->UserData);auto stride=b->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);auto index=(c.ptr-b->srvs->GetCPUDescriptorHandleForHeapStart().ptr)/stride;if(index<b->descriptors.size())b->descriptors[index]=false;};
   dx12_ready=ImGui_ImplDX12_Init(&info);if(!dx12_ready)return false;
-  ui_ready=true;log("DX12_IMGUI_INITIALIZED; Insert cycles Overlay/Editor/Clean; runtime visuals require user verification");return true;
+  ui_ready=true;log("DX12_IMGUI_INITIALIZED; v3 UI; F4 shows/hides, Shift+F4 clean; runtime visuals require user verification");return true;
  }
- void draw_native_status(){
+ // anchor_right/top: top-right corner to place the HUD at (the game area while the UI is shown).
+ void draw_native_status(float anchor_right,float anchor_top){
   char text[2048];ULONGLONG tick;{std::lock_guard lock(native_status_mutex);memcpy(text,native_status,sizeof(text));tick=native_status_tick;}
   auto*v=ImGui::GetMainViewport();const float dpi=GetDpiForWindow(hwnd)/96.f;
-  ImGui::SetNextWindowPos(ImVec2(v->WorkPos.x+v->WorkSize.x-16*dpi,v->WorkPos.y+16*dpi),ImGuiCond_Always,ImVec2(1,0));
+  ImGui::SetNextWindowPos(ImVec2(anchor_right-16*dpi,anchor_top+16*dpi),ImGuiCond_Always,ImVec2(1,0));
   ImGui::SetNextWindowBgAlpha(.90f);
   ImGui::Begin("Native Ghost Status",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoDocking);
   ImGui::TextUnformatted("NATIVE REPLAY GHOST — EXPERIMENTAL");ImGui::TextUnformatted("F10: Create once | F11: Remove / Cancel");
@@ -99,24 +114,24 @@ public:
   if(waiting){double remaining=std::max(0.0,60.0-double(GetTickCount64()-tick)/1000.0);ImGui::Text("Waiting for native context: %.1f seconds remaining",remaining);ImGui::TextUnformatted("Do not press F11 yet — it cancels pending Create.");}
   ImGui::End();
  }
- void draw(){theater_ui::Snapshot s;{std::lock_guard lock(ipc);s=snapshot;}auto&io=ImGui::GetIO();io.MouseDrawCursor=mode.load()==2;
-  const bool editor=mode.load()==2;ImGui::SetNextWindowPos(ImVec2(10,10),ImGuiCond_FirstUseEver);ImGui::SetNextWindowSize(ImVec2(editor?560.f:460.f,editor?380.f:180.f),ImGuiCond_FirstUseEver);
-  ImGui::Begin(editor?"Theater Editor — experimental":"Theater Transport — experimental");
-  ImGui::Text("Host clock %.3f / %.3f seconds",s.time_ns/1e9,s.duration_ns/1e9);ImGui::Text("Game %s | Player %s",s.connected?"CONNECTED":"WAITING",s.player_found?"FOUND":"WAITING");
-  ImGui::BeginDisabled(!s.loaded);if(ImGui::Button("Play"))command(theater_ui::play);ImGui::SameLine();if(ImGui::Button("Stop / F6"))command(theater_ui::stop);
-  if(ImGui::Button("Restart"))command(theater_ui::restart);ImGui::SameLine();if(ImGui::Button("Previous tick"))command(theater_ui::previous);ImGui::SameLine();if(ImGui::Button("Next tick"))command(theater_ui::next);
-  constexpr double speeds[]{.1,.25,.5,1,2,4};const char*labels[]{"0.1x","0.25x","0.5x","1x","2x","4x"};int selected=3;for(int i=0;i<6;++i)if(s.playback_speed==speeds[i])selected=i;
-  if(ImGui::Combo("Playback speed",&selected,labels,6))command(theater_ui::speed,static_cast<std::uint64_t>(speeds[selected]*100));
-  double time=s.time_ns/1e9,lo=0,hi=s.duration_ns/1e9;if(ImGui::SliderScalar("Replay time",ImGuiDataType_Double,&time,&lo,&hi,"%.3f s"))command(theater_ui::seek,static_cast<std::uint64_t>(time*1e9));ImGui::EndDisabled();
-  ImGui::TextWrapped("%s",s.diagnostic);if(editor){ImGui::Separator();ImGui::TextUnformatted("Scene — recorded actor identities (runtime resolution UNKNOWN)");
-   ImGuiListClipper clip;clip.Begin(static_cast<int>(s.count));while(clip.Step())for(int i=clip.DisplayStart;i<clip.DisplayEnd;++i){auto&a=s.actors[i];char label[128];snprintf(label,sizeof(label),"Actor %llu / entity %u / NPC %d",a.id,a.entity,a.npc);if(ImGui::Selectable(label,a.id==s.selected))command(theater_ui::select,a.id);}
-   if(ImGui::Button("Previous actors"))command(theater_ui::page,s.offset>=16?s.offset-16:0);ImGui::SameLine();if(ImGui::Button("Next actors"))command(theater_ui::page,std::min(s.offset+16,s.total));
-   ImGui::Text("Live XYZ %.3f %.3f %.3f",s.live_position[0],s.live_position[1],s.live_position[2]);ImGui::TextUnformatted("Ownership / AI / grounding: inspect runtime trace; UNKNOWN in UI.");
-   ImGui::TextUnformatted("Free Camera / Dolly / world loading: NOT IMPLEMENTED.");ImGui::TextWrapped("Seek and stepping stop native replay writes. Editor time changes; world reconstruction is not available.");
-  }ImGui::End();capture_mouse=io.WantCaptureMouse;capture_keyboard=io.WantCaptureKeyboard;
+ bool recording_now(){std::lock_guard lock(ipc);return TheaterUI::Overlay::IsRecording(snapshot);}
+ // Builds the v3 UI frame from a snapshot copy. Returns the rects, for placing the native ghost HUD.
+ TheaterUI::LayoutRects draw(){
+  TheaterUI::OverlayFrame frame;{std::lock_guard lock(ipc);frame.snapshot=snapshot;}
+  frame.hostLinked=host_linked.load();frame.visibility=TheaterUI::UiVisibility(visibility.load());
+  frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
+  if(native_status_visible.load()){std::lock_guard lock(native_status_mutex);frame.nativeStatus=native_status;}
+  auto&io=ImGui::GetIO();const bool shown=frame.visibility==TheaterUI::UiVisibility::Shown;io.MouseDrawCursor=shown;
+  const auto rects=overlay.Draw(frame,[](void*user,std::uint32_t kind,std::uint64_t value){static_cast<TheaterRenderBackend*>(user)->command(kind,value);},this);
+  capture_mouse=shown&&io.WantCaptureMouse;capture_keyboard=shown&&io.WantCaptureKeyboard;return rects;
  }
  void render(IDXGISwapChain*sc,UINT flags){if(flags&DXGI_PRESENT_TEST)return;std::lock_guard lock(graphics);if(failed||!chain||sc!=static_cast<IDXGISwapChain*>(chain.Get()))return;
-  if(mode.load()==0&&!context&&!native_status_visible.load())return; // Prototype HUD is noninteractive and independent of Insert.
+  // Draw only when something is visible: the UI, the REC pill (not in Shift+F4 clean mode),
+  // the F4 hint, or the noninteractive native ghost HUD, which is independent of F4.
+  const auto vis=TheaterUI::UiVisibility(visibility.load());
+  const bool hint=vis==TheaterUI::UiVisibility::Hidden&&GetTickCount64()-hidden_tick.load()<2500;
+  const bool needed=vis==TheaterUI::UiVisibility::Shown||native_status_visible.load()||hint||(vis!=TheaterUI::UiVisibility::HiddenClean&&recording_now());
+  if(!needed&&!context)return;
   const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
   if(!context&&!initialize_resources()){log("DX12_RESOURCE_INIT_FAILED; overlay disabled; replay integration unchanged");release_resources();failed=true;return;}
   ImGui::SetCurrentContext(context);std::deque<Input> pending;
@@ -138,7 +153,9 @@ public:
    else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
-  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");if(mode.load()!=0)draw();else{ImGui::GetIO().MouseDrawCursor=false;capture_mouse=false;capture_keyboard=false;}if(native_status_visible.load())draw_native_status();ImGui::Render();if(mode.load()==0&&!native_status_visible.load())return;
+  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");const auto rects=draw();
+  if(native_status_visible.load()){const bool shown=vis==TheaterUI::UiVisibility::Shown;draw_native_status(shown?rects.areaMax.x:ImGui::GetIO().DisplaySize.x,0.f);}
+  ImGui::Render();if(!needed)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
   D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={f.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET};list->ResourceBarrier(1,&barrier);
   list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvs.Get();list->SetDescriptorHeaps(1,&heap);stage("FRAME_RENDER_DRAW_DATA");ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
@@ -164,7 +181,8 @@ LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
  }busy=false;return EXCEPTION_CONTINUE_SEARCH;
 }
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
- if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==VK_INSERT){b.mode=(b.mode.load()+1)%3;return 0;}
+ // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
+ if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==VK_F4){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
  if(m==WM_KEYDOWN&&w==VK_F6){b.command(theater_ui::stop);return 0;}
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
  if(b.mode.load()&&input){std::lock_guard lock(b.input_mutex);if(b.inputs.size()<256)b.inputs.push_back({h,m,w,l});}
@@ -201,11 +219,20 @@ extern "C" void tm_render_shutdown(){auto&b=backend();b.running=false;if(b.clien
 }
 // CPU-only UI construction test. Does not install hooks or assert game rendering.
 extern "C" int tm_render_test_ui(){
- auto&b=backend();auto*c=ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.DeltaTime=1.f/60;io.Fonts->AddFontDefault();
- unsigned char*p=nullptr;int w=0,h=0;io.Fonts->GetTexDataAsRGBA32(&p,&w,&h);
- {std::lock_guard lock(b.ipc);b.snapshot.loaded=1;b.snapshot.connected=1;b.snapshot.player_found=1;b.snapshot.duration_ns=10'000'000'000;b.snapshot.count=16;
+ auto&b=backend();auto*c=ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.DeltaTime=1.f/60;
+ // No renderer backend here: let the atlas build on the CPU as the legacy path does.
+ b.overlay.Init(io);unsigned char*p=nullptr;int w=0,h=0;io.Fonts->GetTexDataAsRGBA32(&p,&w,&h);
+ {std::lock_guard lock(b.ipc);b.snapshot={};b.snapshot.loaded=1;b.snapshot.connected=1;b.snapshot.player_found=1;b.snapshot.duration_ns=134'500'000'000;b.snapshot.time_ns=26'300'000'000;
+  b.snapshot.count=16;b.snapshot.total=40;b.snapshot.phase=2;b.snapshot.recording_state=theater_ui::record_recording;b.snapshot.recording_ns=83'400'000'000;b.snapshot.recording_samples=2502;
   for(unsigned i=0;i<16;++i)b.snapshot.actors[i].id=i+1;}
- bool valid=true;for(auto size:{ImVec2{1280,720},ImVec2{3440,1440},ImVec2{7680,2160}})for(int mode:{1,2}){
-  b.mode=mode;io.DisplaySize=size;ImGui::NewFrame();b.draw();ImGui::Render();valid=valid&&ImGui::GetDrawData()->Valid;
- }ImGui::DestroyContext(c);return valid?1:0;
+ b.host_linked=true;
+ bool valid=true;
+ for(auto lang:{TheaterUI::Lang::English,TheaterUI::Lang::Russian}){b.overlay.language=lang;
+  for(auto size:{ImVec2{1280,720},ImVec2{1920,1080},ImVec2{2560,1440},ImVec2{2560,1100},ImVec2{3440,1440},ImVec2{3840,2160},ImVec2{7680,2160}})
+   for(auto vis:{TheaterUI::UiVisibility::Shown,TheaterUI::UiVisibility::Hidden,TheaterUI::UiVisibility::HiddenClean})
+    for(auto tool:{TheaterUI::Tool::Scene,TheaterUI::Tool::Camera,TheaterUI::Tool::Look,TheaterUI::Tool::Replays,TheaterUI::Tool::Export,TheaterUI::Tool::Debug,TheaterUI::Tool::Settings}){
+     b.visibility=int(vis);b.mode=vis==TheaterUI::UiVisibility::Shown?2:0;b.overlay.State().activeTool=tool;io.DisplaySize=size;
+     ImGui::NewFrame();b.draw();ImGui::Render();valid=valid&&ImGui::GetDrawData()->Valid;
+    }}
+ b.host_linked=false;b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;ImGui::DestroyContext(c);return valid?1:0;
 }
