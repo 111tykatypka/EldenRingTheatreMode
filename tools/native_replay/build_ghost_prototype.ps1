@@ -24,7 +24,7 @@ $gitArgs=@('-c',('safe.directory='+$repoRoot.Replace('\','/')),'-C',$repoRoot)
 $commit=(& git @gitArgs rev-parse HEAD);$branch=(& git @gitArgs branch --show-current)
 $status=(& git @gitArgs status --porcelain)
 $sources=@('adapter/Cargo.toml','adapter/Cargo.lock','adapter/build.rs','CMakeLists.txt')+
- @((Get-ChildItem -LiteralPath (Join-Path $repoRoot 'adapter/src'),(Join-Path $repoRoot 'src'),(Join-Path $repoRoot 'shared'),(Join-Path $repoRoot 'native_ui'),(Join-Path $repoRoot 'third_party') -File -Recurse).FullName | ForEach-Object{[IO.Path]::GetRelativePath($repoRoot,$_).Replace('\','/')})
+ @((Get-ChildItem -LiteralPath (Join-Path $repoRoot 'adapter/src'),(Join-Path $repoRoot 'src'),(Join-Path $repoRoot 'shared'),(Join-Path $repoRoot 'native_ui'),(Join-Path $repoRoot 'third_party') -File -Recurse).FullName | ForEach-Object{$_.Substring($repoRoot.Length).TrimStart([char[]]"\/").Replace('\','/')})
 $hashRows=@($sources|Sort-Object -Unique|ForEach-Object{$h=Get-FileHash -LiteralPath (Join-Path $repoRoot $_) -Algorithm SHA256;"$($h.Hash)  $_"})
 $hashRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt') -Encoding utf8
 $binaryRows=@(Get-ChildItem -LiteralPath $OutputDirectory -File|Where-Object Extension -in '.exe','.dll'|ForEach-Object{"$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)  $($_.Name)"})
