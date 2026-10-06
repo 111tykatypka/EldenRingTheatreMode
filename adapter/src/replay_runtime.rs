@@ -31,7 +31,10 @@ pub fn stop(detail: u32) {
 }
 pub fn connection(connected: bool) { CONNECTED.store(connected,Ordering::Release); stop(0); }
 pub fn heartbeat(now_ns: u64) { HEARTBEAT_NS.store(now_ns,Ordering::Release); }
-pub fn connection_lease(now:u64)->bool{transform_probe::lease_valid(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),now)}
+pub fn connection_lease(_callback_ns:u64)->bool{
+    let heartbeat=HEARTBEAT_NS.load(Ordering::Acquire);
+    transform_probe::sample_lease(CONNECTED.load(Ordering::Acquire),heartbeat,crate::monotonic_ns).0
+}
 pub fn input_owned(now:u64)->bool{active()&&connection_lease(now)}
 pub fn active() -> bool { PENDING.load(Ordering::Acquire) || matches!(status().0,replay::PLAYING|replay::PAUSED) }
 pub fn status() -> (u32,u32,u64,u64,u64) {
@@ -82,7 +85,14 @@ impl GameReplay {
         let request=match REQUEST.try_lock() {Ok(mut slot)=>slot.take(),Err(_)=>None}
             .filter(|r| r.generation==generation);
         if request.is_none() && !matches!(self.playback.phase,replay::PLAYING|replay::PAUSED) {self.input.restore();self.animation.restore();return;}
-        if !transform_probe::lease_valid(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),now_ns) {
+        let callback_ns=now_ns;
+        let heartbeat=HEARTBEAT_NS.load(Ordering::Acquire);
+        let connected=CONNECTED.load(Ordering::Acquire);
+        // REQUEST and heartbeat are published by another thread. Clock sampling
+        // must follow those reads, including for Playback::frame target freshness.
+        let (valid_lease,now_ns)=transform_probe::sample_lease(connected,heartbeat,crate::monotonic_ns);
+        if !valid_lease {
+            crate::log_game(&format!("REPLAY_LEASE_REJECT connected={connected} callback_ns={callback_ns} heartbeat_ns={heartbeat} checked_ns={now_ns} age_ns={:?} reason={}",now_ns.checked_sub(heartbeat),if !connected{"DISCONNECTED"}else if heartbeat>now_ns{"FUTURE_HEARTBEAT"}else{"HEARTBEAT_EXPIRED"}));
             stop(2); self.playback.cancel();self.input.restore();self.animation.restore(); return;
         }
         if crate::PROFILE.load(Ordering::Acquire)!=crate::STATE_WAITING || crate::INIT_STATE.load(Ordering::Acquire)!=crate::STATE_READY {

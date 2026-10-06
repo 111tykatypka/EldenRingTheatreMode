@@ -1,5 +1,19 @@
 # Hotfix3 — global recording controls
 
+## Live evidence after user test
+
+The log now confirms GLOBAL_HOTKEY id=1 -> queued START -> Recording started,
+then id=2 -> STOP -> finalization -> REPLAY_OPEN. File:
+replay_2026-10-06_054152.erplay; 1035 samples; 17.2364181 s; measured 59.989262 Hz;
+2 player chunks; 519908 bytes. Player recording hotkey path and finalization are
+confirmed in this live session. No unfinished recording file was found.
+
+Read-only inspection verified chunk/track CRCs. Initial player position:
+(-7.6980581, 1.5803874, -6.7588100). First 5 s have zero XZ displacement; first
+movement >0.1 units occurs at 7.6514167 s. Therefore First 5 seconds is a stationary
+hold test, followed by First 10 seconds to observe movement, after returning to
+the same start. Player replay and grounding remain unverified by this recording.
+
 User reported F5 has no effect with game running in Hotfix2. Current log confirms
 F5/F6/F7/F8 RegisterHotKey success and PLAYER FOUND, but no recording-start entry.
 There was no hotkey-delivery logging, so receipt of that physical F5 cannot be proven.

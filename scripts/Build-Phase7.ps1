@@ -1,14 +1,14 @@
 param(
- [string]$OutputDirectory='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Phase7_Runtime_UI_Hotfix3',
+ [string]$OutputDirectory='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Phase7_Runtime_UI_Hotfix4',
  [string]$CMakeBin='C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
 )
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 $outputFull=[IO.Path]::GetFullPath($OutputDirectory)
-if($outputFull -match '\\(Phase5[^\\]*|TesterBuild|Nightly_ResearchIntegration|Phase7_Runtime_UI|Phase7_Runtime_UI_Hotfix1|Phase7_Runtime_UI_Hotfix2)(\\|$)'){throw 'Preserved build directory cannot be an output'}
+if($outputFull -match '\\(Phase5[^\\]*|TesterBuild|Nightly_ResearchIntegration|Phase7_Runtime_UI|Phase7_Runtime_UI_Hotfix1|Phase7_Runtime_UI_Hotfix2|Phase7_Runtime_UI_Hotfix3)(\\|$)'){throw 'Preserved build directory cannot be an output'}
 $preserved=@{}
 $outputs='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode'
-foreach($folder in @('Phase5','TesterBuild','Nightly_ResearchIntegration','Phase7_Runtime_UI','Phase7_Runtime_UI_Hotfix1','Phase7_Runtime_UI_Hotfix2')){
+foreach($folder in @('Phase5','TesterBuild','Nightly_ResearchIntegration','Phase7_Runtime_UI','Phase7_Runtime_UI_Hotfix1','Phase7_Runtime_UI_Hotfix2','Phase7_Runtime_UI_Hotfix3')){
  foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','BUILD_MANIFEST.txt')){
   $path=Join-Path (Join-Path $outputs $folder) $name
   if(Test-Path -LiteralPath $path){$preserved[$path]=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
@@ -47,6 +47,7 @@ foreach($name in @('PHASE7_IMPLEMENTATION_STATUS','PHASE7_RUNTIME_TEST_PLAN','PH
 }
 Copy-Item -LiteralPath (Join-Path $repo 'notes\PHASE7_CRASH_DIAGNOSTIC.md') -Destination $outputFull -Force
 Copy-Item -LiteralPath (Join-Path $repo 'notes\PHASE7_RECORDING_HOTKEY_FIX.md') -Destination $outputFull -Force
+Copy-Item -LiteralPath (Join-Path $repo 'notes\PHASE7_REPLAY_LEASE_FIX.md') -Destination $outputFull -Force
 Copy-Item -LiteralPath (Join-Path $repo 'third_party\minhook_vendor\LICENSE.txt') -Destination (Join-Path $outputFull 'MinHook-LICENSE.txt') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'ERPLAY_FORMAT.md') -Destination $outputFull -Force
 Copy-Item -LiteralPath (Join-Path $repo 'research\symbols_2_7_0_0.json') -Destination $outputFull -Force
@@ -61,10 +62,11 @@ $git=Join-Path $env:ProgramFiles 'Git\cmd\git.exe';$safe="safe.directory=$($repo
 $commit=& $git -c $safe -C $repo rev-parse HEAD
 $branch=& $git -c $safe -C $repo branch --show-current
 $dirty=& $git -c $safe -C $repo status --porcelain
-$manifest=@('DEVELOPER EXPERIMENTAL BUILD',"Branch: $branch","Source commit: $commit","Working tree dirty: $([bool]$dirty)","Built UTC: $([DateTime]::UtcNow.ToString('o'))",'AMD64 Release; EldenRing_1_17 / file+product 2.7.0.0','Target disk SHA256: D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134','Pinned SDK: 3c8c1d7633a99309fb004c9f894ea10b7967d0e0','ERPLAY02 reader retained; ERPLAY03 unchanged; no ERPLAY04 introduced','Control v3/128 bytes; new capability 128; XZ flag 4; editor pipe v1/32-byte request with bounded actor pages','C++ CTest 13/13 PASS; Rust 24/24 PASS; Python research tests 3/3 PASS; see captured logs.','Previously user-verified: player/NPC capture, host trajectories; player replay PARTIAL.','Current Phase7 checkpoint: NO NEW LIVE GAME VERIFICATION. Grounding/NPC playback/animation remain FAILED or UNVERIFIED.','New diagnostic binding: typed CSLuaEventManImp READ-ONLY; runtime UNVERIFIED','Exact native +538 debug tail static verified; +530 callback. noMove/noAttack probes gated by live callback+owner check; noUpdate blocked','animationSpeed=0 selected-NPC 2s experiment only; identity/module reacquisition; UNVERIFIED','DX12 backend + host transport implemented; GPU/game runtime UNVERIFIED. Camera/warp/WALK/Dolly NOT IMPLEMENTED','One host ReplayPlayer clock; no second ERPLAY parser; no custom injector; YAFSML retained')
+$manifest=@('DEVELOPER EXPERIMENTAL BUILD',"Branch: $branch","Source commit: $commit","Working tree dirty: $([bool]$dirty)","Built UTC: $([DateTime]::UtcNow.ToString('o'))",'AMD64 Release; EldenRing_1_17 / file+product 2.7.0.0','Target disk SHA256: D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134','Pinned SDK: 3c8c1d7633a99309fb004c9f894ea10b7967d0e0','ERPLAY02 reader retained; ERPLAY03 unchanged; no ERPLAY04 introduced','Control v3/128 bytes; new capability 128; XZ flag 4; editor pipe v1/32-byte request with bounded actor pages','C++ CTest 13/13 PASS; Rust 25/25 PASS; Python research tests 3/3 PASS; see captured logs.','Previously user-verified: player/NPC capture, host trajectories; player replay PARTIAL.','Current Phase7 checkpoint: NO NEW LIVE GAME VERIFICATION. Grounding/NPC playback/animation remain FAILED or UNVERIFIED.','New diagnostic binding: typed CSLuaEventManImp READ-ONLY; runtime UNVERIFIED','Exact native +538 debug tail static verified; +530 callback. noMove/noAttack probes gated by live callback+owner check; noUpdate blocked','animationSpeed=0 selected-NPC 2s experiment only; identity/module reacquisition; UNVERIFIED','DX12 backend + host transport implemented; GPU/game runtime UNVERIFIED. Camera/warp/WALK/Dolly NOT IMPLEMENTED','One host ReplayPlayer clock; no second ERPLAY parser; no custom injector; YAFSML retained')
 $manifest+='Hotfix1: original Phase7 startup crash REPORTED; root cause UNRESOLVED; Clean startup/manual Insert and WndProc publication race fix; in-game validation REQUIRED.'
 $manifest+='User verified Hotfix1 loads world and displays Overlay; game terminates on RMB. Hotfix2 input fix: RUNTIME VALIDATION REQUIRED.'
 $manifest+='User subsequently verified Hotfix2 UI/mouse. Hotfix3 host-only global recording hotkey dispatch fix: live F5 validation REQUIRED.'
+$manifest+='Hotfix3 live F5/start/stop/file finalization verified in logs. Hotfix4 fixes callback-vs-IPC clock ordering; new DLL runtime validation REQUIRED; timeout limits unchanged.'
 $manifest+='Real-device DX12 smoke: PASS (120 Presents, Clean/Overlay/Editor, mouse buttons, ResizeBuffers, shutdown); separate from Elden Ring verification; see phase7-dx12-smoke.log.'
 foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','EldenRingCompatibilityProbe.exe')){
  $p=Join-Path $outputFull $name;$manifest+="$name bytes=$((Get-Item -LiteralPath $p).Length) SHA256=$((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash)"

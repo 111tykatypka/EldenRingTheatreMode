@@ -29,6 +29,11 @@ pub const LEASE_NS: u64 = 500_000_000;
 pub fn lease_valid(connected: bool, heartbeat_ns: u64, now_ns: u64) -> bool {
     connected && now_ns >= heartbeat_ns && now_ns-heartbeat_ns <= LEASE_NS
 }
+// Read heartbeat first, then sample the clock. An IPC update can legitimately be
+// newer than a timestamp captured at the start of the game callback.
+pub fn sample_lease(connected:bool, heartbeat_ns:u64, clock:impl FnOnce()->u64)->(bool,u64){
+    let checked_ns=clock();(lease_valid(connected,heartbeat_ns,checked_ns),checked_ns)
+}
 #[derive(Clone, Copy)]
 pub struct Observation {
     pub original: Transform, pub requested: Transform, pub began_ns: u64,
@@ -41,6 +46,23 @@ impl Observation {
 }
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn fresh_clock_after_ipc_snapshot_prevents_false_future_expiry(){
+        let callback_ns=100;let heartbeat=101;
+        assert!(!lease_valid(true,heartbeat,callback_ns)); // Reproduce old ordering.
+        let (valid,checked)=sample_lease(true,heartbeat,||102);assert!(valid);assert_eq!(checked,102);
+        assert!(!sample_lease(false,heartbeat,||102).0);
+        assert!(sample_lease(true,heartbeat,||heartbeat+LEASE_NS).0);
+        assert!(!sample_lease(true,heartbeat,||heartbeat+LEASE_NS+1).0);
+        assert!(!sample_lease(true,heartbeat,||100).0); // Real future times still rejected.
+        let target=Transform{position:[0.;3],quaternion:[0.,0.,0.,1.]};
+        let request=crate::transform_replay::Request{player_action:Default::default(),animation_enabled:false,
+            action:crate::transform_replay::Action::Begin,session:1,sequence:1,generation:1,
+            received_ns:heartbeat,replay_ns:0,paused:false,target};
+        let mut playback=crate::transform_replay::Playback::default();
+        playback.ingest(request,target).unwrap();assert!(playback.frame(1,callback_ns).is_none());
+        playback.ingest(request,target).unwrap();assert!(playback.frame(1,checked).is_some());
+        assert!(playback.frame(1,heartbeat+crate::transform_replay::TARGET_LEASE_NS+1).is_none());
+    }
     #[test] fn safe_offset_preserves_orientation() {
         let t=Transform { position: [1.0,2.0,3.0], quaternion: [0.0,0.0,0.0,1.0] };
         let next=t.offset([0.5,0.0,0.0]).unwrap(); assert_eq!(next.position,[1.5,2.0,3.0]);
