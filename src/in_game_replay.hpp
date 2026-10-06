@@ -4,13 +4,15 @@
 #include <functional>
 
 namespace in_game_replay {
-enum class Phase { inactive, starting, playing, paused, finishing, finished, error, restarting };
+std::optional<erplay::CharacterRecord> find_start_anchor(const erplay::Reader& reader);
+enum class Phase { inactive, starting, playing, paused, finishing, finished, error, restarting, preparing };
 // Serialized playback coordinator. The existing Player remains the ONLY replay clock.
 class Controller {
 public:
     using Logger=std::function<void(const std::string&)>;
     explicit Controller(game_control::Client& control,Logger logger):control_(control),logger_(std::move(logger)){}
     bool play(replay::Player& player,std::uint64_t limit_ns,replay::Player::Clock::time_point now=replay::Player::Clock::now());
+    bool prepare_start(replay::Player& player,bool autoplay=false,std::uint64_t limit=0,replay::Player::Clock::time_point now=replay::Player::Clock::now());
     void pause(replay::Player::Clock::time_point now=replay::Player::Clock::now());
     void restart(replay::Player& player,std::uint64_t limit_ns,replay::Player::Clock::time_point now=replay::Player::Clock::now());
     void tick(replay::Player::Clock::time_point now=replay::Player::Clock::now());
@@ -26,7 +28,7 @@ public:
 private:
     game_control::Client& control_;Logger logger_;replay::Player* player_{};
     Phase phase_{Phase::inactive};std::wstring diagnostic_{L"INACTIVE — no transform writes"};
-    std::uint64_t session_{},limit_ns_{};replay::Player::Clock::time_point deadline_{};bool pause_on_start_{};bool animation_{};
+    std::uint64_t session_{},limit_ns_{};replay::Player::Clock::time_point deadline_{};bool return_autoplay_{}; std::uint64_t return_limit_{}; bool pause_on_start_{};bool animation_{};
     std::uint64_t selected_actor_{},actor_log_ns_{};bool characters_{};bool xz_only_{};std::vector<erplay::CharacterInfo> actors_;
     bool send_characters();
     void transition(Phase phase,const std::wstring& diagnostic);

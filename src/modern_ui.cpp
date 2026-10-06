@@ -621,6 +621,13 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   if (ImGui::Button("Restart"))
     request_play(p, remote, true);
   ImGui::EndDisabled();
+  ImGui::BeginDisabled(!p.loaded||p.active||!remote.ready||recorder.state==erplay::RecordingState::recording||recorder.state==erplay::RecordingState::saving);
+  button("Return to replay start",return_replay_start);
+  ImGui::EndDisabled();
+  ImGui::TextWrapped("Play prepares the recorded start automatically when a loaded scene anchor matches. No cross-map teleport.");
+  if(p.loaded){std::lock_guard lock(app.replay_mutex);const auto start=app.replay_player->reader().sample(0);
+    const double dx=start.position.x-remote.live.position[0],dy=start.position.y-remote.live.position[1],dz=start.position.z-remote.live.position[2];
+    ImGui::Text("Recorded start: %.3f %.3f %.3f | distance %.2f",start.position.x,start.position.y,start.position.z,std::sqrt(dx*dx+dy*dy+dz*dz));}
   ImGui::Separator();
   ImGui::Text("Position: %.4f  %.4f  %.4f", p.state.position.x,
               p.state.position.y, p.state.position.z);
@@ -747,7 +754,7 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   if (show_settings) {
     ImGui::Begin("Settings", &show_settings);
     ImGui::Checkbox("Developer XZ-only diagnostic (native Y; not final replay)", &app.xz_diagnostic);
-    ImGui::TextWrapped("Map UNKNOWN: start blocked beyond 1.0 horizontal / 0.25 vertical units. Return to recording start.");
+    ImGui::TextWrapped("Play can prepare start using a matching stationary scene anchor. Return is bounded to the loaded area; map loading is not implemented.");
     ImGui::InputDouble("Legacy warning preference (unused)", &warning_threshold, 1, 10,
                        "%.1f");
     warning_threshold =

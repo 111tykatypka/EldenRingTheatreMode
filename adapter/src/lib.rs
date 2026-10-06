@@ -1,3 +1,4 @@
+mod replay_return;
 use std::{
     ffi::{c_void, CStr},
     fs::OpenOptions,

@@ -17,6 +17,7 @@ pub const ACTOR_APPLY: u16 = 11;
 pub const RUNTIME_TRACE_START:u16=12;
 pub const RUNTIME_TRACE_STOP:u16=13;
 pub const OWNERSHIP_PROBE:u16=14;
+pub const RETURN_START:u16=15;
 pub const STATUS: u16 = 0x8000;
 pub const PIPE: &str = r"\\.\pipe\EldenRingTheaterMode_1_17_Control";
 
@@ -90,7 +91,14 @@ impl Packet {
             if (norm-1.0).abs()>0.001 || self.timestamp_ns>now_ns || now_ns-self.timestamp_ns>250_000_000 {return Err("invalid/stale actor target");}
             return Ok(());
         }
-        if !matches!(self.kind, HELLO | HEARTBEAT | PROBE_NUDGE | STOP | REPLAY_BEGIN | REPLAY_APPLY | REPLAY_FINISH | TRACE_START | TRACE_STOP | TRACE_MARK | RUNTIME_TRACE_START | RUNTIME_TRACE_STOP) { return Err("unknown command"); }
+        if !matches!(self.kind, HELLO | HEARTBEAT | PROBE_NUDGE | STOP | REPLAY_BEGIN | REPLAY_APPLY | REPLAY_FINISH | TRACE_START | TRACE_STOP | TRACE_MARK | RUNTIME_TRACE_START | RUNTIME_TRACE_STOP | RETURN_START) { return Err("unknown command"); }
+        if self.kind==RETURN_START {
+            if self.version!=3||self.sequence==0||self.sequence<=last_sequence||self.timestamp_ns>now_ns||now_ns-self.timestamp_ns>500_000_000{return Err("return start stale/version/sequence");}
+            if self.flags!=0||self.session!=0||self.replay_timestamp_ns!=0||self.replay_state!=0||self.detail==0||(self.applied_sequence as u32>>28)!=1{return Err("return start anchor/reserved");}
+            if self.player_action.action!=0||self.player_action.flags!=0||self.player_action.raw_action_bits!=0||self.player_action.animation_id!=-1{return Err("return start anchor payload");}
+            if !self.position.iter().chain(self.quaternion.iter()).chain([self.player_action.animation_time,self.player_action.animation_length,self.player_action.playback_rate].iter()).all(|v|v.is_finite()){return Err("return start nonfinite");}
+            let norm:f64=self.quaternion.iter().map(|v|f64::from(*v).powi(2)).sum();if (norm-1.0).abs()>0.001{return Err("return start quaternion");}return Ok(());
+        }
         if matches!(self.kind,RUNTIME_TRACE_START|RUNTIME_TRACE_STOP)&&self.version!=3{return Err("runtime trace requires v3");}
         if matches!(self.kind,TRACE_START|TRACE_STOP|TRACE_MARK) && self.version!=3 {return Err("trace requires v3");}
         let replay=matches!(self.kind,REPLAY_BEGIN|REPLAY_APPLY|REPLAY_FINISH);
@@ -126,6 +134,12 @@ mod tests {
     use super::*;
     fn command() -> Packet { Packet { version:3,player_action:Default::default(), replay_timestamp_ns:0,session:0,replay_state:0,replay_detail:0,applied_sequence:0, kind: PROBE_NUDGE, sequence: 7, timestamp_ns: 100,
         position: [0.5, 0.0, 0.0], quaternion: [0.0, 0.0, 0.0, 1.0], state: 0, detail: 0, flags: 0 } }
+    #[test]fn return_start_payload_has_explicit_validation(){
+        let p=Packet{kind:RETURN_START,detail:123,replay_detail:44,state:2,applied_sequence:0x10000001,position:[1.,2.,3.],player_action:crate::player_action::State{animation_time:-5.,animation_length:10.,playback_rate:12.,..Default::default()},..command()};
+        assert!(p.validate_command(6,100).is_ok());assert!(Packet::decode(&p.encode()).unwrap().validate_command(6,100).is_ok());
+        for bad in [Packet{detail:0,..p},Packet{version:2,..p},Packet{flags:1,..p},Packet{session:3,..p},Packet{position:[f32::NAN,0.,0.],..p},Packet{quaternion:[0.;4],..p},Packet{applied_sequence:0x20000001,..p}]{assert!(bad.validate_command(6,100).is_err());}
+        assert!(p.validate_command(7,100).is_err());assert!(p.validate_command(6,500_000_101).is_err());
+    }
     #[test]fn nightly_commands_have_explicit_modes(){
         let trace=Packet{kind:RUNTIME_TRACE_START,position:[0.;3],..command()};assert!(trace.validate_command(6,100).is_ok());assert!(Packet{version:2,..trace}.validate_command(6,100).is_err());
         let actor=Packet{kind:OWNERSHIP_PROBE,session:1,applied_sequence:0x10000001,position:[0.;3],flags:1,..command()};

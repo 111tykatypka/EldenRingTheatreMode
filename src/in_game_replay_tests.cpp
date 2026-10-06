@@ -15,8 +15,8 @@ bool wait_for(const std::function<bool()>& predicate){for(int i=0;i<300;++i){if(
 // Transport/coordinator mock only: no production pipe, DLL, hook or game is used.
 class MockGame {
 public:
-    explicit MockGame(game_control::Transform live):live_(live){
-        name=L"\\\\.\\pipe\\TheaterMode.ReplayTest."+std::to_wstring(GetCurrentProcessId());
+    explicit MockGame(game_control::Transform live,bool return_supported=false):live_(live),return_supported_(return_supported){
+        static std::atomic<unsigned> instances{0};name=L"\\\\.\\pipe\\TheaterMode.ReplayTest."+std::to_wstring(GetCurrentProcessId())+L"."+std::to_wstring(++instances);
         pipe_=CreateNamedPipeW(name.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,PIPE_TYPE_BYTE|PIPE_REJECT_REMOTE_CLIENTS,1,sizeof(game_control::Packet),sizeof(game_control::Packet),0,nullptr);
         assert(pipe_!=INVALID_HANDLE_VALUE);thread_=std::thread([this]{run();});
     }
@@ -26,7 +26,7 @@ public:
     game_control::Packet last(std::uint16_t kind){std::lock_guard lock(mutex_);for(auto it=commands_.rbegin();it!=commands_.rend();++it)if(it->kind==kind)return *it;return {};}
     std::wstring name;
 private:
-    HANDLE pipe_;std::thread thread_;std::mutex mutex_;game_control::Transform live_;
+    bool return_supported_{};std::uint32_t probe_phase_{};HANDLE pipe_;std::thread thread_;std::mutex mutex_;game_control::Transform live_;
     std::vector<game_control::Packet> commands_;std::uint64_t session_{},replay_ns_{},applied_{};std::uint32_t phase_{};
     void run(){
         if(!ConnectNamedPipe(pipe_,nullptr)&&GetLastError()!=ERROR_PIPE_CONNECTED)return;
@@ -36,13 +36,15 @@ private:
             assert(request.version==3&&request.sequence>sequence);sequence=request.sequence;
             game_control::Packet reply;
             {std::lock_guard lock(mutex_);commands_.push_back(request);
-                if(request.kind==game_control::stop){phase_=game_control::inactive;session_=0;}
+                if(request.kind==game_control::stop){phase_=game_control::inactive;session_=0;probe_phase_=game_control::off;}
                 if(request.kind==game_control::replay_begin||request.kind==game_control::replay_apply||request.kind==game_control::replay_finish){
                     session_=request.session;replay_ns_=request.replay_timestamp_ns;applied_=request.sequence;
                     if(request.flags!=2){std::copy(std::begin(request.position),std::end(request.position),live_.position.begin());std::copy(std::begin(request.quaternion),std::end(request.quaternion),live_.quaternion.begin());}
                     phase_=request.kind==game_control::replay_finish?game_control::finished:request.replay_state;
                 }
-                reply.kind=game_control::status;reply.sequence=sequence;reply.timestamp_ns=GetTickCount64()*1'000'000ULL;reply.flags=99;
+                if(request.kind==game_control::return_start){std::copy(std::begin(request.position),std::end(request.position),live_.position.begin());std::copy(std::begin(request.quaternion),std::end(request.quaternion),live_.quaternion.begin());probe_phase_=game_control::complete;}
+                reply.state=probe_phase_;
+                reply.kind=game_control::status;reply.sequence=sequence;reply.timestamp_ns=GetTickCount64()*1'000'000ULL;reply.flags=99|(return_supported_?256:0);
                 reply.session=session_;reply.replay_timestamp_ns=replay_ns_;reply.replay_state=phase_;reply.applied_sequence=applied_;
                 std::copy(live_.position.begin(),live_.position.end(),reply.position);std::copy(live_.quaternion.begin(),live_.quaternion.end(),reply.quaternion);
             }
@@ -149,12 +151,32 @@ int run_tests(int argc,wchar_t**argv){
     assert(wait_for([&]{controller.tick(now);return controller.phase()==in_game_replay::Phase::playing;}));
     sample_pid=0;assert(wait_for([&]{return !client.state().connected;}));controller.tick(now+1s);assert(controller.phase()==in_game_replay::Phase::error);
     client.close();
+    // Automatic preparation mock only: no game or native teleport.
+    const auto anchored=dir/L"anchored.erplay";
+    {erplay::Metadata anchored_meta;anchored_meta.format_version=3;erplay::Writer writer(anchored,anchored_meta);for(unsigned i=0;i<2;++i){erplay::Sample sample;sample.index=i;sample.source_time_ns=100+i*1'000'000'000ULL;sample.replay_time_ns=i*1'000'000'000ULL;writer.append(sample);
+        erplay::CharacterRecord row;row.id=1;row.native_handle=0x10000042;row.entity_id=123;row.npc_param=456;row.block_id=0;row.character_type=2;row.position={1,0,2};row.timestamp_ns=sample.replay_time_ns;
+        if(i==0){row.kind=erplay::CharacterKind::registry;writer.append_character(row);}row.kind=erplay::CharacterKind::transform;row.flags=0;writer.append_character(row);}(void)writer.finalize();}
+    replay::Player anchored_player(anchored);assert(in_game_replay::find_start_anchor(anchored_player.reader()));
+    MockGame returning({{5,0,0},{0,0,0,1}},true);std::atomic<DWORD> returning_pid{GetCurrentProcessId()};game_control::Client returning_client(returning.name);returning_client.start(returning_pid);
+    assert(wait_for([&]{return returning_client.state().return_supported;}));in_game_replay::Controller returning_controller(returning_client,[](const auto&){});
+    assert(returning_controller.play(anchored_player,500'000'000,Clock::now()));assert(returning_controller.phase()==in_game_replay::Phase::preparing);
+    assert(wait_for([&]{returning_controller.tick();return returning_controller.phase()==in_game_replay::Phase::playing;}));assert(returning.count(game_control::return_start)==1);returning_controller.stop();returning_client.close();
+    if(argc>1){erplay::Reader real(argv[1]);auto anchor=in_game_replay::find_start_anchor(real);std::cout<<"REAL_START_ANCHOR available="<<bool(anchor);if(anchor)std::cout<<" entity="<<anchor->entity_id<<" block="<<anchor->block_id<<" xyz="<<anchor->position[0]<<","<<anchor->position[1]<<","<<anchor->position[2];std::cout<<" (read-only, not live verification)\n";}
     std::cout<<"In-game coordinator MOCK PASS: begin ACK, interpolation/SLERP, pause/resume, restart STOP ACK, exact 5-second finish, STOP, displacement guard, malformed local target and disconnect. No game or DLL loaded.\n";
     return 0;
 }
 
 int wmain(int argc,wchar_t**argv){
     try{
+        if(argc==3&&std::wstring(argv[1])==L"--start-anchor"){
+            erplay::Reader real(argv[2]);auto anchor=in_game_replay::find_start_anchor(real);
+            std::cout<<"REAL_START_ANCHOR available="<<bool(anchor);if(anchor)std::cout<<" entity="<<anchor->entity_id<<" block="<<anchor->block_id<<" xyz="<<anchor->position[0]<<","<<anchor->position[1]<<","<<anchor->position[2];std::cout<<" (read-only; runtime validation required)\n";
+            for(const auto& info:real.characters()) { auto row=real.character_at(info.registry.id,info.first_ns); auto end=real.character_at(info.registry.id,real.summary().duration_ns);
+                std::cout<<"ANCHOR_CANDIDATE id="<<info.registry.id<<" entity="<<info.registry.entity_id<<" block="<<info.registry.block_id<<" handle="<<info.registry.native_handle<<" first_ns="<<info.first_ns<<" first_pose="<<bool(row)<<" end_pose="<<bool(end);
+                if(row)std::cout<<" xyz="<<row->position[0]<<","<<row->position[1]<<","<<row->position[2];
+                if(end)std::cout<<" end_xyz="<<end->position[0]<<","<<end->position[1]<<","<<end->position[2];std::cout<<"\n";
+            } return 0;
+        }
         if(argc>1&&!std::filesystem::is_regular_file(argv[1])){std::wcerr<<L"REAL_FIXTURE_MISSING: "<<argv[1]<<L"\n";return 2;}
         return run_tests(argc,argv);
     }catch(const std::exception&e){std::cerr<<"TEST_EXCEPTION: "<<e.what()<<"\n";return 2;}

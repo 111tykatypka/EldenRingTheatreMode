@@ -382,6 +382,7 @@ void launch_game() {
                 L"Game launch failed", MB_ICONERROR | MB_OK);
   }
 }
+void return_replay_start(){std::lock_guard lock(app.replay_mutex);if(app.replay_player&&can_start_game_replay())app.game_replay->prepare_start(*app.replay_player);}
 void play_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)

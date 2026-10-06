@@ -110,6 +110,7 @@ void post_command(Command);
 bool handle_global_hotkey(UINT);
 void emergency_stop();
 void play_replay();
+void return_replay_start();
 void pause_replay();
 void restart_replay();
 void seek_replay(std::uint64_t);

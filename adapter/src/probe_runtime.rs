@@ -11,7 +11,7 @@ static STATE:AtomicU32=AtomicU32::new(OFF);
 static DETAIL:AtomicU32=AtomicU32::new(0);
 static COMMAND_SEQUENCE:AtomicU64=AtomicU64::new(0);
 static PENDING:Mutex<Option<Request>>=Mutex::new(None);
-#[derive(Clone,Copy)] struct Request { sequence:u64, generation:u64, received_ns:u64, delta:[f32;3] }
+#[derive(Clone,Copy)] struct Request { sequence:u64, generation:u64, received_ns:u64, delta:[f32;3],return_start:Option<wire::Packet> }
 
 pub(crate) fn stop(detail:u32) {
     crate::ownership_probe::stop();
@@ -28,9 +28,9 @@ fn ready()->bool { crate::PROFILE.load(Ordering::Acquire)==crate::STATE_WAITING 
 #[derive(Default)] pub struct GameProbe { observation:Option<Observation> }
 impl GameProbe {
     /// Called only by the verified game task, before the immutable sampler borrow.
-    pub fn tick(&mut self,now_ns:u64) {
+    pub fn tick(&mut self,_callback_ns:u64) {
         let generation=GENERATION.load(Ordering::Acquire);
-        let valid_lease=transform_probe::lease_valid(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),now_ns);
+        let (valid_lease,_lease_ns)=transform_probe::sample_lease(CONNECTED.load(Ordering::Acquire),HEARTBEAT_NS.load(Ordering::Acquire),crate::monotonic_ns);
         if let Some(o)=self.observation {
             if !valid_lease || o.generation!=generation || crate::PROFILE.load(Ordering::Acquire)!=crate::STATE_WAITING {
                 self.observation=None;
@@ -43,7 +43,9 @@ impl GameProbe {
             .filter(|r| r.generation==GENERATION.load(Ordering::Acquire));
         if self.observation.is_none() && request.is_none(){return;}
         if !valid_lease {stop(2);self.observation=None;return;}
+        let now_ns=crate::monotonic_ns(); // Sample AFTER pending IPC request has been read.
         if request.is_some_and(|r|now_ns<r.received_ns||now_ns-r.received_ns>transform_probe::LEASE_NS){stop(8);return;}
+        if let Some(r)=request {if let Some(packet)=r.return_start {if let Err(reason)=crate::replay_return::validate(packet){stop(32);self.observation=None;crate::log_game(&format!("REPLAY_RETURN_REJECT reason={reason}; no write"));return;}}}
         // The binding internally reacquires WorldChrMan::instance_mut/main_player.
         // No PlayerIns/WorldChrMan reference survives this invocation.
         let player=match unsafe {PlayerIns::local_player_mut()} {
@@ -67,7 +69,7 @@ impl GameProbe {
         }
         if let Some(r)=request {
             if self.observation.is_some() || r.generation!=GENERATION.load(Ordering::Acquire) || now_ns<r.received_ns || now_ns-r.received_ns>transform_probe::LEASE_NS {return;}
-            let Some(requested)=actual.offset(r.delta) else {stop(4);crate::log_game("PROBE_ERROR=INVALID_TARGET; no write");return;};
+            let Some(requested)=r.return_start.map(|packet|Transform{position:packet.position,quaternion:packet.quaternion}).or_else(||actual.offset(r.delta)) else {stop(4);crate::log_game("PROBE_ERROR=INVALID_TARGET; no write");return;};
             if !ready(){stop(5);crate::log_game("PROBE_ERROR=RUNTIME_NOT_READY; no write");return;}
             // Test A intentionally writes ONLY these documented transform fields.
             // No ChrCtrl proxy flags, Euler fields, input, or collision are changed.
@@ -104,7 +106,7 @@ fn status(version:u16)->wire::Packet {
     let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
     wire::Packet {version,player_action:Default::default(),replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32|64|128}else{0}) }
+        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32|64|128|256}else{0}) }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;
@@ -136,8 +138,12 @@ pub fn pipe_worker() {
                 COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);
                 if !ready(){stop(5);crate::log_game("PROBE_REJECTED=RUNTIME_NOT_READY");}
                 else if crate::locomotion_trace::busy() || crate::replay_runtime::active() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING){crate::log_game("PROBE_REJECTED=BUSY");}
-                else if let Ok(mut slot)=PENDING.lock(){DETAIL.store(0,Ordering::Release);STATE.store(ARMED,Ordering::Release);*slot=Some(Request {sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),received_ns:now_ns,delta:packet.position});crate::log_game("PROBE_STATE=ARMED; awaiting game callback");}
+                else if let Ok(mut slot)=PENDING.lock(){DETAIL.store(0,Ordering::Release);STATE.store(ARMED,Ordering::Release);*slot=Some(Request {sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),received_ns:now_ns,delta:packet.position,return_start:None});crate::log_game("PROBE_STATE=ARMED; awaiting game callback");}
                 else {stop(6);}
+            }
+            if packet.kind==wire::RETURN_START {
+                if !ready()||crate::replay_runtime::active()||crate::locomotion_trace::busy()||matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING){crate::log_game("REPLAY_RETURN_REJECT=BUSY_OR_NOT_READY");}
+                else if let Ok(mut slot)=PENDING.lock(){DETAIL.store(0,Ordering::Release);STATE.store(ARMED,Ordering::Release);*slot=Some(Request{sequence:packet.sequence,generation:GENERATION.load(Ordering::Acquire),received_ns:now_ns,delta:[0.;3],return_start:Some(packet)});crate::log_game("REPLAY_RETURN_ARMED; game callback scene verification required");}
             }
             if matches!(packet.kind,wire::REPLAY_BEGIN|wire::REPLAY_APPLY|wire::REPLAY_FINISH) {
                 if !ready() || crate::locomotion_trace::busy() || matches!(STATE.load(Ordering::Acquire),ARMED|OBSERVING) {crate::replay_runtime::stop(5);}
