@@ -1,0 +1,3126 @@
+{
+  "file": "C:\\Users\\user\\AppData\\Local\\EldenRingTheaterMode\\replays\\replay_2026-10-06_075252.erplay",
+  "tracks": {
+    "PhysicsTrack": {
+      "records": 7555,
+      "changed_records": 7542,
+      "last_available_fields": 62,
+      "nonfinite_fields": 0
+    },
+    "AnimationTrack": {
+      "records": 7555,
+      "changed_records": 7542,
+      "last_available_fields": 42,
+      "nonfinite_fields": 0
+    },
+    "ActionTrackRaw": {
+      "records": 7555,
+      "changed_records": 3559,
+      "last_available_fields": 39,
+      "nonfinite_fields": 0
+    },
+    "LocomotionBehaviorTrack": {
+      "records": 7555,
+      "changed_records": 6981,
+      "last_available_fields": 23,
+      "nonfinite_fields": 0
+    },
+    "EquipmentTrack": {
+      "records": 7555,
+      "changed_records": 4,
+      "last_available_fields": 8,
+      "nonfinite_fields": 0
+    },
+    "AppearanceTrack": {
+      "records": 7555,
+      "changed_records": 0,
+      "last_available_fields": 3,
+      "nonfinite_fields": 0
+    },
+    "GameplayStateTrack": {
+      "records": 7555,
+      "changed_records": 3133,
+      "last_available_fields": 25,
+      "nonfinite_fields": 0
+    },
+    "EffectSignalsTrack": {
+      "records": 7555,
+      "changed_records": 4,
+      "last_available_fields": 4,
+      "nonfinite_fields": 0
+    },
+    "CombatStateTrack": {
+      "records": 7555,
+      "changed_records": 5295,
+      "last_available_fields": 36,
+      "nonfinite_fields": 0
+    }
+  },
+  "selected": {
+    "PhysicsTrack": {
+      "track": "PhysicsTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "position": {
+          "available": true,
+          "raw_hex": [
+            "C119F702",
+            "4063DCA8",
+            "41BD00B3",
+            "3F800000"
+          ],
+          "value": [
+            -9.622804641723633,
+            3.560342788696289,
+            23.625341415405273,
+            1.0
+          ],
+          "confidence": "RUNTIME_READ_VERIFIED",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "last_update_position": {
+          "available": true,
+          "raw_hex": [
+            "C11A3ADD",
+            "4063A9A9",
+            "41BCCE34",
+            "3F800000"
+          ],
+          "value": [
+            -9.639370918273926,
+            3.557230234146118,
+            23.600685119628906,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "interpolated_orientation": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "3DDF4A55",
+            "00000000",
+            "3F7E7951"
+          ],
+          "value": [
+            0.0,
+            0.10902849584817886,
+            0.0,
+            0.9940386414527893
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "additional_rotation": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000",
+            "00000000",
+            "00000000"
+          ],
+          "value": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "orientation_euler": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000",
+            "00000000",
+            "00000000"
+          ],
+          "value": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "rotation_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "BF800000"
+          ],
+          "value": [
+            -1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "motion_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "gravity_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "chr_push_up_factor": {
+          "available": true,
+          "raw_hex": [
+            "3E99999A"
+          ],
+          "value": [
+            0.30000001192092896
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "default_max_turn_rate": {
+          "available": true,
+          "raw_hex": [
+            "3F5F66F3"
+          ],
+          "value": [
+            0.8726646304130554
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "hit_height": {
+          "available": true,
+          "raw_hex": [
+            "3FC00000"
+          ],
+          "value": [
+            1.5
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "hit_radius": {
+          "available": true,
+          "raw_hex": [
+            "3ECCCCCD"
+          ],
+          "value": [
+            0.4000000059604645
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "weight": {
+          "available": true,
+          "raw_hex": [
+            "42700000"
+          ],
+          "value": [
+            60.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "chr_proxy_pos_update_requested": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "standing_on_solid_ground": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "touching_solid_ground": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_falling": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_touching_ground": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "gravity_disabled": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "fade_out_gravity_disabled": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "flying_character_fall_requested": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "use_world_y_alignment_logic": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_surface_constrained": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "adjust_to_hi_collision": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "move_type_flags": {
+          "available": true,
+          "raw_hex": [
+            "00000016"
+          ],
+          "value": [
+            22
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "physics_model_matrix": {
+          "available": true,
+          "raw_hex": [
+            "3F79E9EB",
+            "00000000",
+            "BE5DF591",
+            "00000000",
+            "00000000",
+            "3F800000",
+            "00000000",
+            "00000000",
+            "3E5DF591",
+            "00000000",
+            "3F79E9EB",
+            "00000000",
+            "C119F702",
+            "4063DCA8",
+            "41BD00B3",
+            "3F800000"
+          ],
+          "value": [
+            0.9762255549430847,
+            0.0,
+            -0.21675707399845123,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.21675707399845123,
+            0.0,
+            0.9762255549430847,
+            0.0,
+            -9.622804641723633,
+            3.560342788696289,
+            23.625341415405273,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "model_matrix": {
+          "available": true,
+          "raw_hex": [
+            "3F79E9EC",
+            "B554BDFD",
+            "BE5DF581",
+            "00000000",
+            "3541CEC7",
+            "3F800000",
+            "B4D9388E",
+            "00000000",
+            "3E5DF581",
+            "348009C8",
+            "3F79E9EC",
+            "00000000",
+            "C119F702",
+            "4064892F",
+            "41BD00B3",
+            "3F800000"
+          ],
+          "value": [
+            0.9762256145477295,
+            -7.925262366370589e-07,
+            -0.21675683557987213,
+            0.0,
+            7.219900339805463e-07,
+            1.0,
+            -4.0460548689225107e-07,
+            0.0,
+            0.21675683557987213,
+            2.3848974706197623e-07,
+            0.9762256145477295,
+            0.0,
+            -9.622804641723633,
+            3.5708730220794678,
+            23.625341415405273,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "additional_orientation_quat": {
+          "available": true,
+          "raw_hex": [
+            "B4593895",
+            "00000000",
+            "B4C1CECE",
+            "3F7FFFF7"
+          ],
+          "value": [
+            -2.0230284292210854e-07,
+            0.0,
+            -3.6099521594223916e-07,
+            0.999999463558197
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "vertical_position_offset": {
+          "available": true,
+          "raw_hex": [
+            "3C2C873E"
+          ],
+          "value": [
+            0.010530291125178337
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "scale_size_x": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "scale_size_y": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "scale_size_z": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "offset_y": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "ragdoll_revive_time": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "foot_ik_error_height_limit": {
+          "available": true,
+          "raw_hex": [
+            "3ECCCCCD"
+          ],
+          "value": [
+            0.4000000059604645
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "disable_move": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "height_correction_request": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "chr_ragdoll_state": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "flags": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "flags_copy": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "chr_proxy_flags": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "fall_timer": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "force_max_fall_height": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "disable_fall_motion": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "chr_hit_height": {
+          "available": true,
+          "raw_hex": [
+            "3FC00000"
+          ],
+          "value": [
+            1.5
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "chr_hit_radius": {
+          "available": true,
+          "raw_hex": [
+            "3ECCCCCD"
+          ],
+          "value": [
+            0.4000000059604645
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "step_disp_interpolate_time": {
+          "available": true,
+          "raw_hex": [
+            "3F000000"
+          ],
+          "value": [
+            0.5
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "step_disp_interpolate_trigger_value": {
+          "available": true,
+          "raw_hex": [
+            "3F19999A"
+          ],
+          "value": [
+            0.6000000238418579
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_enable_step_disp_interpolate": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_watcher_stones": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "physics_transform_matrix_squared": {
+          "available": true,
+          "raw_hex": [
+            "3F79E9EB",
+            "00000000",
+            "3E5DF591",
+            "00000000",
+            "00000000",
+            "3F800000",
+            "80000000",
+            "00000000",
+            "BE5DF591",
+            "00000000",
+            "3F79E9EB",
+            "00000000",
+            "41683D64",
+            "C063DCA7",
+            "C1A7D2A3",
+            "3F800000"
+          ],
+          "value": [
+            0.9762255549430847,
+            0.0,
+            0.21675707399845123,
+            0.0,
+            0.0,
+            1.0,
+            -0.0,
+            0.0,
+            -0.21675707399845123,
+            0.0,
+            0.9762255549430847,
+            0.0,
+            14.51498794555664,
+            -3.56034255027771,
+            -20.97784996032715,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "model_matrix_squared": {
+          "available": true,
+          "raw_hex": [
+            "3F79E9EC",
+            "3541CEC9",
+            "3E5DF581",
+            "80000000",
+            "B554BDFB",
+            "3F800000",
+            "348009D0",
+            "00000000",
+            "BE5DF581",
+            "B4D93886",
+            "3F79E9EC",
+            "00000000",
+            "41683D62",
+            "C06488EA",
+            "C1A7D2A6",
+            "3F800000"
+          ],
+          "value": [
+            0.9762256145477295,
+            7.21990147667384e-07,
+            0.21675683557987213,
+            -0.0,
+            -7.925261229502212e-07,
+            1.0,
+            2.384899744356517e-07,
+            0.0,
+            -0.21675683557987213,
+            -4.046052595185756e-07,
+            0.9762256145477295,
+            0.0,
+            14.514986038208008,
+            -3.5708565711975098,
+            -20.977855682373047,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "foot_ik_error_on_gain": {
+          "available": true,
+          "raw_hex": [
+            "3DCCCCCD"
+          ],
+          "value": [
+            0.10000000149011612
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "foot_ik_error_off_gain": {
+          "available": true,
+          "raw_hex": [
+            "3ECCCCCD"
+          ],
+          "value": [
+            0.4000000059604645
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "forward_undulation_limit_radians": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "backward_undulation_limit_radians": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "side_undulation": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "undulation_correction_gain": {
+          "available": true,
+          "raw_hex": [
+            "3DCCCCCD"
+          ],
+          "value": [
+            0.10000000149011612
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "weight_type": {
+          "available": true,
+          "raw_hex": [
+            "00000002"
+          ],
+          "value": [
+            2
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_undulation": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "use_ik_normal_by_undulation": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "hit_group_and_navimesh": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "AnimationTrack": {
+      "track": "AnimationTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "read_idx": {
+          "available": true,
+          "raw_hex": [
+            "00000009"
+          ],
+          "value": [
+            9
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "write_idx": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_0_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_0_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3DCCCD4A"
+          ],
+          "value": [
+            0.10000093281269073
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_0_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_1_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_1_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3DEEEFBC"
+          ],
+          "value": [
+            0.11666819453239441
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_1_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_2_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_2_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E088917"
+          ],
+          "value": [
+            0.13333545625209808
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_2_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_3_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_3_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E199A50"
+          ],
+          "value": [
+            0.15000271797180176
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_3_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_4_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_4_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E2AAB89"
+          ],
+          "value": [
+            0.16666997969150543
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_4_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_5_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_5_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E3BBCC2"
+          ],
+          "value": [
+            0.1833372414112091
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_5_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_6_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_6_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E4CCDFB"
+          ],
+          "value": [
+            0.20000450313091278
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_6_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_7_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_7_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E5DDF34"
+          ],
+          "value": [
+            0.21667176485061646
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_7_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_8_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_8_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E6EF06D"
+          ],
+          "value": [
+            0.23333902657032013
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_8_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_9_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_9_play_time": {
+          "available": true,
+          "raw_hex": [
+            "3E8000D3"
+          ],
+          "value": [
+            0.2500062882900238
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_9_anim_length": {
+          "available": true,
+          "raw_hex": [
+            "3FEAAAAB"
+          ],
+          "value": [
+            1.8333333730697632
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "animation_speed": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "max_ankle_pitch_angle_rad": {
+          "available": true,
+          "raw_hex": [
+            "3E32B8C2"
+          ],
+          "value": [
+            0.1745329201221466
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "max_ankle_roll_angle_rad": {
+          "available": true,
+          "raw_hex": [
+            "3E32B8C2"
+          ],
+          "value": [
+            0.1745329201221466
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "ground_touch_state": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "root_motion": {
+          "available": true,
+          "raw_hex": [
+            "3DBF7E10",
+            "00000000",
+            "00000000",
+            "3F800000"
+          ],
+          "value": [
+            0.09350216388702393,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "request_animation_id": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "idle_anim_id": {
+          "available": true,
+          "raw_hex": [
+            "000109AC"
+          ],
+          "value": [
+            68012
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "ez_state_request_ladder": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "ez_state_request_ladder_output": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "flags": {
+          "available": true,
+          "raw_hex": [
+            "000000FF"
+          ],
+          "value": [
+            255
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "ActionTrackRaw": {
+      "track": "ActionTrackRaw",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "action_requests": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "previous_action_requests": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "new_action_presses": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "released_actions": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "cancel_ready_actions": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queued_action_inputs": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "disabled_action_inputs": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "possible_action_inputs": {
+          "available": true,
+          "raw_hex": [
+            "3D18064F",
+            "00000006"
+          ],
+          "value": 26794788431,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "possible_action_cancels": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "prev_possible_action_inputs": {
+          "available": true,
+          "raw_hex": [
+            "3D18064F",
+            "00000006"
+          ],
+          "value": 26794788431,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "readback_new_presses": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "readback_cancel_ready": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "readback_queued_inputs": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "readback_possible_inputs": {
+          "available": true,
+          "raw_hex": [
+            "3D18064F",
+            "00000006"
+          ],
+          "value": 26794788431,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "readback_possible_cancels": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000"
+          ],
+          "value": 0,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "npc_action_id": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "requested_gesture": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "readback_npc_action_id": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_tae_id_override": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_current_tae_id": {
+          "available": true,
+          "raw_hex": [
+            "000069E8"
+          ],
+          "value": [
+            27112
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "tae_cancels": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "movement_request_flags": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "queue_mode_enabled": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_r1": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_r2": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_l1": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_l2": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_action": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_roll": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_jump": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_use_item": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_switch_spell": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_change_weapon_r": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_change_weapon_l": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_change_item": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_r3": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_l3": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_touch_r": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "timer_touch_l": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "LocomotionBehaviorTrack": {
+      "track": "LocomotionBehaviorTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "hks_root_motion_mult": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "turn_speed": {
+          "available": true,
+          "raw_hex": [
+            "BF800000"
+          ],
+          "value": [
+            -1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "hks_animation_speed_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "fixed_rotation_direction": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "has_twist_modifier": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "root_motion_reduction": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "movement_limit": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "action_flags": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "hks_flags": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "movement_request_duration": {
+          "available": true,
+          "raw_hex": [
+            "3FF81E44"
+          ],
+          "value": [
+            1.9384236335754395
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "normal_vector": {
+          "available": true,
+          "raw_hex": [
+            "3D8D5462",
+            "3F7BA42E",
+            "BE2E619F",
+            "00000000"
+          ],
+          "value": [
+            0.06900860369205475,
+            0.9829739332199097,
+            -0.17029426991939545,
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "orientation_matrix": {
+          "available": true,
+          "raw_hex": [
+            "3F800000",
+            "00000000",
+            "00000000",
+            "00000000",
+            "00000000",
+            "3F800000",
+            "00000000",
+            "00000000",
+            "00000000",
+            "00000000",
+            "3F800000",
+            "00000000",
+            "C0400000",
+            "C2A00000",
+            "40C00000",
+            "3F800000"
+          ],
+          "value": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            -3.0,
+            -80.0,
+            6.0,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "hit_material": {
+          "available": true,
+          "raw_hex": [
+            "00000005"
+          ],
+          "value": [
+            5
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_slippery_surface": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_non_slippery_surface": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "slide_vector": {
+          "available": true,
+          "raw_hex": [
+            "00000000",
+            "00000000",
+            "00000000",
+            "00000000"
+          ],
+          "value": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "normal_angle": {
+          "available": true,
+          "raw_hex": [
+            "3F5F66F3"
+          ],
+          "value": [
+            0.8726646304130554
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "normal_angle_deg": {
+          "available": true,
+          "raw_hex": [
+            "41296859"
+          ],
+          "value": [
+            10.58797550201416
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "is_sliding": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "enable_angle_check": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "enabled": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "enable_slide_interpolation": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "min_twist_rank": {
+          "available": true,
+          "raw_hex": [
+            "0000FFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "EquipmentTrack": {
+      "track": "EquipmentTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "equipment_param_ids": {
+          "available": true,
+          "raw_hex": [
+            "01DE0ED0",
+            "001E8480",
+            "0001ADB0",
+            "0001ADB0",
+            "0001ADB0",
+            "0001ADB0",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "000A1220",
+            "000A1284",
+            "000A12E8",
+            "000A134C",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF",
+            "FFFFFFFF"
+          ],
+          "value": [
+            31330000,
+            2000000,
+            110000,
+            110000,
+            110000,
+            110000,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            660000,
+            660100,
+            660200,
+            660300,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "left_weapon_slot": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "right_weapon_slot": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "left_arrow_slot": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "right_arrow_slot": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "left_bolt_slot": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "right_bolt_slot": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "arm_style": {
+          "available": true,
+          "raw_hex": [
+            "00000003"
+          ],
+          "value": [
+            3
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "AppearanceTrack": {
+      "track": "AppearanceTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "face_buffer": {
+          "available": true,
+          "raw_hex": [
+            "45434146",
+            "00000004",
+            "00000120",
+            "00000000",
+            "00000009",
+            "00000000",
+            "00000003",
+            "00000001",
+            "00000000",
+            "00000000",
+            "00000002",
+            "00006CCD",
+            "586CA876",
+            "4E9462BC",
+            "804462A8",
+            "8A6C6C8A",
+            "803AC68A",
+            "4E8000B2",
+            "B2007344",
+            "6C760080",
+            "A8807662",
+            "8AC68C62",
+            "7680A880",
+            "808AD069",
+            "62C68780",
+            "BC267DC6",
+            "469E8A55",
+            "00000080",
+            "80808000",
+            "00008080",
+            "00000000",
+            "80000000",
+            "00808080",
+            "80000000",
+            "80808080",
+            "80808080",
+            "80808080",
+            "80808080",
+            "80808080",
+            "80808080",
+            "80808080",
+            "80808080",
+            "00808080",
+            "80808080",
+            "8F808080",
+            "FFA04F67",
+            "1E1450D7",
+            "41FF0019",
+            "00000041",
+            "19326400",
+            "14281E00",
+            "57FF141E",
+            "80D28057",
+            "18254780",
+            "46000180",
+            "0F1A1D30",
+            "6400C805",
+            "FFFF6464",
+            "0F1A8AFF",
+            "6400C805",
+            "FFFF6464",
+            "30468AFF",
+            "50804E1D",
+            "4E1D3046",
+            "30465080",
+            "50804E1D",
+            "3C000000",
+            "00003C3C",
+            "00000000",
+            "00000000",
+            "00000000",
+            "00000000"
+          ],
+          "value": "4641434504000000200100000000000009000000000000000300000001000000000000000000000002000000cd6c000076a86c58bc62944ea86244808a6c6c8a8ac63a80b200804e447300b28000766c627680a8628cc68a80a8807669d08a808087c662c67d26bc558a9e4680000000008080808080000000000000000000808080800000000080808080808080808080808080808080808080808080808080808080808080808080808000808080808080808f674fa0ffd750141e1900ff414100000000643219001e28141e14ff575780d2808047251880010046301d1a0f05c800646464ffffff8a1a0f05c800646464ffffff8a46301d4e805046301d4e805046301d4e80500000003c3c3c000000000000000000000000000000000000",
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "gender": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "archetype": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "GameplayStateTrack": {
+      "track": "GameplayStateTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "hp": {
+          "available": true,
+          "raw_hex": [
+            "0000020A"
+          ],
+          "value": [
+            522
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "max_hp": {
+          "available": true,
+          "raw_hex": [
+            "0000020A"
+          ],
+          "value": [
+            522
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "max_uncapped_hp": {
+          "available": true,
+          "raw_hex": [
+            "0000020A"
+          ],
+          "value": [
+            522
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "base_hp": {
+          "available": true,
+          "raw_hex": [
+            "0000020A"
+          ],
+          "value": [
+            522
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "fp": {
+          "available": true,
+          "raw_hex": [
+            "00000046"
+          ],
+          "value": [
+            70
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "max_fp": {
+          "available": true,
+          "raw_hex": [
+            "0000004E"
+          ],
+          "value": [
+            78
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "base_fp": {
+          "available": true,
+          "raw_hex": [
+            "0000004E"
+          ],
+          "value": [
+            78
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "stamina": {
+          "available": true,
+          "raw_hex": [
+            "00000014"
+          ],
+          "value": [
+            20
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "max_stamina": {
+          "available": true,
+          "raw_hex": [
+            "00000061"
+          ],
+          "value": [
+            97
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "base_stamina": {
+          "available": true,
+          "raw_hex": [
+            "00000061"
+          ],
+          "value": [
+            97
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "chara_init_param_id": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "recoverable_hp": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "recoverable_hp_time": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "sa_durability": {
+          "available": true,
+          "raw_hex": [
+            "42C80000"
+          ],
+          "value": [
+            100.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "sa_durability_max": {
+          "available": true,
+          "raw_hex": [
+            "42C80000"
+          ],
+          "value": [
+            100.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "armor_recover_time": {
+          "available": true,
+          "raw_hex": [
+            "BC8EA1F7"
+          ],
+          "value": [
+            -0.017411215230822563
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "poise_broken_state": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "toughness": {
+          "available": true,
+          "raw_hex": [
+            "40933332"
+          ],
+          "value": [
+            4.59999942779541
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "toughness_max": {
+          "available": true,
+          "raw_hex": [
+            "40933332"
+          ],
+          "value": [
+            4.59999942779541
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "toughness_recover_time": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "stamina_recovery_remainder": {
+          "available": true,
+          "raw_hex": [
+            "3F7AE906"
+          ],
+          "value": [
+            0.9801181554794312
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "stamina_recovery_modifier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "draw_params": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "block_id_origin": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            4294967295
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "trigger_max_toughness_update": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "EffectSignalsTrack": {
+      "track": "EffectSignalsTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "item_use_cast_sfx_id": {
+          "available": true,
+          "raw_hex": [
+            "000497C8"
+          ],
+          "value": [
+            301000
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "item_use_fire_sfx_id": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "item_use_effect_sfx_id": {
+          "available": true,
+          "raw_hex": [
+            "000497CA"
+          ],
+          "value": [
+            301002
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "tae_queued_use_item": {
+          "available": true,
+          "raw_hex": [
+            "400003E9"
+          ],
+          "value": [
+            1073742825
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    },
+    "CombatStateTrack": {
+      "track": "CombatStateTrack",
+      "replay_timestamp_ns": 49985539900,
+      "source_timestamp_ns": 114072140052600,
+      "sequence": 3966,
+      "source_drops": 0,
+      "fields": {
+        "is_locked_on": {
+          "available": true,
+          "raw_hex": [
+            "00000001"
+          ],
+          "value": [
+            1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "lock_on_target_position": {
+          "available": true,
+          "raw_hex": [
+            "C1260883",
+            "40AAE9C2",
+            "41B245B8",
+            "3F800000"
+          ],
+          "value": [
+            -10.37707805633545,
+            5.341034889221191,
+            22.284042358398438,
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "animation_action_flags": {
+          "available": true,
+          "raw_hex": [
+            "00000008"
+          ],
+          "value": [
+            8
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "action_modifiers_flags": {
+          "available": true,
+          "raw_hex": [
+            "00008002",
+            "00000000"
+          ],
+          "value": 32770,
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "damage_level": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "guard_level": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "received_damage_type": {
+          "available": true,
+          "raw_hex": [
+            "0001869F"
+          ],
+          "value": [
+            99999
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "turn_speed": {
+          "available": true,
+          "raw_hex": [
+            "BF800000"
+          ],
+          "value": [
+            -1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "lock_on_turn_speed": {
+          "available": true,
+          "raw_hex": [
+            "BF800000"
+          ],
+          "value": [
+            -1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "joint_turn_speed": {
+          "available": true,
+          "raw_hex": [
+            "BF800000"
+          ],
+          "value": [
+            -1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "facing_angle_correction_rad": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "root_motion_div": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "root_motion_mult_min_dist": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "speed_default": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "speed_extra": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "speed_boost": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "root_motion_mult_target_radius": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "disable_lock_on_angle": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "mov_dist_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "cam_turn_dist_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "ladder_dist_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "sa_durability_multiplier": {
+          "available": true,
+          "raw_hex": [
+            "3F800000"
+          ],
+          "value": [
+            1.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "knockback_value": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0.0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "camera_lock_on_param_id": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            -1
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "guard_behavior_judge_id": {
+          "available": true,
+          "raw_hex": [
+            "FFFFFFFF"
+          ],
+          "value": [
+            4294967295
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "action_flags": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "weapon_model_location_overridden": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "sp_effect_wet_condition_depth": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_up_limit": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_down_limit": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_right_limit": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_left_limit": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_up_dead_zone": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_down_dead_zone": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_right_dead_zone": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        },
+        "bullet_aim_angle_left_dead_zone": {
+          "available": true,
+          "raw_hex": [
+            "00000000"
+          ],
+          "value": [
+            0
+          ],
+          "confidence": "REFERENCE",
+          "semantics": "SDK_REFERENCE_NOT_RUNTIME_DECODED"
+        }
+      }
+    }
+  },
+  "source_drops_max": 0,
+  "metadata": {
+    "format_version": 3,
+    "date_unix_ns": 1791255172447250800,
+    "requested_hz": 60.0,
+    "actual_hz": 59.73441802559463,
+    "samples": 7555,
+    "duration_ns": 126459757200,
+    "paused_ns": 0,
+    "game_version": "2.7.0.0",
+    "mod_version": "0.7.0-fidelity1",
+    "title": "Elden Ring recording",
+    "description": "Raw player tracks schema1. New fields REFERENCE; pose, HKS VM, full effect/queue data UNAVAILABLE. Animation reconstruction not implemented.",
+    "tags": "capture-fidelity-v1,raw-state,read-only"
+  },
+  "file_bytes": 21030717,
+  "bytes_per_second": 166303.6325994148
+}

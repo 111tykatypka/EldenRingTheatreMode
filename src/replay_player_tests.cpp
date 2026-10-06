@@ -19,6 +19,23 @@ int run_tests(int argc,char**argv){
     p.stop();assert(p.state().status==replay::Status::stopped&&p.state().timestamp_ns==0);p.restart(t0+5s);assert(p.state().status==replay::Status::playing);p.advance(t0+5s+50ms);assert(p.state().timestamp_ns==25'000'000);
     auto q=replay::slerp({0,0,0,1},{0,1,0,0},0.5);const double norm=std::sqrt(double(q.x)*q.x+double(q.y)*q.y+double(q.z)*q.z+double(q.w)*q.w);assert(std::abs(norm-1.0)<1e-5);
     auto side=dir/"clock.bookmarks";replay::BookmarkStore bm(side);bm.add(300);bm.add(100);bm.add(300);bm.save();replay::BookmarkStore loaded(side);loaded.load();assert(loaded.timestamps().size()==2&&loaded.timestamps()[0]==100&&loaded.timestamps()[1]==300);loaded.erase(0);loaded.save();replay::BookmarkStore again(side);again.load();assert(again.timestamps().size()==1&&again.timestamps()[0]==300);
+    // Explicit capture producer support; unknown producer versions still fail closed.
+    for(const auto version : {"0.7.0-fidelity1", "unknown-future"}) {
+        auto capture_file=dir/(std::string(version)+".erplay");erplay::Metadata capture_meta;capture_meta.format_version=3;capture_meta.mod_version=version;
+        {erplay::Writer w(capture_file,capture_meta,2);w.append({});w.finalize();}
+        bool accepted=false;try{replay::Player capture(capture_file);accepted=true;}catch(const std::runtime_error&){}
+        assert(accepted==(std::string(version)=="0.7.0-fidelity1"));
+    }
+    if(argc==3&&std::string(argv[1])=="--capture-real") {
+        replay::Player real{std::filesystem::path(argv[2])};const auto& summary=real.summary();
+        assert(summary.metadata.mod_version=="0.7.0-fidelity1");assert(summary.sample_count>0);
+        for(auto count:summary.capture_record_counts)assert(count==summary.sample_count);
+        for(auto time:{std::uint64_t(0),summary.duration_ns/2,summary.duration_ns}) {
+            real.seek(time);assert(real.state().timestamp_ns==time);
+            for(unsigned track=5;track<=13;++track)assert(real.reader().capture_at(track,time));
+        }
+        std::cout<<"REAL_CAPTURE_VALIDATED samples="<<summary.sample_count<<" duration_ns="<<summary.duration_ns<<" actual_hz="<<summary.actual_rate_hz<<" chunks="<<summary.chunk_count<<" tracks=9\n";
+    } else
     if(argc>1){replay::Player real{std::filesystem::path(argv[1])};assert(real.summary().sample_count==4093);assert(real.summary().duration_ns==68'500'000'000ULL);assert(real.summary().chunk_count==7);real.seek(30'000'000'000ULL);const auto first=real.state();assert(first.sample_index>1700&&first.sample_index<1900);real.seek(55'000'000'000ULL);assert(real.state().sample_index>3200);real.seek(0);real.step(1);assert(real.state().timestamp_ns==real.reader().sample(1).replay_time_ns);std::cout<<"REAL_FIXTURE_PASS samples="<<real.summary().sample_count<<" duration_ns="<<real.summary().duration_ns<<" rate_hz="<<real.summary().actual_rate_hz<<" chunks="<<real.summary().chunk_count<<"\n";}
     std::cout<<"ReplayPlayer tests passed\n";return 0;
 }
