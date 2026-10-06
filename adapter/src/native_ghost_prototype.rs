@@ -11,7 +11,7 @@ pub fn initialize() {
     let layout=[offset_of!(PlayerIns,replay_recorder),offset_of!(ChrIns,modules),
         offset_of!(ChrInsModuleContainer,physics),offset_of!(CSChrPhysicsModule,position),
         offset_of!(CSChrPhysicsModule,orientation),offset_of!(ChrIns,chr_type),
-        offset_of!(PlayerIns,current_block_id),offset_of!(ChrIns,phantom_param_override)];
+        offset_of!(PlayerIns,current_block_id),offset_of!(ChrIns,chr_model_ins)];
     let result=unsafe{tm_native_ghost_start(log,layout.as_ptr())};
     crate::log_game(&format!("NATIVE_GHOST: bridge initialization={result}; feature=native-replay-ghost-create-remove; runtime UNVERIFIED"));
 }

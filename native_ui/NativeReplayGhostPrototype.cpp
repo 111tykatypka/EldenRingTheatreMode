@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 #include <thread>
 #include <mutex>
 #include "NativeGhostFingerprints.h"
@@ -17,7 +18,7 @@ extern "C" void tm_render_native_status(const char*);
 
 namespace {
 using U=uintptr_t;
-U base{}, layout[8]{}; // [7] = ChrIns::phantom_param_override (SDK offset)
+U base{}, layout[8]{}; // [7] = ChrIns::chr_model_ins (SDK offset)
 void(*logger)(const char*){};
 void log(const char* fmt,...) { char text[2048];va_list a;va_start(a,fmt);vsnprintf(text,sizeof(text),fmt,a);va_end(a);logger(text);if(strncmp(text,"NATIVE_GHOST",12)==0)tm_render_native_status(text); }
 bool read(U address,void* out,size_t bytes) { SIZE_T n{};return address>=0x10000 && address<=UINTPTR_MAX-bytes && ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes; }
@@ -241,6 +242,27 @@ void onDeleter(U deleter,U payload) {
  deleterOriginal(deleter,payload);
  if(ours){log("NATIVE_GHOST_DESTROY: native deleter returned; synchronous actor destructor+allocator-free path completed; no freed-pointer reads");deleterDone.store(true);}
 }
+// Read-only render diagnostic (shadow investigation): compares the owned ghost with the main
+// player, word by word, in ChrIns and in the model item / display entity behind chr_model_ins.
+// Words that look like pointers on either side are skipped. Logged once per ghost.
+void logBlockDiff(const char* name,U ghost,U player,size_t bytes) {
+ if(!ghost||!player){log("GHOST_RENDER_DIFF %s: missing pointer ghost=0x%llX player=0x%llX",name,ghost,player);return;}
+ static unsigned char a[0x1000],b[0x1000];bytes=std::min(bytes,sizeof(a));
+ if(!read(ghost,a,bytes)||!read(player,b,bytes)){log("GHOST_RENDER_DIFF %s: unreadable",name);return;}
+ char line[1800];int n=snprintf(line,sizeof(line),"GHOST_RENDER_DIFF %s:",name);unsigned shown=0;
+ auto pointerish=[](uint64_t v){return v>=0x10000000000ull&&v<0x800000000000ull;};
+ for(size_t o=0;o+8<=bytes;o+=4){uint32_t ga,pa;memcpy(&ga,a+o,4);memcpy(&pa,b+o,4);if(ga==pa)continue;
+  uint64_t g8,p8;memcpy(&g8,a+(o&~size_t(7)),8);memcpy(&p8,b+(o&~size_t(7)),8);if(pointerish(g8)||pointerish(p8))continue;
+  if(n<int(sizeof(line))-40){n+=snprintf(line+n,sizeof(line)-n," +%zX:%08X/%08X",o,ga,pa);}
+  if(++shown%60==0){log("%s",line);n=snprintf(line,sizeof(line),"GHOST_RENDER_DIFF %s (cont):",name);}}
+ log("%s (ghost/player, %u words)",line,shown);}
+void renderDiff(U actor) {
+ U w=world(),player{},recorder{};if(!ready(w,player,recorder)){log("GHOST_RENDER_DIFF: player not ready");return;}
+ U gm=get<U>(actor+layout[7]),pm=get<U>(player+layout[7]);
+ logBlockDiff("ChrIns",actor,player,0x540);
+ logBlockDiff("CSChrModelIns",gm,pm,0x28);
+ logBlockDiff("CSFD4ModelItem",gm?get<U>(gm+0x10):0,pm?get<U>(pm+0x10):0,0x6d0);
+ logBlockDiff("ModelDispEntity",gm?get<U>(gm+0x18):0,pm?get<U>(pm+0x18):0,0x400);}
 void keys() {
  bool lastCreate=false,lastRemove=false;
  for(;;) {
@@ -248,6 +270,9 @@ void keys() {
   using theater_hotkeys::Action;const int createKey=int(theater_hotkeys::Key(Action::GhostCreateTest)),removeKey=int(theater_hotkeys::Key(Action::GhostRemoveTest));
   bool c=foreground&&(GetAsyncKeyState(createKey)&0x8000),r=foreground&&(GetAsyncKeyState(removeKey)&0x8000);
   auto live=snapshot();if(live.active&&world()!=live.world)retire(live.actor,"world-changed; observation only, no destruction request");
+  {static unsigned long long diffEpoch=~0ull;static ULONGLONG ownedAt=0;
+   if(live.active&&live.epoch!=diffEpoch){if(!ownedAt)ownedAt=GetTickCount64();else if(GetTickCount64()-ownedAt>1000){diffEpoch=live.epoch;ownedAt=0;renderDiff(live.actor);}}
+   else if(!live.active)ownedAt=0;}
   if(c&&!lastCreate) {
    U player{},recorder{};auto s=snapshot();
    if(s.active||command.load())log("NATIVE_GHOST_ERROR: create rejected: active/pending command");
