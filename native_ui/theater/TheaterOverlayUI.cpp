@@ -212,6 +212,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         if (ui_.layout.panelOpen) DrawPanel(f);
         DrawSequencer(f);
         ImGui::PopFont();
+        DrawCursor();
     }
     else DrawHiddenHint(f);
     if (ui_.visibility != UiVisibility::HiddenClean) DrawRecordingPill(f);
@@ -889,6 +890,25 @@ void Overlay::DrawRecordingPill(const OverlayFrame& f)
     const bool blink = snap.recording_state != theater_ui::record_recording || std::fmod(f.now, 1.0) < 0.6;
     if (blink) dl->AddCircleFilled(ImVec2(p0.x + h * 0.5f + dot * 0.5f, p0.y + h * 0.5f), dot, Color::AccentRed.U32());
     dl->AddText(font, size, ImVec2(p0.x + h * 0.5f + dot * 2 + Px(8, s), p0.y + (h - tsz.y) * 0.5f), Color::TextPrimary.U32(), text);
+}
+
+// The overlay's own arrow cursor. The game hides the Windows cursor and can hold the mouse
+// through DirectInput, so neither the OS cursor nor ImGui's software cursor is reliable here.
+void Overlay::DrawCursor()
+{
+    const ImVec2 p = ImGui::GetIO().MousePos;
+    if (!ImGui::IsMousePosValid(&p)) return;
+    const float s = std::max(1.0f, ui_.rects.uiScale * 1.25f);
+    // Classic arrow, tip at the mouse position.
+    const ImVec2 pts[] = { {0, 0}, {0, 17}, {4.5f, 13}, {7.5f, 20}, {10.5f, 18.8f}, {7.5f, 12}, {12.5f, 12} };
+    ImVec2 poly[7];
+    for (int i = 0; i < 7; ++i) poly[i] = ImVec2(p.x + pts[i].x * s, p.y + pts[i].y * s);
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    ImVec2 shadow[7];
+    for (int i = 0; i < 7; ++i) shadow[i] = ImVec2(poly[i].x + 1.5f, poly[i].y + 1.5f);
+    dl->AddConcavePolyFilled(shadow, 7, IM_COL32(0, 0, 0, 90));
+    dl->AddConcavePolyFilled(poly, 7, Color::TextPrimary.U32());
+    dl->AddPolyline(poly, 7, Color::AppBg.U32(), ImDrawFlags_Closed, std::max(1.0f, s));
 }
 
 void Overlay::DrawHiddenHint(const OverlayFrame& f)

@@ -35,6 +35,9 @@ std::atomic<bool> used{}, contextSeen{}, readyLogged{};
 // (deleter returned and the replay data's final reference released). Any other ending keeps
 // the one-attempt rule until restart.
 std::atomic<bool> deleterDone{}, dataReleased{};
+// The native serializer returned 0 (wrote nothing). The game's own caller just skips in that
+// case, so another F10 is allowed.
+std::atomic<bool> retryable{};
 std::atomic<int> ghostPhantomOverride{-1};
 std::atomic<ULONGLONG> deadline{};
 std::atomic<uint64_t> stepCount{},buildCount{},requestStepCount{};
@@ -158,7 +161,7 @@ void create(U nativeContext) {
     } else log("NATIVE_GHOST_ERROR: native factory returned no actor handle=0x%llX",handle);
    } else log("NATIVE_GHOST_ERROR: decoded data invalid/secondary present; factory not called");
   } else log("NATIVE_GHOST_ERROR: native replay-data allocation failed");
- } else log("NATIVE_GHOST_ERROR: native serialization/eligibility failed written=%d size=%d",written,size);
+ } else {if(written==0)retryable.store(true);log("NATIVE_GHOST_ERROR: native serialization/eligibility failed written=%d size=%d recorder_count40=%u recorder_count44=%u%s",written,size,get<uint32_t>(recorder+0x40),get<uint32_t>(recorder+0x44),written==0?"; nothing was written, F10 can be retried (walk a few seconds first)":"");}
  releaseTemporary(data);freeNative(buffer);fn<void(*)(void*)>(0x3c12a0)(metadata);
 }
 void onStep(U child,U context,float dt,U auxiliary) {
@@ -239,9 +242,9 @@ void keys() {
   if(c&&!lastCreate) {
    U player{},recorder{};auto s=snapshot();
    if(s.active||command.load())log("NATIVE_GHOST_ERROR: create rejected: active/pending command");
-   else if(used.load()&&!(deleterDone.load()&&dataReleased.load()))log("NATIVE_GHOST_ERROR: previous ghost did not finish native teardown; restart before another create");
+   else if(used.load()&&!(deleterDone.load()&&dataReleased.load())&&!retryable.load())log("NATIVE_GHOST_ERROR: previous ghost did not finish native teardown; restart before another create");
    else if(!ready(world(),player,recorder))log("NATIVE_GHOST_ERROR: CREATE refused: player/recorder/world/block not ready; restart required before retry");
-   else {used.store(true);deleterDone.store(false);dataReleased.store(false);ghostPhantomOverride.store(-1);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
+   else {used.store(true);retryable.store(false);deleterDone.store(false);dataReleased.store(false);ghostPhantomOverride.store(-1);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
   }
   if(r&&!lastRemove) {
    unsigned pending=1;

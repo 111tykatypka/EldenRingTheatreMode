@@ -11,7 +11,7 @@
 //! engine actually uses for a ReplayGhostIns is not statically proven; the log says what changed.
 #[cfg(feature="native-replay-ghost-create-remove")]
 mod imp {
-    use eldenring::cs::{NetworkParam, PhantomParam, SoloParamRepository};
+    use eldenring::cs::{NetworkParam, PhantomParam, SoloParamRepository, WorldChrMan};
     use eldenring::param::PHANTOM_PARAM_ST;
     use fromsoftware_shared::FromStatic;
     use std::sync::Mutex;
@@ -59,7 +59,10 @@ mod imp {
     }
 
     pub fn tick() {
-        let Ok(mut state)=STATE.lock() else { return; };
+        // Params are only safe to read once regulation is loaded; a loaded main player implies that.
+        let player_ready=unsafe{WorldChrMan::instance()}.ok().map(|w|w.main_player.is_some()).unwrap_or(false);
+        if !player_ready { return; }
+        let mut state=STATE.lock().unwrap_or_else(|e|e.into_inner());
         let Ok(repo)=(unsafe{SoloParamRepository::instance_mut()}) else { return; };
         if !state.described {
             state.described=true;

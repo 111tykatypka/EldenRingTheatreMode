@@ -54,6 +54,7 @@ namespace TheaterUI
         void DrawEventLog(float height);
         void DrawRecordingPill(const OverlayFrame& f);
         void DrawHiddenHint(const OverlayFrame& f);
+        void DrawCursor();
         void Emit(std::uint32_t command, std::uint64_t value = 0);
         void PushFont(Theme::Font role, float extraScale = 1.0f);
         const char* T(Str s) const { return Tr(language, s); }

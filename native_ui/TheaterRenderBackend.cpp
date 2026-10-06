@@ -52,12 +52,19 @@ public:
  // buttons drive the ImGui cursor instead, unless real window mouse messages are arriving.
  std::atomic<long> mouse_dx{},mouse_dy{};std::atomic<unsigned> mouse_buttons{};std::atomic<ULONGLONG> os_mouse_tick{};
  ImVec2 virtual_mouse{-1,-1};unsigned applied_buttons{};
+ // One cursor position for the overlay, from whichever source is actually moving:
+ // DirectInput deltas (the game holds the mouse) or the Windows cursor (window messages).
+ ImVec2 last_os_mouse{-1,-1};ULONGLONG last_dinput_tick{},cursor_log_tick{};long dinput_seen{};
  void feed_virtual_mouse(){auto&io=ImGui::GetIO();const long dx=mouse_dx.exchange(0),dy=mouse_dy.exchange(0);const unsigned buttons=mouse_buttons.load();
-  if(mode.load()!=2){virtual_mouse={-1,-1};applied_buttons=0;return;}
-  if(GetTickCount64()-os_mouse_tick.load()<250){virtual_mouse=io.MousePos;return;} // Windows is delivering the mouse; use it.
+  if(mode.load()!=2){virtual_mouse={-1,-1};applied_buttons=0;last_os_mouse={-1,-1};return;}
+  const ULONGLONG now=GetTickCount64();
   if(virtual_mouse.x<0||virtual_mouse.y<0)virtual_mouse={io.DisplaySize.x*.5f,io.DisplaySize.y*.5f};
-  virtual_mouse.x=std::clamp(virtual_mouse.x+float(dx),0.f,std::max(0.f,io.DisplaySize.x-1));virtual_mouse.y=std::clamp(virtual_mouse.y+float(dy),0.f,std::max(0.f,io.DisplaySize.y-1));
+  if(dx||dy){virtual_mouse.x+=float(dx);virtual_mouse.y+=float(dy);last_dinput_tick=now;dinput_seen+=std::labs(dx)+std::labs(dy);}
+  else{POINT p{};if(GetCursorPos(&p)&&ScreenToClient(hwnd,&p)){const ImVec2 os(float(p.x),float(p.y));
+   if(last_os_mouse.x>=0&&(os.x!=last_os_mouse.x||os.y!=last_os_mouse.y)&&now-last_dinput_tick>250)virtual_mouse=os;last_os_mouse=os;}}
+  virtual_mouse.x=std::clamp(virtual_mouse.x,0.f,std::max(0.f,io.DisplaySize.x-1));virtual_mouse.y=std::clamp(virtual_mouse.y,0.f,std::max(0.f,io.DisplaySize.y-1));
   io.AddMousePosEvent(virtual_mouse.x,virtual_mouse.y);
+  if(now-cursor_log_tick>3000){cursor_log_tick=now;char line[200];snprintf(line,sizeof(line),"CURSOR pos=(%.0f,%.0f) display=(%.0f,%.0f) dinput_motion_total=%ld os_msg_age_ms=%llu buttons=%u",virtual_mouse.x,virtual_mouse.y,io.DisplaySize.x,io.DisplaySize.y,dinput_seen,now-os_mouse_tick.load(),buttons);log(line);}
   for(unsigned i=0;i<3;++i){const bool down=(buttons>>i)&1;if(down!=(((applied_buttons>>i)&1)!=0))io.AddMouseButtonEvent(int(i),down);}applied_buttons=buttons;}
  std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
@@ -137,7 +144,7 @@ public:
   frame.hostLinked=host_linked.load();frame.visibility=TheaterUI::UiVisibility(visibility.load());
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
   if(native_status_visible.load()){std::lock_guard lock(native_status_mutex);frame.nativeStatus=native_status;}
-  auto&io=ImGui::GetIO();const bool shown=frame.visibility==TheaterUI::UiVisibility::Shown;io.MouseDrawCursor=shown;
+  auto&io=ImGui::GetIO();const bool shown=frame.visibility==TheaterUI::UiVisibility::Shown;io.MouseDrawCursor=false; // the overlay draws its own cursor (TheaterOverlayUI)
   const auto rects=overlay.Draw(frame,[](void*user,std::uint32_t kind,std::uint64_t value){static_cast<TheaterRenderBackend*>(user)->command(kind,value);},this);
   capture_mouse=shown&&io.WantCaptureMouse;capture_keyboard=shown&&io.WantCaptureKeyboard;return rects;
  }
