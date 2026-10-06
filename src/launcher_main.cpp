@@ -244,9 +244,9 @@ void draw_launcher() {
   ImGui::SameLine();
   ImGui::PushStyleColor(ImGuiCol_Text, Color::TextMuted.Vec4());
   ImGui::SetCursorPosX((ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x) -
-                       ImGui::CalcTextSize(tr("In game: F4 Theater Mode   F5 record   F6 stop",
-                                              "В игре: F4 Theater Mode   F5 запись   F6 стоп")).x);
-  ImGui::TextUnformatted(tr("In game: F4 Theater Mode   F5 record   F6 stop", "В игре: F4 Theater Mode   F5 запись   F6 стоп"));
+                       ImGui::CalcTextSize(tr("In game: F4 Theater Mode   F5 record   F6 stop   Space play/pause",
+                                              "В игре: F4 Theater Mode   F5 запись   F6 стоп   Пробел пуск/пауза")).x);
+  ImGui::TextUnformatted(tr("In game: F4 Theater Mode   F5 record   F6 stop   Space play/pause", "В игре: F4 Theater Mode   F5 запись   F6 стоп   Пробел пуск/пауза"));
   ImGui::PopStyleColor();
   ImGui::PopFont();
 

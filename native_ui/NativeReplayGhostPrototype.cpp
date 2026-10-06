@@ -12,6 +12,7 @@
 #include <thread>
 #include <mutex>
 #include "NativeGhostFingerprints.h"
+#include "TheaterHotkeys.h"
 extern "C" void tm_render_native_status(const char*);
 
 namespace {
@@ -244,7 +245,8 @@ void keys() {
  bool lastCreate=false,lastRemove=false;
  for(;;) {
   DWORD pid{};GetWindowThreadProcessId(GetForegroundWindow(),&pid);bool foreground=pid==GetCurrentProcessId();
-  bool c=foreground&&(GetAsyncKeyState(VK_F10)&0x8000),r=foreground&&(GetAsyncKeyState(VK_F11)&0x8000);
+  using theater_hotkeys::Action;const int createKey=int(theater_hotkeys::Key(Action::GhostCreateTest)),removeKey=int(theater_hotkeys::Key(Action::GhostRemoveTest));
+  bool c=foreground&&(GetAsyncKeyState(createKey)&0x8000),r=foreground&&(GetAsyncKeyState(removeKey)&0x8000);
   auto live=snapshot();if(live.active&&world()!=live.world)retire(live.actor,"world-changed; observation only, no destruction request");
   if(c&&!lastCreate) {
    U player{},recorder{};auto s=snapshot();

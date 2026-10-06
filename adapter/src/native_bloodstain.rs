@@ -112,7 +112,10 @@ impl Capture{
   let mut foreground_pid=0;
   unsafe{GetWindowThreadProcessId(GetForegroundWindow(),&mut foreground_pid);}
   let foreground=foreground_pid==unsafe{GetCurrentProcessId()};
-  let keys=[foreground&&unsafe{GetAsyncKeyState(0x79)}<0,foreground&&unsafe{GetAsyncKeyState(0x7a)}<0];
+  // Same keys as the native ghost test (shared/TheaterHotkeys.h: GhostCreateTest=4, GhostRemoveTest=5).
+  unsafe extern "C"{fn tm_hotkey_vk(action:u32)->u32;}
+  let (create_key,remove_key)=unsafe{(tm_hotkey_vk(4) as i32,tm_hotkey_vk(5) as i32)};
+  let keys=[foreground&&create_key!=0&&unsafe{GetAsyncKeyState(create_key)}<0,foreground&&remove_key!=0&&unsafe{GetAsyncKeyState(remove_key)}<0];
   let rising=[keys[0]&&!self.payload.keys[0],keys[1]&&!self.payload.keys[1]];self.payload.keys=keys;
   if rising[0]{
    if self.payload.active{self.payload.active=false;crate::log_game(&format!("NATIVE_PAYLOAD: STOP callbacks={} observed_new_nodes={} accumulator_changes={} queue_drops={}; no writes",self.payload.callbacks,self.payload.observed_nodes,self.payload.accum_changes,self.dropped));}

@@ -1,5 +1,6 @@
 #include "ingame_editor_server.hpp"
 #include "editor_backend.hpp"
+#include "TheaterHotkeys.h"
 namespace theater {
 App app;
 constexpr UINT WM_REFRESH = WM_APP + 1;
@@ -845,8 +846,9 @@ void initialize(HWND window) {
   load_loader_path();
   app.game_replay =
       std::make_unique<in_game_replay::Controller>(app.control, log_line);
-  register_hotkey(window, 1, VK_F5, "F5 START");
-  app.stop_hotkey = register_hotkey(window, 2, VK_F6, "F6 STOP");
+  using theater_hotkeys::Action;
+  register_hotkey(window, 1, theater_hotkeys::Key(Action::StartRecording), "START RECORDING");
+  app.stop_hotkey = register_hotkey(window, 2, theater_hotkeys::Key(Action::StopRecording), "STOP");
   ingame_editor::start();
   app.control.start(app.game_pid);
   app.characters.start(app.game_pid);

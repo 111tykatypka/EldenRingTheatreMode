@@ -12,6 +12,7 @@
 #include <imgui_impl_dx12.h>
 #include "TheaterUiProtocol.h"
 #include "theater/TheaterOverlayUI.h"
+#include "TheaterHotkeys.h"
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
@@ -47,6 +48,12 @@ public:
  TheaterUI::Overlay overlay;
  // Game input is blocked only while the UI is shown AND actually rendering, so a failed overlay never traps the player.
  bool blocking() const {return mode.load()==2&&ui_ready.load()&&!failed;}
+ // Replay state from the latest host snapshot, for keys that only act while a replay is loaded.
+ std::atomic_bool replay_loaded{},replay_playing{};
+ // TogglePlayback (Space) belongs to Theater Mode while a replay is loaded or the overlay is open;
+ // then the game never sees that key (window messages and DirectInput), so no jump.
+ bool owns_playback_key() const {return blocking()||replay_loaded.load();}
+ void toggle_playback(){if(!replay_loaded.load())return;command(replay_playing.load()?theater_ui::pause:theater_ui::play);}
  // Virtual cursor. Elden Ring can hold the mouse through DirectInput so Windows never moves
  // the cursor or sends WM_MOUSEMOVE. While the UI is shown, the blocked game mouse deltas and
  // buttons drive the ImGui cursor instead, unless real window mouse messages are arriving.
@@ -87,8 +94,8 @@ public:
   if(h==INVALID_HANDLE_VALUE){h=CreateFileW(theater_ui::pipe,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE){Sleep(100);continue;}}
   theater_ui::Request r;{std::lock_guard lock(ipc);if(!commands.empty()){r=commands.front();commands.pop_front();}}r.sequence=++sequence;theater_ui::Snapshot s;
   if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=theater_ui::version||s.sequence!=r.sequence||s.count>16||!std::isfinite(s.playback_speed)){
-   CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
-  {std::lock_guard lock(ipc);snapshot=s;}host_linked=true;Sleep(50);
+   CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;replay_loaded=false;replay_playing=false;{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
+  {std::lock_guard lock(ipc);snapshot=s;}host_linked=true;replay_loaded=s.loaded!=0;replay_playing=s.phase==2;Sleep(50);
  }if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
  void adopt(IDXGISwapChain*sc,IUnknown*unknown){ComPtr<ID3D12CommandQueue> q;ComPtr<IDXGISwapChain3> c;
   if(FAILED(unknown->QueryInterface(IID_PPV_ARGS(&q)))||q->GetDesc().Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||FAILED(sc->QueryInterface(IID_PPV_ARGS(&c))))return;
@@ -209,8 +216,11 @@ LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
 }
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
  // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
- if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==VK_F4){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
- if(m==WM_KEYDOWN&&w==VK_F6){b.command(theater_ui::stop);return 0;}
+ using theater_hotkeys::Action;using theater_hotkeys::Key;
+ if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==Key(Action::ToggleOverlay)){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
+ if(m==WM_KEYDOWN&&w==Key(Action::StopRecording)){b.command(theater_ui::stop);return 0;}
+ if((m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR)&&w==Key(Action::TogglePlayback)&&b.owns_playback_key()){
+  if(m==WM_KEYDOWN&&!(l&(1LL<<30)))b.toggle_playback();return 0;}
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
  if(m==WM_MOUSEMOVE)b.os_mouse_tick=GetTickCount64();
  // The overlay draws the only cursor while shown; keep the Windows cursor hidden and the game out of it.
@@ -231,18 +241,31 @@ void capture_mouse_state(const void*data,DWORD size){auto&b=backend();if(size!=s
  const auto*m=static_cast<const DIMOUSESTATE*>(data);b.mouse_dx+=m->lX;b.mouse_dy+=m->lY;
  b.mouse_buttons=(m->rgbButtons[0]&0x80?1u:0u)|(m->rgbButtons[1]&0x80?2u:0u)|(m->rgbButtons[2]&0x80?4u:0u);}
 // Buffered data has no size hint, so the device type is asked once per device and cached.
-bool is_mouse(IDirectInputDevice8W*d){static std::mutex lock;static std::vector<std::pair<void*,bool>> known;std::lock_guard g(lock);
- for(auto&k:known)if(k.first==d)return k.second;DIDEVCAPS caps{};caps.dwSize=sizeof(caps);const bool mouse=SUCCEEDED(d->GetCapabilities(&caps))&&GET_DIDEVICE_TYPE(caps.dwDevType)==DI8DEVTYPE_MOUSE;
- if(known.size()<16)known.push_back({d,mouse});return mouse;}
+DWORD device_type(IDirectInputDevice8W*d){static std::mutex lock;static std::vector<std::pair<void*,DWORD>> known;std::lock_guard g(lock);
+ for(auto&k:known)if(k.first==d)return k.second;DIDEVCAPS caps{};caps.dwSize=sizeof(caps);const DWORD type=SUCCEEDED(d->GetCapabilities(&caps))?GET_DIDEVICE_TYPE(caps.dwDevType):0;
+ if(known.size()<16)known.push_back({d,type});return type;}
+bool is_mouse(IDirectInputDevice8W*d){return device_type(d)==DI8DEVTYPE_MOUSE;}
+// DirectInput keyboard offsets are scan codes; derived from the bound virtual key, so a rebind follows.
+DWORD playback_scan_code(){return MapVirtualKeyW(theater_hotkeys::Key(theater_hotkeys::Action::TogglePlayback),MAPVK_VK_TO_VSC);}
 void capture_mouse_data(IDirectInputDevice8W*d,DWORD object_size,const DIDEVICEOBJECTDATA*data,DWORD count){auto&b=backend();if(!data||object_size<sizeof(DIDEVICEOBJECTDATA)||!is_mouse(d))return;
  auto*bytes=reinterpret_cast<const unsigned char*>(data);for(DWORD i=0;i<count;++i){auto&e=*reinterpret_cast<const DIDEVICEOBJECTDATA*>(bytes+size_t(i)*object_size);
   if(e.dwOfs==DIMOFS_X)b.mouse_dx+=LONG(e.dwData);else if(e.dwOfs==DIMOFS_Y)b.mouse_dy+=LONG(e.dwData);
   else if(e.dwOfs>=DIMOFS_BUTTON0&&e.dwOfs<=DIMOFS_BUTTON2){const unsigned bit=1u<<(e.dwOfs-DIMOFS_BUTTON0);if(e.dwData&0x80)b.mouse_buttons|=bit;else b.mouse_buttons&=~bit;}}}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_state(IDirectInputDevice8W*d,DWORD size,LPVOID data){
- const HRESULT hr=original_state[N](d,size,data);if(SUCCEEDED(hr)&&data&&backend().blocking()){capture_mouse_state(data,size);memset(data,0,size);}return hr;}
+ const HRESULT hr=original_state[N](d,size,data);if(FAILED(hr)||!data)return hr;auto&b=backend();
+ if(b.blocking()){capture_mouse_state(data,size);memset(data,0,size);}
+ else if(size==256&&b.owns_playback_key()){const DWORD code=playback_scan_code();if(code&&code<256)static_cast<BYTE*>(data)[code]=0;}
+ return hr;}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_data(IDirectInputDevice8W*d,DWORD object_size,LPDIDEVICEOBJECTDATA data,LPDWORD count,DWORD flags){
- const HRESULT hr=original_data[N](d,object_size,data,count,flags);
- if(SUCCEEDED(hr)&&count&&backend().blocking()){if(!(flags&DIGDD_PEEK))capture_mouse_data(d,object_size,data,*count);*count=0;}return hr;}
+ const HRESULT hr=original_data[N](d,object_size,data,count,flags);if(FAILED(hr)||!count)return hr;auto&b=backend();
+ if(b.blocking()){if(!(flags&DIGDD_PEEK))capture_mouse_data(d,object_size,data,*count);*count=0;}
+ else if(data&&object_size>=sizeof(DIDEVICEOBJECTDATA)&&b.owns_playback_key()&&device_type(d)==DI8DEVTYPE_KEYBOARD){
+  // Drop only the playback key's events, keep the rest in order.
+  const DWORD code=playback_scan_code();auto*bytes=reinterpret_cast<unsigned char*>(data);DWORD kept=0;
+  for(DWORD i=0;i<*count;++i){auto*e=reinterpret_cast<DIDEVICEOBJECTDATA*>(bytes+size_t(i)*object_size);if(e->dwOfs==code)continue;
+   if(kept!=i)memmove(bytes+size_t(kept)*object_size,e,object_size);++kept;}
+  *count=kept;}
+ return hr;}
 // Hooks the shared device vtables through throwaway devices. Failure leaves the overlay working
 // with window-message blocking only, and is logged.
 void install_dinput_hooks(){auto&b=backend();
@@ -316,3 +339,5 @@ extern "C" int tm_render_test_ui(){
     }}
  b.host_linked=false;b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;ImGui::DestroyContext(c);return valid?1:0;
 }
+// The hotkey table for the Rust side (shared/TheaterHotkeys.h). Unknown action: 0 (unbound).
+extern "C" unsigned tm_hotkey_vk(unsigned action){return action<unsigned(theater_hotkeys::Action::Count)?theater_hotkeys::Key(theater_hotkeys::Action(action)):0u;}
