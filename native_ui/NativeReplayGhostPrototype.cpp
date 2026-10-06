@@ -261,6 +261,21 @@ void logBlockDiff(const char* name,U ghost,U player,size_t bytes) {
   if(n<int(sizeof(line))-40){n+=snprintf(line+n,sizeof(line)-n," +%zX:%08X/%08X",o,ga,pa);}
   if(++shown%60==0){log("%s",line);n=snprintf(line,sizeof(line),"GHOST_RENDER_DIFF %s (cont):",name);}}
  log("%s (ghost/player, %u words)",line,shown);}
+// Shadow flags. The live diff (2026-10-06) showed three byte flags in CSFD4ModelItem that are 1
+// on the player and 0 on the replay ghost, on every ghost: +0x6AC, +0x6AD, +0x6B6. The ghost's
+// model item is given the player's values while the ghost is alive; the game may reset them, so
+// this runs every 100 ms. Only bytes that are 0 on the ghost and 1 on the player are written.
+bool writeByte(U address,uint8_t value){SIZE_T n{};return address>=0x10000&&WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),&value,1,&n)&&n==1;}
+void matchPlayerShadowFlags(U actor) {
+ static unsigned long long loggedEpoch=~0ull;
+ U w=world(),player{},recorder{};if(!ready(w,player,recorder))return;
+ U gm=get<U>(actor+layout[7]),pm=get<U>(player+layout[7]);if(!gm||!pm)return;
+ U gi=get<U>(gm+0x10),pi=get<U>(pm+0x10);if(!gi||!pi)return;
+ static constexpr U flags[]{0x6AC,0x6AD,0x6B6};unsigned written=0;
+ for(U o:flags){uint8_t g{},p{};if(read(gi+o,&g,1)&&read(pi+o,&p,1)&&g==0&&p==1&&writeByte(gi+o,1))++written;}
+ const auto epoch=snapshot().epoch;
+ if(written&&loggedEpoch!=epoch){loggedEpoch=epoch;log("GHOST_RENDER: copied %u player shadow flag(s) to the ghost model (CSFD4ModelItem +0x6AC/+0x6AD/+0x6B6)",written);}
+}
 void renderDiff(U actor) {
  U w=world(),player{},recorder{};if(!ready(w,player,recorder)){log("GHOST_RENDER_DIFF: player not ready");return;}
  U gm=get<U>(actor+layout[7]),pm=get<U>(player+layout[7]);
@@ -278,6 +293,7 @@ void keys() {
   {static unsigned long long diffEpoch=~0ull;static ULONGLONG ownedAt=0;
    if(live.active&&live.epoch!=diffEpoch){if(!ownedAt)ownedAt=GetTickCount64();else if(GetTickCount64()-ownedAt>1000){diffEpoch=live.epoch;ownedAt=0;renderDiff(live.actor);}}
    else if(!live.active)ownedAt=0;}
+  {static ULONGLONG lastShadow=0;if(live.active&&GetTickCount64()-lastShadow>=100){lastShadow=GetTickCount64();matchPlayerShadowFlags(live.actor);}}
   if(c&&!lastCreate) {
    U player{},recorder{};auto s=snapshot();
    if(s.active||command.load())log("NATIVE_GHOST_ERROR: create rejected: active/pending command");
