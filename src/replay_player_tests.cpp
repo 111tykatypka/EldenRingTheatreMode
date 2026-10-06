@@ -7,6 +7,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <bit>
 
 using namespace std::chrono_literals;
 int run_tests(int argc,char**argv){
@@ -22,7 +23,7 @@ int run_tests(int argc,char**argv){
     // Explicit capture producer support; unknown producer versions still fail closed.
     for(const auto version : {"0.7.0-fidelity1", "unknown-future"}) {
         auto capture_file=dir/(std::string(version)+".erplay");erplay::Metadata capture_meta;capture_meta.format_version=3;capture_meta.mod_version=version;
-        {erplay::Writer w(capture_file,capture_meta,2);w.append({});w.finalize();}
+        {erplay::Writer w(capture_file,capture_meta,2);w.append({});(void)w.finalize();}
         bool accepted=false;try{replay::Player capture(capture_file);accepted=true;}catch(const std::runtime_error&){}
         assert(accepted==(std::string(version)=="0.7.0-fidelity1"));
     }
@@ -34,6 +35,17 @@ int run_tests(int argc,char**argv){
             real.seek(time);assert(real.state().timestamp_ns==time);
             for(unsigned track=5;track<=13;++track)assert(real.reader().capture_at(track,time));
         }
+        std::uint64_t dense_samples=0;
+        for(std::uint64_t i=0;i<summary.sample_count;++i){
+            const auto sample=real.reader().sample(i);real.seek(sample.replay_time_ns);
+            const auto raw=real.reader().capture_at(6,sample.replay_time_ns);assert(raw&&raw->timestamp_ns==sample.replay_time_ns);
+            assert(real.state().dense_action);++dense_samples;
+            if(raw->available(0)&&raw->values[0]<10){const auto slot=2+raw->values[0]*3;
+                if(raw->available(slot)&&std::bit_cast<std::int32_t>(raw->values[slot])>=0)assert(real.state().current_action.animation_id==std::bit_cast<std::int32_t>(raw->values[slot]));
+                if(real.state().current_action.flags&erplay::time_valid)assert(std::bit_cast<std::uint32_t>(real.state().current_action.animation_time)==raw->values[slot+1]);
+            }
+        }
+        std::cout<<"REAL_DENSE_ANIMATION_DECODE samples="<<dense_samples<<" (read-only; no engine writes)\n";
         std::cout<<"REAL_CAPTURE_VALIDATED samples="<<summary.sample_count<<" duration_ns="<<summary.duration_ns<<" actual_hz="<<summary.actual_rate_hz<<" chunks="<<summary.chunk_count<<" tracks=9\n";
     } else
     if(argc>1){replay::Player real{std::filesystem::path(argv[1])};assert(real.summary().sample_count==4093);assert(real.summary().duration_ns==68'500'000'000ULL);assert(real.summary().chunk_count==7);real.seek(30'000'000'000ULL);const auto first=real.state();assert(first.sample_index>1700&&first.sample_index<1900);real.seek(55'000'000'000ULL);assert(real.state().sample_index>3200);real.seek(0);real.step(1);assert(real.state().timestamp_ns==real.reader().sample(1).replay_time_ns);std::cout<<"REAL_FIXTURE_PASS samples="<<real.summary().sample_count<<" duration_ns="<<real.summary().duration_ns<<" rate_hz="<<real.summary().actual_rate_hz<<" chunks="<<real.summary().chunk_count<<"\n";}

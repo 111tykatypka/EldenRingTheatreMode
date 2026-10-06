@@ -39,7 +39,7 @@ bool Controller::play(replay::Player& player,std::uint64_t requested_limit,repla
     actor_log_ns_=0;session_=GetTickCount64()*1'000'000ULL+nonce.fetch_add(1);pause_on_start_=false;
     if(!control_.begin_replay(session_,first,player_->state().current_action,animation_&&!selected_actor_,selected_actor_!=0,xz_only_)){fail(L"ERROR: replay BEGIN refused (probe/STOP busy or unsupported DLL)");return false;}
     deadline_=now+std::chrono::seconds(2);transition(Phase::starting,L"STARTING — waiting for first game-thread write");
-    logger_("REPLAY_START session="+std::to_string(session_)+" limit_ns="+std::to_string(limit_ns_)+" action_events="+std::to_string(player_->summary().action_event_count)+" animation_override="+std::to_string(animation_&&!selected_actor_));return true;
+    logger_("REPLAY_START session="+std::to_string(session_)+" limit_ns="+std::to_string(limit_ns_)+" action_events="+std::to_string(player_->summary().action_event_count)+" animation_source="+std::string(player_->state().dense_action?"continuous_capture":"legacy_sparse")+" animation_override="+std::to_string(animation_&&!selected_actor_));return true;
 }
 void Controller::stop(){control_.emergency_stop();if(player_)player_->stop();player_=nullptr;pause_on_start_=false;transition(Phase::inactive,L"INACTIVE — writes OFF / normal controls");logger_("REPLAY_STOP requested");}
 void Controller::pause(replay::Player::Clock::time_point now){

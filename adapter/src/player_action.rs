@@ -20,19 +20,57 @@ pub fn observe_chr(chr:&eldenring::cs::ChrIns)->State {
  }
  let rate=modules.behavior.animation_speed;if rate.is_finite()&&(0.0..=10.0).contains(&rate){s.playback_rate=rate;s.flags|=4;}s
 }
-/// Experimental public next-frame animation override. Does not force HKS or TAE time.
-#[derive(Default)]pub struct AnimationLease{saved:Option<(FieldInsHandle,i32,i32)>,last_id:Option<i32>}
-impl AnimationLease {
- pub fn apply(&mut self,player:&mut PlayerIns,state:State,enabled:bool){
-  if !enabled||state.flags&1==0{self.restore_player(player);return;}
-  if self.last_id==Some(state.animation_id){return;}
-  if let Some((handle,original,_))=self.saved{if handle==player.chr_ins.field_ins_handle{self.saved=Some((handle,original,state.animation_id));}}
-  else{self.saved=Some((player.chr_ins.field_ins_handle,player.chr_ins.modules.event.request_animation_id,state.animation_id));}
-  player.chr_ins.modules.event.request_animation_id=state.animation_id;self.last_id=Some(state.animation_id);
-  crate::log_game(&format!("REPLAY_ANIMATION_REQUEST id={} mode=EXPERIMENTAL transition_only; phase/time/rate NOT forced",state.animation_id));
+/// Pure recorded-cycle detector. Repeated IDs are not necessarily the same action.
+#[derive(Default)]pub struct AnimationCursor{last:Option<State>}
+impl AnimationCursor{
+ pub fn request(&mut self,state:State)->bool{
+  if !state.valid()||state.flags&1==0{self.last=None;return false;}
+  let request=self.last.is_none_or(|old|old.animation_id!=state.animation_id||
+   (old.flags&2!=0&&state.flags&2!=0&&state.animation_time+0.0001<old.animation_time));
+  self.last=Some(state);request
  }
- pub fn restore_player(&mut self,player:&mut PlayerIns){if let Some((handle,original,owned))=self.saved.take(){if handle==player.chr_ins.field_ins_handle&&player.chr_ins.modules.event.request_animation_id==owned{player.chr_ins.modules.event.request_animation_id=original;}}self.last_id=None;}
- pub fn restore(&mut self){if self.saved.is_some(){if let Ok(player)=unsafe{PlayerIns::local_player_mut()}{self.restore_player(player);}}else{self.last_id=None;}}
- pub fn discard(&mut self){self.saved=None;self.last_id=None;}
+}
+/// Experimental public next-frame request. TAE queue/time and pose are NEVER overwritten.
+#[derive(Default)]pub struct AnimationLease{
+ saved:Option<(FieldInsHandle,i32,i32)>,cursor:AnimationCursor,last_log_ns:u64,requests:u64,
+}
+impl AnimationLease {
+ pub fn apply(&mut self,player:&mut PlayerIns,state:State,enabled:bool,session:u64,replay_ns:u64)->bool{
+  if !enabled||state.flags&1==0{self.restore_player(player);return true;}
+  if !state.valid(){return false;}
+  let owner=std::ptr::from_ref(&player.chr_ins);
+  if player.chr_ins.modules.event.owner.as_ptr().cast_const()!=owner||player.chr_ins.modules.time_act.owner.as_ptr().cast_const()!=owner{return false;}
+  // Diagnose the previous native update BEFORE issuing this callback's request.
+  let now=crate::monotonic_ns();
+  if self.saved.is_some()&&now.saturating_sub(self.last_log_ns)>=1_000_000_000 {
+   let actual=observe(player);
+   crate::log_game(&format!("REPLAY_ANIMATION_COMPARE session={} replay_ns={} requested_id={} requested_time={} observed_id={} observed_time={} id_match={} phase_error={:?} requests={} mode=EXPERIMENTAL; phase NOT forced",
+    session,replay_ns,state.animation_id,state.animation_time,actual.animation_id,actual.animation_time,state.animation_id==actual.animation_id,
+    if state.flags&2!=0&&actual.flags&2!=0{Some(actual.animation_time-state.animation_time)}else{None},self.requests));
+   self.last_log_ns=now;
+  }
+  if !self.cursor.request(state){return true;}
+  if let Some((handle,original,_))=self.saved{if handle!=player.chr_ins.field_ins_handle{return false;}self.saved=Some((handle,original,state.animation_id));}
+  else{self.saved=Some((player.chr_ins.field_ins_handle,player.chr_ins.modules.event.request_animation_id,state.animation_id));}
+  player.chr_ins.modules.event.request_animation_id=state.animation_id;self.requests+=1;
+  crate::log_game(&format!("REPLAY_ANIMATION_REQUEST session={} replay_ns={} id={} recorded_time={} recorded_length={} raw_requests=0x{:X} request_count={} mode=EXPERIMENTAL ID_CHANGE_OR_PHASE_RESET; phase/time/rate NOT forced",
+   session,replay_ns,state.animation_id,state.animation_time,state.animation_length,state.raw_action_bits,self.requests));true
+ }
+ pub fn restore_player(&mut self,player:&mut PlayerIns){
+  if let Some((handle,original,owned))=self.saved.take(){
+   if handle==player.chr_ins.field_ins_handle&&player.chr_ins.modules.event.owner.as_ptr().cast_const()==std::ptr::from_ref(&player.chr_ins)&&player.chr_ins.modules.event.request_animation_id==owned{player.chr_ins.modules.event.request_animation_id=original;}
+   crate::log_game("REPLAY_ANIMATION_OFF; owned pending request restored if still owned; native animation already accepted is not rewound");
+  }
+  self.cursor=AnimationCursor::default();self.requests=0;self.last_log_ns=0;
+ }
+ pub fn restore(&mut self){if self.saved.is_some(){if let Ok(player)=unsafe{PlayerIns::local_player_mut()}{self.restore_player(player);}}else{self.cursor=AnimationCursor::default();}}
+ pub fn discard(&mut self){*self=Self::default();}
 }
 #[cfg(test)]mod tests{use super::*;#[test]fn action_layout_validation(){let s=State{flags:3,animation_id:100,animation_time:0.5,animation_length:1.0,..Default::default()};assert!(s.valid());assert_eq!(State::decode(&s.encode()),s);assert!(!State{action:99,..s}.valid());assert!(!State{animation_time:f32::NAN,..s}.valid());assert!(!State{animation_id:-1,..s}.valid());assert!(!State{animation_time:3.0,..s}.valid());}}
+
+#[cfg(test)]mod cycle_tests{
+ use super::*;
+ fn sample(time:f32)->State{State{flags:3,animation_id:12345,animation_time:time,animation_length:1.0,..Default::default()}}
+ #[test]fn same_id_new_cycle_is_requested_once(){let mut c=AnimationCursor::default();assert!(c.request(sample(0.0)));assert!(!c.request(sample(0.2)));assert!(!c.request(sample(0.2)));assert!(c.request(sample(0.0)));assert!(!c.request(sample(0.1)));}
+ #[test]fn invalid_or_unavailable_never_requests(){let mut c=AnimationCursor::default();assert!(!c.request(State::default()));assert!(!c.request(sample(f32::NAN)));assert!(c.request(sample(0.0)));assert!(!c.request(sample(0.00001)));assert!(!c.request(sample(0.0)));assert!(c.request(State{animation_id:54321,..sample(0.0)}));}
+}

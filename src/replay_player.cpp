@@ -3,6 +3,9 @@
 #include <cmath>
 #include <fstream>
 #include <stdexcept>
+#include <bit>
+#include <string_view>
+#include <optional>
 
 namespace replay {
 namespace {
@@ -10,6 +13,34 @@ erplay::Quaternion normalize(erplay::Quaternion q) {
     const double n=std::sqrt(double(q.x)*q.x+double(q.y)*q.y+double(q.z)*q.z+double(q.w)*q.w);
     if(!(n>1e-12&&std::isfinite(n))) return {0,0,0,1};
     return {float(q.x/n),float(q.y/n),float(q.z/n),float(q.w/n)};
+}
+// Decode only named schema fields. Never infer an action from movement velocity.
+std::optional<std::uint32_t> captured_word(const erplay::CaptureRecord& record,unsigned track,std::string_view name,unsigned component=0) {
+    const auto* definition=erplay::capture_track(track);if(!definition)return {};
+    for(const auto& field:erplay::capture_fields)if(field.track==track&&name==field.name&&component<field.words) {
+        const auto local=field.offset-definition->begin+component;
+        if(record.available(local))return record.values[local];return {};
+    }
+    return {};
+}
+std::optional<erplay::ActionState> dense_action(const erplay::Reader& reader,std::uint64_t timestamp) {
+    const auto animation=reader.capture_at(6,timestamp);if(!animation)return {};
+    erplay::ActionState result;const auto index=captured_word(*animation,6,"read_idx");
+    if(!index||*index>=10)return result;
+    const auto prefix="queue_"+std::to_string(*index);
+    const auto id=captured_word(*animation,6,prefix+"_anim_id");
+    const auto time=captured_word(*animation,6,prefix+"_play_time");
+    const auto length=captured_word(*animation,6,prefix+"_anim_length");
+    const auto rate=captured_word(*animation,6,"animation_speed");
+    if(id&&std::bit_cast<std::int32_t>(*id)>=0){result.animation_id=std::bit_cast<std::int32_t>(*id);result.flags|=erplay::animation_valid;}
+    if(time&&length){const float phase=std::bit_cast<float>(*time),duration=std::bit_cast<float>(*length);
+        if((result.flags&erplay::animation_valid)&&std::isfinite(phase)&&std::isfinite(duration)&&phase>=0&&duration>0&&phase<=duration+1){result.animation_time=phase;result.animation_length=duration;result.flags|=erplay::time_valid;}}
+    if(rate){const float speed=std::bit_cast<float>(*rate);if(std::isfinite(speed)&&speed>=0&&speed<=10){result.playback_rate=speed;result.flags|=erplay::rate_valid;}}
+    if(const auto actions=reader.capture_at(7,timestamp)) {
+        const auto low=captured_word(*actions,7,"action_requests",0),high=captured_word(*actions,7,"action_requests",1);
+        if(low&&high)result.raw_action_bits=std::uint64_t(*low)|(std::uint64_t(*high)<<32);
+    }
+    return result;
 }
 std::uint64_t ns_between(Player::Clock::time_point a,Player::Clock::time_point b) {
     const auto d=std::chrono::duration_cast<std::chrono::nanoseconds>(b-a).count();
@@ -43,6 +74,11 @@ void Player::update_state() {
     state_.orientation=slerp(a.orientation,b.orientation,t);
     const auto& events=reader_->action_events();state_.has_action=false;state_.current_action={};
     if(!events.empty()){if(!action_cursor_valid_||clock_ns_<previous_action_clock_){const auto it=std::upper_bound(events.begin(),events.end(),clock_ns_,[](std::uint64_t ns,const erplay::ActionEvent&e){return ns<e.timestamp_ns;});action_cursor_=static_cast<std::size_t>(it-events.begin());action_cursor_valid_=true;}else{while(action_cursor_<events.size()&&events[action_cursor_].timestamp_ns<=clock_ns_)++action_cursor_;}if(action_cursor_){state_.has_action=true;state_.current_action=events[action_cursor_-1].state;}}
+    state_.dense_action=false;
+    if(summary().capture_record_counts[1]) {
+        state_.current_action={};state_.has_action=false;
+        if(auto captured=dense_action(*reader_,clock_ns_)){state_.current_action=*captured;state_.has_action=(captured->flags&erplay::animation_valid)!=0;state_.dense_action=true;}
+    }
     previous_action_clock_=clock_ns_;
 }
 void Player::play(Clock::time_point now) {

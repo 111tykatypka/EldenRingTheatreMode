@@ -129,7 +129,11 @@ impl GameReplay {
         // STOP may arrive after a request was read; recheck just before the write.
         if generation!=GENERATION.load(Ordering::Acquire) || !CONNECTED.load(Ordering::Acquire) {return;}
         if player_writes_enabled(){
-            self.input.apply(player);self.animation.apply(player,r.player_action,r.animation_enabled);
+            self.input.apply(player);
+            if !self.animation.apply(player,r.player_action,r.animation_enabled,r.session,r.replay_ns){
+                stop(6);self.playback.cancel();self.input.restore_player(player);self.animation.restore_player(player);
+                crate::log_game("REPLAY_ERROR=ANIMATION_OWNER_OR_STATE_INVALID; writes OFF");return;
+            }
             crate::grounding::request(now_ns,"player_write_before",&player.chr_ins,r);
             let physics=&mut player.chr_ins.modules.physics;
             physics.position.0=r.target.position[0];

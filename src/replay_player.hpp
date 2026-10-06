@@ -13,7 +13,7 @@ struct State {
     erplay::Vec3 position{};
     erplay::Quaternion orientation{};
     double speed{1.0};
-    erplay::ActionState current_action;bool has_action{};
+    erplay::ActionState current_action;bool has_action{},dense_action{};
     Status status{Status::stopped};
 };
 class Player {

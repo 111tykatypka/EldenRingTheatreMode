@@ -2,6 +2,11 @@ import unittest,struct,json,zlib,tempfile
 from pathlib import Path
 from inspect_capture import inspect,decode_record,DEFAULT_SCHEMA
 class CaptureTests(unittest.TestCase):
+ def test_replay_comparisons_are_scoped_and_honest(self):
+  from analyze_animation_replay import analyze
+  log="REPLAY_ANIMATION_REQUEST session=2 replay_ns=0 id=4\nREPLAY_ANIMATION_COMPARE session=2 replay_ns=100 requested_id=4 observed_id=4 id_match=true phase_error=Some(-0.05)\nREPLAY_ANIMATION_COMPARE session=2 replay_ns=200 requested_id=5 observed_id=4 id_match=false phase_error=Some(9.0)\nREPLAY_ANIMATION_REQUEST session=3 replay_ns=0 id=7"
+  group=analyze(log,2)['sessions'][2];self.assertEqual(group['requests'],1);self.assertEqual(group['id_match_fraction'],.5);self.assertEqual(group['max_abs_phase_error_s'],.05);self.assertEqual(len(group['mismatches']),1)
+
  def test_schema_unique_and_bounded(self):
   s=json.loads(DEFAULT_SCHEMA.read_text());self.assertEqual(len(s['tracks']),9)
   for t in s['tracks']:

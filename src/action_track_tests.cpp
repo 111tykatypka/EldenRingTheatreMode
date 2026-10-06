@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iterator>
 #include <iostream>
+#include <bit>
 #undef assert
 #define assert(x) do{if(!(x)){std::cerr<<"FAILED line "<<__LINE__<<": "<<#x<<"\n";throw std::runtime_error("assertion failure");}}while(false)
 int run(){
@@ -29,6 +30,13 @@ int run(){
  auto optional=bytes;optional[track+4]=99;auto optional_file=dir/"optional.erplay"; // Footer count must reflect the skipped known events.
  std::uint64_t count=1;std::memcpy(optional.data()+optional.size()-8,&count,8);{std::ofstream o(optional_file,std::ios::binary);o.write(optional.data(),optional.size());}assert(erplay::validate(optional_file).action_event_count==1);
  optional[track+8]=1;reject(optional,"required.erplay");
+ // Continuous native timing supersedes sparse events and preserves same-ID cycles.
+ const auto dense=dir/"dense.erplay";meta.mod_version="0.7.0-fidelity1";
+ {erplay::Writer writer(dense,meta,2);for(unsigned i=0;i<4;++i){erplay::Sample sample;sample.index=i;sample.source_sequence=i+1;sample.source_time_ns=sample.replay_time_ns=i*100'000'000ULL;sample.capture=erplay::CaptureFrame{};
+ auto set=[&](unsigned track,const char*name,std::uint32_t value,unsigned component=0){for(const auto&field:erplay::capture_fields)if(field.track==track&&std::string(name)==field.name){const auto offset=field.offset+component;sample.capture->values[offset]=value;sample.capture->valid[offset/32]|=1u<<(offset%32);return;}assert(false);};
+ set(6,"read_idx",2);set(6,"queue_2_anim_id",12345);set(6,"queue_2_play_time",std::bit_cast<std::uint32_t>(i==2?.01f:float(i)*.1f));set(6,"queue_2_anim_length",std::bit_cast<std::uint32_t>(1.f));set(6,"animation_speed",std::bit_cast<std::uint32_t>(1.f));set(7,"action_requests",i);set(7,"action_requests",0,1);writer.append(sample);}(void)writer.finalize();}
+ replay::Player dense_player(dense);dense_player.seek(100'000'000);assert(dense_player.state().dense_action&&dense_player.state().has_action);assert(dense_player.state().current_action.animation_id==12345);assert(std::abs(dense_player.state().current_action.animation_time-.1f)<1e-6);assert(dense_player.state().current_action.raw_action_bits==1);
+ dense_player.seek(200'000'000);assert(std::abs(dense_player.state().current_action.animation_time-.01f)<1e-6);dense_player.seek(0);assert(dense_player.state().current_action.animation_time==0);
  std::cout<<"Action track / v2 compatibility / seek / recovery / integrity passed\n";return 0;
 }
 

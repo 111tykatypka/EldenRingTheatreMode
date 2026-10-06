@@ -629,6 +629,9 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
               p.state.orientation.w);
   ImGui::Text("Raw animation: %d | semantics UNKNOWN",
               p.state.current_action.animation_id);
+  ImGui::Text("Recorded native phase: %.4fs / %.4fs | source: %s",
+              p.state.current_action.animation_time,p.state.current_action.animation_length,
+              p.state.dense_action?"continuous capture":"legacy sparse events");
   ImGui::Text("Game: %s | Samples: %llu",
               p.summary.metadata.game_version.c_str(), p.summary.sample_count);
   if(p.loaded){std::lock_guard lock(app.replay_mutex);auto visual=app.replay_player->reader().visual_at(selected_actor,p.state.timestamp_ns);
@@ -751,7 +754,8 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
         std::isfinite(warning_threshold) ? std::max(0., warning_threshold) : 15;
     button("Save settings", save_settings);
     ImGui::BeginDisabled(p.active);
-    ImGui::Checkbox("Experimental raw animation requests", &app.animation);
+    ImGui::Checkbox("Experimental native animation requests + same-ID cycles", &app.animation);
+    ImGui::TextWrapped("Uses recorded native phase to detect cycles; phase/pose are NOT forced. Verify first 5 seconds before longer playback.");
     ImGui::Checkbox("Experimental existing-character transform replay", &app.actor_playback);
     ImGui::Checkbox("Replay selected NPC only (player writes OFF)", &app.selected_actor_only);
     app.selected_replay_actor=selected_actor;
