@@ -317,23 +317,35 @@ void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
  log("ANIM_PROBE: start player=0x%llX behavior=0x%llX(%s) time_act=0x%llX(%s)",player,behavior,rttiName(behavior).c_str(),timeAct,rttiName(timeAct).c_str());
  std::vector<ProbeNode> found;std::vector<U> seen;
  auto interesting=[](const std::string&n){return n.find("hk")!=std::string::npos||n.find("Anim")!=std::string::npos||n.find("Behavior")!=std::string::npos||n.find("Clip")!=std::string::npos||n.find("TimeAct")!=std::string::npos;};
+ bool allowArrays=false;
  std::function<void(U,const std::string&,size_t,int)> walk=[&](U object,const std::string& path,size_t bytes,int depth){
   if(found.size()>=400)return;
   std::vector<unsigned char> buffer(bytes);if(!read(object,buffer.data(),bytes))return;
   for(size_t o=8;o+8<=bytes&&found.size()<400;o+=8){
    U p;memcpy(&p,buffer.data()+o,8);if(!pointerish(p)||std::find(seen.begin(),seen.end(),p)!=seen.end())continue;
-   const auto name=rttiName(p);if(name.empty()||!interesting(name))continue;
+   auto name=rttiName(p);
+   if(name.empty()&&depth>0&&allowArrays){ // hkArray / plain storage: look for named objects inside
+    std::vector<unsigned char> inner(0x100);if(read(p,inner.data(),inner.size()))for(size_t k=0;k+8<=inner.size();k+=8){U q;memcpy(&q,inner.data()+k,8);
+     if(!pointerish(q)||std::find(seen.begin(),seen.end(),q)!=seen.end())continue;const auto qn=rttiName(q);if(qn.empty())continue;
+     seen.push_back(q);char st[64];snprintf(st,sizeof(st),"+%zX[]+%zX",o,k);found.push_back({q,qn,path+st});if(found.size()<400)walk(q,path+st+">",0x400,depth-1);}
+    continue;}
+   if(name.empty()||(!allowArrays&&!interesting(name)))continue;
    seen.push_back(p);char step[48];snprintf(step,sizeof(step),"+%zX",o);
    found.push_back({p,name,path+step});
-   if(depth>0)walk(p,path+step+">",0x300,depth-1);
+   if(depth>0)walk(p,path+step+">",allowArrays?0x400:0x300,depth-1);
   }};
  seen.push_back(behavior);seen.push_back(timeAct);
  walk(behavior,"behavior",0x1A00,3);
+ // Path used by community tools: CSChrBehaviorModule+0x10 -> +0x30 = hkbCharacter. Walk it fully.
+ {U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0;
+  log("ANIM_PROBE: behavior+10 = %s @0x%llX; +30 = %s @0x%llX",rttiName(holder).c_str(),holder,rttiName(character).c_str(),character);
+  if(character){allowArrays=true;seen.push_back(character);found.push_back({character,rttiName(character),"hkbCharacter"});walk(character,"hkbCharacter>",0x400,3);allowArrays=false;}
+  if(holder){allowArrays=true;walk(holder,"behavior+10>",0x200,1);allowArrays=false;}}
  walk(timeAct,"time_act",0xD8,3);
  for(const auto& n:found)log("ANIM_PROBE: %s = %s @0x%llX",n.path.c_str(),n.name.c_str(),n.address);
  // Sample candidate objects: first 0x100 bytes as floats, 30 samples x 50 ms; report changing fields.
  std::vector<const ProbeNode*> targets;
- for(const auto& n:found)if(n.name.find("AnimationControl")!=std::string::npos||n.name.find("ClipGenerator")!=std::string::npos||n.name.find("AnimatedSkeleton")!=std::string::npos||n.name.find("hkbCharacter")!=std::string::npos)if(targets.size()<12)targets.push_back(&n);
+ for(const auto& n:found)if(n.name.find("AnimationControl")!=std::string::npos||n.name.find("ClipGenerator")!=std::string::npos||n.name.find("AnimatedSkeleton")!=std::string::npos||n.name.find("hkbCharacter")!=std::string::npos||n.name.find("HvkAnim")!=std::string::npos||n.name.find("BehaviorGraph")!=std::string::npos)if(targets.size()<20)targets.push_back(&n);
  constexpr int samples=30;constexpr size_t words=0x100/4;
  std::vector<std::vector<float>> series(targets.size(),std::vector<float>(samples*words));
  std::vector<std::array<float,4>> tae(samples);
