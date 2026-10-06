@@ -69,7 +69,7 @@ impl Capture{
    if let Err(e)=std::fs::create_dir_all(&root){crate::log_game(&format!("NATIVE_REPLAY: STORAGE_ERROR {e}"));return;}
    let path=root.join(format!("native_replay_{}_{}.jsonl",std::process::id(),crate::monotonic_ns()));
    let Ok(mut file)=std::fs::File::create(&path)else{crate::log_game("NATIVE_REPLAY: STORAGE_ERROR create journal");return;};
-   crate::log_game(&format!("NATIVE_REPLAY: READONLY=ON profile=EldenRing_1_17 interval=1s; engine calls/writes blocked; journal={}",path.display()));
+   crate::log_game(&format!("NATIVE_REPLAY: capture=READONLY profile=EldenRing_1_17 interval=1s; legacy replay writes blocked; native_ghost_feature={}; journal={}",cfg!(feature="native-replay-ghost-create-remove"),path.display()));
    while let Ok(batch)=rx.recv(){for row in batch.rows{
     if row.prefix!="PAYLOAD_TICK"&&row.prefix!="PAYLOAD_CONTEXT"&&!row.message.starts_with("role=observed_write") {crate::log_game(&format!("{}: t={} {}",row.prefix,batch.timestamp,row.message));}
     let line=format!("{{\"schema\":1,\"time_ns\":{},\"source_drops\":{},\"prefix\":{},\"address\":\"0x{:x}\",\"message\":{},\"raw_hex\":{}}}\n",batch.timestamp,batch.dropped,json_quote(row.prefix),row.address,json_quote(&row.message),json_quote(&hex(&row.bytes)));

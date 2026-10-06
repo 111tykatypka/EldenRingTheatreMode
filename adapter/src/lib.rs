@@ -30,6 +30,7 @@ mod ownership_probe;
 mod world_observation;
 mod research_readonly;
 mod native_bloodstain;
+mod native_ghost_prototype;
 mod actor_replay;
 mod visual_capture;
 mod fidelity_capture;
@@ -132,6 +133,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     return;
                 }
                 log_game("Runtime profile accepted: EldenRing_1_17 / WW 2.7.0.0");
+                native_ghost_prototype::initialize();
                 // Early, after exact executable guard; never under the loader lock.
                 let graphics=unsafe{tm_render_start(render_emergency_stop)};
                 log_game(&format!("IN_GAME_UI_HOOKS={graphics}; visuals UNVERIFIED"));
