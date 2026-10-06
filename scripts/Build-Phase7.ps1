@@ -1,14 +1,14 @@
 param(
- [string]$OutputDirectory='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Phase7_Runtime_UI_Hotfix4',
+ [string]$OutputDirectory='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Phase7_Runtime_UI_Hotfix5',
  [string]$CMakeBin='C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
 )
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 $outputFull=[IO.Path]::GetFullPath($OutputDirectory)
-if($outputFull -match '\\(Phase5[^\\]*|TesterBuild|Nightly_ResearchIntegration|Phase7_Runtime_UI|Phase7_Runtime_UI_Hotfix1|Phase7_Runtime_UI_Hotfix2|Phase7_Runtime_UI_Hotfix3)(\\|$)'){throw 'Preserved build directory cannot be an output'}
+if($outputFull -match '\\(Phase5[^\\]*|TesterBuild|Nightly_ResearchIntegration|Phase7_Runtime_UI|Phase7_Runtime_UI_Hotfix1|Phase7_Runtime_UI_Hotfix2|Phase7_Runtime_UI_Hotfix3|Phase7_Runtime_UI_Hotfix4)(\\|$)'){throw 'Preserved build directory cannot be an output'}
 $preserved=@{}
 $outputs='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode'
-foreach($folder in @('Phase5','TesterBuild','Nightly_ResearchIntegration','Phase7_Runtime_UI','Phase7_Runtime_UI_Hotfix1','Phase7_Runtime_UI_Hotfix2','Phase7_Runtime_UI_Hotfix3')){
+foreach($folder in @('Phase5','TesterBuild','Nightly_ResearchIntegration','Phase7_Runtime_UI','Phase7_Runtime_UI_Hotfix1','Phase7_Runtime_UI_Hotfix2','Phase7_Runtime_UI_Hotfix3','Phase7_Runtime_UI_Hotfix4')){
  foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','BUILD_MANIFEST.txt')){
   $path=Join-Path (Join-Path $outputs $folder) $name
   if(Test-Path -LiteralPath $path){$preserved[$path]=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
@@ -29,8 +29,12 @@ $smoke=Start-Process -FilePath (Join-Path $build 'Release\render-dx12-smoke.exe'
 if(-not $smoke.WaitForExit(20000)){$smoke.Kill();throw 'DX12 smoke test timed out'}
 if($smoke.ExitCode){throw "DX12 smoke test failed: $($smoke.ExitCode)"}
 Get-Content -LiteralPath (Join-Path $build 'phase7-dx12-smoke.log')
+# Windows PowerShell treats redirected compiler stderr as error records.
+$ErrorActionPreference='Continue'
 & $cargo test --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --target x86_64-pc-windows-msvc 2>&1 | Tee-Object -FilePath (Join-Path $build 'phase7-rust-tests.log')
-if($LASTEXITCODE){throw 'Rust tests failed'}
+$cargoTestExit=$LASTEXITCODE
+$ErrorActionPreference='Stop'
+if($cargoTestExit){throw 'Rust tests failed'}
 & $cargo build --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --target x86_64-pc-windows-msvc
 if($LASTEXITCODE){throw 'DLL Release build failed'}
 Push-Location $repo
@@ -48,6 +52,7 @@ foreach($name in @('PHASE7_IMPLEMENTATION_STATUS','PHASE7_RUNTIME_TEST_PLAN','PH
 Copy-Item -LiteralPath (Join-Path $repo 'notes\PHASE7_CRASH_DIAGNOSTIC.md') -Destination $outputFull -Force
 Copy-Item -LiteralPath (Join-Path $repo 'notes\PHASE7_RECORDING_HOTKEY_FIX.md') -Destination $outputFull -Force
 Copy-Item -LiteralPath (Join-Path $repo 'notes\PHASE7_REPLAY_LEASE_FIX.md') -Destination $outputFull -Force
+Copy-Item -LiteralPath (Join-Path $repo 'notes\PHASE7_SIMPLIFIED_CONTROLS.md') -Destination $outputFull -Force
 Copy-Item -LiteralPath (Join-Path $repo 'third_party\minhook_vendor\LICENSE.txt') -Destination (Join-Path $outputFull 'MinHook-LICENSE.txt') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'ERPLAY_FORMAT.md') -Destination $outputFull -Force
 Copy-Item -LiteralPath (Join-Path $repo 'research\symbols_2_7_0_0.json') -Destination $outputFull -Force
@@ -67,6 +72,7 @@ $manifest+='Hotfix1: original Phase7 startup crash REPORTED; root cause UNRESOLV
 $manifest+='User verified Hotfix1 loads world and displays Overlay; game terminates on RMB. Hotfix2 input fix: RUNTIME VALIDATION REQUIRED.'
 $manifest+='User subsequently verified Hotfix2 UI/mouse. Hotfix3 host-only global recording hotkey dispatch fix: live F5 validation REQUIRED.'
 $manifest+='Hotfix3 live F5/start/stop/file finalization verified in logs. Hotfix4 fixes callback-vs-IPC clock ordering; new DLL runtime validation REQUIRED; timeout limits unchanged.'
+$manifest+='Hotfix4 moving replay user-confirmed on flat indoor floor: path repeated without falls/jerks; sliding model, animations not implemented. Hotfix5 removes Pause/Resume UI + F7/F8 and owns timeline wheel; new UI runtime validation REQUIRED.'
 $manifest+='Real-device DX12 smoke: PASS (120 Presents, Clean/Overlay/Editor, mouse buttons, ResizeBuffers, shutdown); separate from Elden Ring verification; see phase7-dx12-smoke.log.'
 foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','EldenRingCompatibilityProbe.exe')){
  $p=Join-Path $outputFull $name;$manifest+="$name bytes=$((Get-Item -LiteralPath $p).Length) SHA256=$((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash)"

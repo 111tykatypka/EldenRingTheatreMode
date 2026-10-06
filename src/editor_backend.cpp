@@ -95,10 +95,10 @@ void playback_tick() {
   }
 }
 bool handle_global_hotkey(UINT id) {
-  if(id<1||id>4)return false;
+  if(id<1||id>2)return false;
   log_line("GLOBAL_HOTKEY received id="+std::to_string(id));
   if(id==2)emergency_stop();
-  else post_command(id==1?Command::start:id==3?Command::pause:Command::resume);
+  else post_command(Command::start);
   return true;
 }
 void post_command(Command c) {
@@ -834,8 +834,6 @@ void initialize(HWND window) {
       std::make_unique<in_game_replay::Controller>(app.control, log_line);
   register_hotkey(window, 1, VK_F5, "F5 START");
   app.stop_hotkey = register_hotkey(window, 2, VK_F6, "F6 STOP");
-  register_hotkey(window, 3, VK_F7, "F7 PAUSE");
-  register_hotkey(window, 4, VK_F8, "F8 RESUME");
   ingame_editor::start();
   app.control.start(app.game_pid);
   app.characters.start(app.game_pid);
@@ -859,7 +857,7 @@ void shutdown() {
     CancelSynchronousIo(app.worker.native_handle());
     app.worker.join();
   }
-  for (int i = 1; i <= 4; ++i)
+  for (int i = 1; i <= 2; ++i)
     UnregisterHotKey(app.window, i);
 }
 } // namespace theater

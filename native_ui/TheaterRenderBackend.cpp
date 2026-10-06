@@ -88,7 +88,7 @@ public:
   const bool editor=mode.load()==2;ImGui::SetNextWindowPos(ImVec2(10,10),ImGuiCond_FirstUseEver);ImGui::SetNextWindowSize(ImVec2(editor?560.f:460.f,editor?380.f:180.f),ImGuiCond_FirstUseEver);
   ImGui::Begin(editor?"Theater Editor — experimental":"Theater Transport — experimental");
   ImGui::Text("Host clock %.3f / %.3f seconds",s.time_ns/1e9,s.duration_ns/1e9);ImGui::Text("Game %s | Player %s",s.connected?"CONNECTED":"WAITING",s.player_found?"FOUND":"WAITING");
-  ImGui::BeginDisabled(!s.loaded);if(ImGui::Button("Play / Resume"))command(theater_ui::play);ImGui::SameLine();if(ImGui::Button("Pause"))command(theater_ui::pause);ImGui::SameLine();if(ImGui::Button("Stop / F6"))command(theater_ui::stop);
+  ImGui::BeginDisabled(!s.loaded);if(ImGui::Button("Play"))command(theater_ui::play);ImGui::SameLine();if(ImGui::Button("Stop / F6"))command(theater_ui::stop);
   if(ImGui::Button("Restart"))command(theater_ui::restart);ImGui::SameLine();if(ImGui::Button("Previous tick"))command(theater_ui::previous);ImGui::SameLine();if(ImGui::Button("Next tick"))command(theater_ui::next);
   constexpr double speeds[]{.1,.25,.5,1,2,4};const char*labels[]{"0.1x","0.25x","0.5x","1x","2x","4x"};int selected=3;for(int i=0;i<6;++i)if(s.playback_speed==speeds[i])selected=i;
   if(ImGui::Combo("Playback speed",&selected,labels,6))command(theater_ui::speed,static_cast<std::uint64_t>(speeds[selected]*100));

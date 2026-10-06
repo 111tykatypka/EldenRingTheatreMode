@@ -6,6 +6,17 @@
 #include <functional>
 namespace editor {
 using namespace theater;
+void zoom_timeline_item(TimeView &view, double duration) {
+  ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+  ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
+  const auto &io = ImGui::GetIO();
+  if (ImGui::IsItemHovered() && io.MouseWheel != 0) {
+    const auto left = ImGui::GetItemRectMin().x;
+    const auto width = std::max(1.f, ImGui::GetItemRectSize().x);
+    view.zoom(std::pow(.8, io.MouseWheel),
+              std::clamp(double(io.MousePos.x - left) / width, 0.0, 1.0), duration);
+  }
+}
 namespace {
 std::vector<std::function<void()>> commands;
 fs::path selected, last_document;
@@ -90,7 +101,7 @@ void draw_timeline(const PlaybackView &p, const game_control::State &remote) {
     ImGui::End();
     return;
   }
-  if (ImGui::Button("Play / Resume"))
+  if (ImGui::Button("Play"))
     request_play(p, remote, false);
   ImGui::SameLine();
   button("|<", [] { seek_replay(0); });
@@ -100,8 +111,6 @@ void draw_timeline(const PlaybackView &p, const game_control::State &remote) {
   button("sample >", [] { step_replay(1); });
   ImGui::SameLine();
   button("Stop / F6", emergency_stop);
-  ImGui::SameLine();
-  button("Pause", pause_replay);
   int speed = 3;
   constexpr double rates[]{.1, .25, .5, 1., 2., 4.};
   for (int i = 0; i < 6; ++i)
@@ -154,7 +163,7 @@ void draw_timeline(const PlaybackView &p, const game_control::State &remote) {
         static_cast<std::uint64_t>(std::clamp(jump, 0.0, duration) * 1e9));
   });
   ImGui::TextDisabled(
-      "Wheel: zoom | Middle drag: pan | Drag ruler: seek (native writes stop)");
+      "Wheel up/down: zoom in/out | Middle drag: pan | Drag ruler: seek (native writes stop)");
   ImGui::BeginChild("Track scroll");
   auto origin = ImGui::GetCursorScreenPos();
   auto size = ImGui::GetContentRegionAvail();
@@ -170,9 +179,7 @@ void draw_timeline(const PlaybackView &p, const game_control::State &remote) {
   auto &io = ImGui::GetIO();
   const bool hover = ImGui::IsItemHovered();
   const double local = io.MousePos.x - origin.x;
-  if (hover && io.MouseWheel != 0)
-    timeline.zoom(std::pow(.8, io.MouseWheel),
-                  std::clamp(local / size.x, 0.0, 1.0), duration);
+  zoom_timeline_item(timeline, duration);
   if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
     timeline.pan(-io.MouseDelta.x / size.x * timeline.span, duration);
   if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
@@ -574,9 +581,6 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   ImGui::EndDisabled();
   ImGui::SameLine();
   button("Stop / F6", emergency_stop);
-  button("Pause / F7", [] { post_command(Command::pause); });
-  ImGui::SameLine();
-  button("Resume / F8", [] { post_command(Command::resume); });
   label(recorder.error);
   ImGui::End();
   ImGui::Begin("Launcher");
@@ -599,8 +603,8 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
                : "No replay loaded");
   ImGui::TextWrapped("%s", text(p.diagnostic).c_str());
   ImGui::BeginDisabled(!p.loaded);
-  if (ImGui::Button(app.game_pid.load() ? "Play / Resume in game"
-                                        : "Play / Resume"))
+  if (ImGui::Button(app.game_pid.load() ? "Play in game"
+                                        : "Play"))
     request_play(p, remote, false);
   ImGui::SameLine();
   if (ImGui::Button("Restart"))
@@ -798,9 +802,7 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   }
   if (!ImGui::GetIO().WantCaptureKeyboard) {
     if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
-      if (p.state.status == replay::Status::playing)
-        commands.push_back(pause_replay);
-      else
+      if (p.state.status != replay::Status::playing)
         request_play(p, remote, false);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))

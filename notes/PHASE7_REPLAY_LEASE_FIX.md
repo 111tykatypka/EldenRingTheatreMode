@@ -1,5 +1,28 @@
 # Hotfix4 — random replay stops
 
+## Stationary runtime test — completed
+
+User reported done; logs confirm recording replay_2026-10-06_060803.erplay:
+419 samples, 6.9673637 s, 59.993997 Hz, 1 chunk, 214980 bytes. Session
+107757156000001 accepted exact start, actors OFF, XZ_ROTATION, and advanced through
+the entire file to native REPLAY_STATE=3 / REPLAY_FINISHED and host acknowledged
+FINISHED. No lease rejection or error stop in this session. After startup, game
+callback/apply rates approximately60 Hz and host IPC approximately120 Hz.
+Recorded stationary position matched requested/applied XZ; this verifies one
+stationary replay completion, not moving playback, animation, full XYZ grounding,
+NPC ownership or pause/resume. Next: fresh short movement recording returning to
+its visible original point before stopping; First 5 seconds player-only XZ test.
+
+## Latest Hotfix4 session
+
+Read-only inspection: running host is Phase7_Runtime_UI_Hotfix4, game PID19652.
+Runtime reached PLAYER_FOUND. Latest attempted Play calls are rejected by the
+host near-start guard BEFORE REPLAY_BEGIN (HOST_REPLAY_STATE=6, session=0).
+Loaded recording start=(-5.28739,1.60188,-5.92740), live=(-9.78130,1.58076,-4.69554),
+distance=4.65974 units. Actor playback disabled. These latest attempts do not
+exercise the lease fix. Older detail=2 entries belong to preceding sessions and
+must not be attributed to this new DLL without an accepted new replay session.
+
 User reports random early stops. Latest host log confirms actor replay disabled,
 successful near-start checks, STARTING -> PLAYING -> ERROR. Game log repeatedly
 reports REPLAY_STOP detail=2, with occasional subsequent detail=9. This is not

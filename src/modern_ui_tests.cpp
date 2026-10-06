@@ -1,4 +1,5 @@
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "modern_ui.hpp"
 #include <iostream>
 int main() {
@@ -7,13 +8,13 @@ int main() {
   auto &io = ImGui::GetIO();
   // Regression: captured keyboard focus must not suppress Windows global hotkeys.
   io.WantCaptureKeyboard=true;
-  for(auto entry:{std::pair<UINT,theater::Command>{1,theater::Command::start},{3,theater::Command::pause},{4,theater::Command::resume}}){
+  for(auto entry:{std::pair<UINT,theater::Command>{1,theater::Command::start}}){
     if(!theater::handle_global_hotkey(entry.first))return 3;
     std::lock_guard lock(theater::app.commands_mutex);
     if(theater::app.commands.size()!=1||theater::app.commands.front()!=entry.second)return 4;
     theater::app.commands.pop();
   }
-  if(theater::handle_global_hotkey(99))return 5;
+  if(theater::handle_global_hotkey(3)||theater::handle_global_hotkey(4)||theater::handle_global_hotkey(99))return 5;
   io.WantCaptureKeyboard=false;
   io.IniFilename = nullptr;
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -79,6 +80,35 @@ int main() {
       if (!ImGui::GetDrawData()->Valid)
         return 1;
     }
+  }
+  // Real ImGui wheel events on an overflowing child: both directions must
+  // zoom, never scroll the canvas/parent, and require no modifier key.
+  editor::TimeView view;
+  view.fit(60);
+  io.DisplaySize = {800,600};
+  io.AddMousePosEvent(150,150);
+  auto wheel_frame = [&](float wheel) {
+    if(wheel) io.AddMouseWheelEvent(0,wheel);
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos({20,20});
+    ImGui::SetNextWindowSize({400,300});
+    ImGui::Begin("Wheel regression",nullptr,ImGuiWindowFlags_NoSavedSettings);
+    ImGui::BeginChild("Overflow",{0,0});
+    ImGui::InvisibleButton("canvas",{300,1000});
+    editor::zoom_timeline_item(view,60);
+    const float child_scroll=ImGui::GetScrollY();
+    ImGui::EndChild();
+    const float parent_scroll=ImGui::GetScrollY();
+    ImGui::End();
+    ImGui::Render();
+    return child_scroll==0 && parent_scroll==0;
+  };
+  wheel_frame(0); wheel_frame(0); wheel_frame(0);
+  for(int i=0;i<10;++i) {
+    const auto before=view.span;
+    if(!wheel_frame(1)||view.span>=before) return 6;
+    const auto zoomed=view.span;
+    if(!wheel_frame(-1)||view.span<=zoomed||io.KeyShift) return 7;
   }
   ImGui::DestroyContext();
   std::cout << "ImGui docking/render construction at five resolutions passed "
