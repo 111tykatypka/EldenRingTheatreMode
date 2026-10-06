@@ -35,7 +35,7 @@ class TheaterRenderBackend {
 public:
  std::recursive_mutex graphics;std::mutex ipc,input_mutex;
  std::mutex native_status_mutex;char native_status[2048]{};ULONGLONG native_status_tick{};std::atomic_bool native_status_visible{};
- BOOL (WINAPI* set_cursor_pos)(int,int){};Present present{};Resize resize{};Create create{};CreateHwnd create_hwnd{};
+ BOOL (WINAPI* set_cursor_pos)(int,int){};BOOL (WINAPI* clip_cursor)(const RECT*){};Present present{};Resize resize{};Create create{};CreateHwnd create_hwnd{};
  std::vector<void*> targets;ComPtr<IDXGISwapChain3> chain;ComPtr<ID3D12CommandQueue> queue;ComPtr<ID3D12Device> device;
  ComPtr<ID3D12DescriptorHeap> rtvs,srvs;ComPtr<ID3D12GraphicsCommandList> list;ComPtr<ID3D12Fence> fence;
  std::vector<Frame> frames;UINT64 fence_value{};HANDLE fence_event{};HWND hwnd{};WNDPROC previous_proc{};
@@ -52,19 +52,22 @@ public:
  // buttons drive the ImGui cursor instead, unless real window mouse messages are arriving.
  std::atomic<long> mouse_dx{},mouse_dy{};std::atomic<unsigned> mouse_buttons{};std::atomic<ULONGLONG> os_mouse_tick{};
  ImVec2 virtual_mouse{-1,-1};unsigned applied_buttons{};
- // One cursor position for the overlay, from whichever source is actually moving:
- // DirectInput deltas (the game holds the mouse) or the Windows cursor (window messages).
- ImVec2 last_os_mouse{-1,-1};ULONGLONG last_dinput_tick{},cursor_log_tick{};long dinput_seen{};
+ // Exactly one cursor source per frame, so position and clicks never disagree.
+ //  - Windows mode (default): the game keeps sending window mouse messages, so ImGui gets
+ //    position and buttons only from those (the queued WM_* events). Nothing else moves it.
+ //  - DirectInput mode: only if no window mouse message arrived for 1 s while shown (the game
+ //    holds the mouse exclusively). Then the blocked DirectInput deltas and buttons drive it.
+ // The OS cursor is hidden while shown (WM_SETCURSOR) and the overlay draws the only arrow.
+ ULONGLONG cursor_log_tick{};bool dinput_mode{};
  void feed_virtual_mouse(){auto&io=ImGui::GetIO();const long dx=mouse_dx.exchange(0),dy=mouse_dy.exchange(0);const unsigned buttons=mouse_buttons.load();
-  if(mode.load()!=2){virtual_mouse={-1,-1};applied_buttons=0;last_os_mouse={-1,-1};return;}
-  const ULONGLONG now=GetTickCount64();
-  if(virtual_mouse.x<0||virtual_mouse.y<0)virtual_mouse={io.DisplaySize.x*.5f,io.DisplaySize.y*.5f};
-  if(dx||dy){virtual_mouse.x+=float(dx);virtual_mouse.y+=float(dy);last_dinput_tick=now;dinput_seen+=std::labs(dx)+std::labs(dy);}
-  else{POINT p{};if(GetCursorPos(&p)&&ScreenToClient(hwnd,&p)){const ImVec2 os(float(p.x),float(p.y));
-   if(last_os_mouse.x>=0&&(os.x!=last_os_mouse.x||os.y!=last_os_mouse.y)&&now-last_dinput_tick>250)virtual_mouse=os;last_os_mouse=os;}}
-  virtual_mouse.x=std::clamp(virtual_mouse.x,0.f,std::max(0.f,io.DisplaySize.x-1));virtual_mouse.y=std::clamp(virtual_mouse.y,0.f,std::max(0.f,io.DisplaySize.y-1));
+  if(mode.load()!=2){virtual_mouse={-1,-1};applied_buttons=0;dinput_mode=false;return;}
+  const ULONGLONG now=GetTickCount64();const bool dinput=now-os_mouse_tick.load()>1000;
+  if(dinput!=dinput_mode){dinput_mode=dinput;virtual_mouse=ImGui::IsMousePosValid(&io.MousePos)?io.MousePos:ImVec2(io.DisplaySize.x*.5f,io.DisplaySize.y*.5f);
+   log(dinput?"CURSOR source=DirectInput (no window mouse messages for 1 s)":"CURSOR source=Windows messages");}
+  if(now-cursor_log_tick>5000){cursor_log_tick=now;char line[160];snprintf(line,sizeof(line),"CURSOR source=%s pos=(%.0f,%.0f) display=(%.0f,%.0f)",dinput?"DirectInput":"Windows",io.MousePos.x,io.MousePos.y,io.DisplaySize.x,io.DisplaySize.y);log(line);}
+  if(!dinput){applied_buttons=buttons;return;}
+  virtual_mouse.x=std::clamp(virtual_mouse.x+float(dx),0.f,std::max(0.f,io.DisplaySize.x-1));virtual_mouse.y=std::clamp(virtual_mouse.y+float(dy),0.f,std::max(0.f,io.DisplaySize.y-1));
   io.AddMousePosEvent(virtual_mouse.x,virtual_mouse.y);
-  if(now-cursor_log_tick>3000){cursor_log_tick=now;char line[200];snprintf(line,sizeof(line),"CURSOR pos=(%.0f,%.0f) display=(%.0f,%.0f) dinput_motion_total=%ld os_msg_age_ms=%llu buttons=%u",virtual_mouse.x,virtual_mouse.y,io.DisplaySize.x,io.DisplaySize.y,dinput_seen,now-os_mouse_tick.load(),buttons);log(line);}
   for(unsigned i=0;i<3;++i){const bool down=(buttons>>i)&1;if(down!=(((applied_buttons>>i)&1)!=0))io.AddMouseButtonEvent(int(i),down);}applied_buttons=buttons;}
  std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
@@ -77,7 +80,8 @@ public:
  // F4 toggles Shown/Hidden. Shift+F4 toggles the clean mode that also hides the REC pill.
  void toggle_ui(bool clean){using V=TheaterUI::UiVisibility;const auto current=V(visibility.load());V next;
   if(clean)next=current==V::HiddenClean?V::Hidden:V::HiddenClean;else next=current==V::Shown?V::Hidden:V::Shown;
-  if(next!=V::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==V::Shown?2:0;}
+  if(next!=V::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==V::Shown?2:0;
+  if(next==V::Shown)ClipCursor(nullptr);} // through the hook: confines to the whole window while shown
  bool transfer(HANDLE h,void*p,DWORD n,bool write){auto*c=static_cast<char*>(p);while(n){DWORD got=0;if(!(write?WriteFile(h,c,n,&got,nullptr):ReadFile(h,c,n,&got,nullptr))||!got)return false;c+=got;n-=got;}return true;}
  void ipc_worker(){HANDLE h=INVALID_HANDLE_VALUE;std::uint64_t sequence=0;while(running){
   if(h==INVALID_HANDLE_VALUE){h=CreateFileW(theater_ui::pipe,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE){Sleep(100);continue;}}
@@ -209,6 +213,8 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  if(m==WM_KEYDOWN&&w==VK_F6){b.command(theater_ui::stop);return 0;}
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
  if(m==WM_MOUSEMOVE)b.os_mouse_tick=GetTickCount64();
+ // The overlay draws the only cursor while shown; keep the Windows cursor hidden and the game out of it.
+ if(m==WM_SETCURSOR&&b.blocking()){SetCursor(nullptr);return TRUE;}
  if(b.mode.load()&&input){std::lock_guard lock(b.input_mutex);if(b.inputs.size()<256)b.inputs.push_back({h,m,w,l});}
  // While the UI is shown the game gets no mouse or keyboard at all; ImGui already has its copy above.
  // WM_SYS* keys still pass, so Alt+F4 and Alt+Tab keep working.
@@ -257,6 +263,11 @@ void install_dinput_hooks(){auto&b=backend();
  hook(data_targets[0],reinterpret_cast<void*>(on_device_data<0>),reinterpret_cast<void**>(&original_data[0]));
  hook(data_targets[1],reinterpret_cast<void*>(on_device_data<1>),reinterpret_cast<void**>(&original_data[1]));
  char line[160];snprintf(line,sizeof(line),"DINPUT_HOOKS installed=%d; game keyboard/mouse report no input while the UI is shown",installed);b.log(line);}
+// While shown, the game may not confine the cursor to a small region; the overlay needs the
+// whole window. Its own clip rectangle is applied again when the UI hides (next game call).
+BOOL WINAPI on_clip_cursor(const RECT*r){auto&b=backend();if(b.blocking()&&b.hwnd){RECT client{};POINT tl{0,0},br{};
+ if(GetClientRect(b.hwnd,&client)){br={client.right,client.bottom};ClientToScreen(b.hwnd,&tl);ClientToScreen(b.hwnd,&br);RECT whole{tl.x,tl.y,br.x,br.y};return b.clip_cursor(&whole);}}
+ return b.clip_cursor(r);}
 BOOL WINAPI on_set_cursor_pos(int x,int y){auto&b=backend();if(b.mode.load()==2&&b.ui_ready.load())return TRUE;return b.set_cursor_pos(x,y);}
 HRESULT STDMETHODCALLTYPE on_present(IDXGISwapChain*s,UINT interval,UINT flags){try{backend().render(s,flags);}catch(...){std::lock_guard lock(backend().graphics);backend().failed=true;backend().log("DX12_RENDER_EXCEPTION; overlay disabled; forwarding original Present");}return backend().present(s,interval,flags);}
 HRESULT STDMETHODCALLTYPE on_resize(IDXGISwapChain*s,UINT n,UINT w,UINT h,DXGI_FORMAT f,UINT flags){auto&b=backend();std::lock_guard lock(b.graphics);
@@ -273,7 +284,7 @@ extern "C" int tm_render_start(void(*emergency)()){
  D3D12_COMMAND_QUEUE_DESC qd{};qd.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;DXGI_SWAP_CHAIN_DESC sd{};sd.BufferCount=2;sd.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;sd.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;sd.OutputWindow=dummy;sd.SampleDesc.Count=1;sd.Windowed=TRUE;sd.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;
  bool ok=SUCCEEDED(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&d)))&&SUCCEEDED(d->CreateCommandQueue(&qd,IID_PPV_ARGS(&q)))&&SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))&&SUCCEEDED(factory->CreateSwapChain(q.Get(),&sd,&swap));
  if(ok){auto s=*reinterpret_cast<void***>(swap.Get());auto f=*reinterpret_cast<void***>(factory.Get());auto status=MH_Initialize();ok=status==MH_OK||status==MH_ERROR_ALREADY_INITIALIZED;
-  struct Hook{void*target,*detour;void**original;};Hook hooks[]{{s[8],reinterpret_cast<void*>(on_present),reinterpret_cast<void**>(&b.present)},{s[13],reinterpret_cast<void*>(on_resize),reinterpret_cast<void**>(&b.resize)},{f[10],reinterpret_cast<void*>(on_create),reinterpret_cast<void**>(&b.create)},{f[15],reinterpret_cast<void*>(on_create_hwnd),reinterpret_cast<void**>(&b.create_hwnd)},{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetCursorPos")),reinterpret_cast<void*>(on_set_cursor_pos),reinterpret_cast<void**>(&b.set_cursor_pos)}};
+  struct Hook{void*target,*detour;void**original;};Hook hooks[]{{s[8],reinterpret_cast<void*>(on_present),reinterpret_cast<void**>(&b.present)},{s[13],reinterpret_cast<void*>(on_resize),reinterpret_cast<void**>(&b.resize)},{f[10],reinterpret_cast<void*>(on_create),reinterpret_cast<void**>(&b.create)},{f[15],reinterpret_cast<void*>(on_create_hwnd),reinterpret_cast<void**>(&b.create_hwnd)},{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetCursorPos")),reinterpret_cast<void*>(on_set_cursor_pos),reinterpret_cast<void**>(&b.set_cursor_pos)},{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"ClipCursor")),reinterpret_cast<void*>(on_clip_cursor),reinterpret_cast<void**>(&b.clip_cursor)}};
   for(auto&hook:hooks){if(!ok)break;ok=MH_CreateHook(hook.target,hook.detour,hook.original)==MH_OK;if(ok)b.targets.push_back(hook.target);}
   if(ok)for(auto*t:b.targets)if(MH_EnableHook(t)!=MH_OK){ok=false;break;}
   if(!ok){for(auto*t:b.targets){MH_DisableHook(t);MH_RemoveHook(t);}b.targets.clear();}

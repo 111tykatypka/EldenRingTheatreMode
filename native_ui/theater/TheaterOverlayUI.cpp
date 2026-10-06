@@ -93,6 +93,8 @@ const char* IconUtf8(std::uint16_t c, char (&out)[4])
 
 void Overlay::Init(ImGuiIO& io)
 {
+    // The overlay draws its own cursor; the platform backend must not call SetCursor.
+    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
     ui_.fonts = LoadFonts(io);
     iconFont_ = LoadIconFont(io);
     ui_.visibility = UiVisibility::Hidden;

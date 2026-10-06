@@ -31,7 +31,7 @@ mod world_observation;
 mod research_readonly;
 mod native_bloodstain;
 mod native_ghost_prototype;
-mod ghost_look;
+mod ghost_appearance;
 mod actor_replay;
 mod visual_capture;
 mod fidelity_capture;
@@ -186,7 +186,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     world_observation.tick(now);
                     research.tick(now);
                     native_replay.tick(now);
-                    {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(ghost_look::tick).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("GHOST_LOOK: tick panicked; F9 look toggle may be unavailable");}}
+                    {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(ghost_appearance::tick).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("GHOST_APPEARANCE_ERROR: tick panicked; ghosts may keep the default look");}}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
                     if !cfg!(feature="native-bloodstain-readonly") {
                       if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}

@@ -38,7 +38,6 @@ std::atomic<bool> deleterDone{}, dataReleased{};
 // The native serializer returned 0 (wrote nothing). The game's own caller just skips in that
 // case, so another F10 is allowed.
 std::atomic<bool> retryable{};
-std::atomic<int> ghostPhantomOverride{-1};
 std::atomic<ULONGLONG> deadline{};
 std::atomic<uint64_t> stepCount{},buildCount{},requestStepCount{};
 std::atomic<ULONGLONG> lastStepTick{};
@@ -85,7 +84,6 @@ void observe(U actor,const char* prefix) {
  U entry=get<U>(actor+0x10), ctrl=get<U>(actor+0x58), manip=get<U>(actor+0x588), data=get<U>(actor+0x740);
  U primary=get<U>(ctrl+0x18),modules=get<U>(actor+layout[1]),physics=get<U>(modules+layout[2]);
  float p[3]{},q[4]{};bool transforms=physics&&read(physics+layout[3],p,sizeof(p))&&read(physics+layout[4],q,sizeof(q));
- {int32_t phantom=-1;if(read(actor+layout[7],&phantom,sizeof(phantom))){ghostPhantomOverride.store(phantom);log("%s: phantom_param_override=%d (ChrIns+0x%llX)",prefix,phantom,static_cast<unsigned long long>(layout[7]));}}
  uint64_t handle=get<uint64_t>(actor+8);
  log("%s: literal_manipulator_type=%d (read getter instructions, not incompatible SDK reference-return ABI) ctrl_owner_matches=%u manip_owner_matches=%u",prefix,kindLiteral(manip),get<U>(ctrl+0x10)==actor,get<U>(manip+0xa8)==actor);
  log("%s: actor=0x%llX entry=0x%llX entry_actor_matches=%u handle=0x%llX ChrType=%u ChrCtrl=0x%llX primary=0x%llX ReplayManipulator=0x%llX vtable=0x%llX expected_vtable=%u ManipulatorType=%s gate132=%u ReplayData=0x%llX refcount=%d primary_count=%u primary_cursor=%u secondary_count=%u secondary_cursor=%u BlockId=0x%X slot=%u transform_read=%u position=(%.3f,%.3f,%.3f) rotation=(%.5f,%.5f,%.5f,%.5f)",
@@ -114,7 +112,8 @@ void releaseTemporary(U data) {
  if(old==1)reinterpret_cast<void(*)(U)>(get<U>(get<U>(data)))(data);
  else if(old<1)log("NATIVE_GHOST_ERROR: invalid native creator refcount; no additional cleanup attempted");
 }
-void create(U nativeContext) {
+std::atomic<bool> overflowed{};
+void createImpl(U nativeContext) {
  U w=world(),player{},recorder{};
  if(snapshot().active||!ready(w,player,recorder)||hasGhost(w)){log("NATIVE_GHOST_ERROR: create precondition failed (world/player/recorder/block/occupied ghost set)");return;}
  U gameData=get<U>(base+0x3d61f98), assembly=get<U>(gameData+8), flags=get<U>(base+0x3d5eec0);
@@ -161,8 +160,16 @@ void create(U nativeContext) {
     } else log("NATIVE_GHOST_ERROR: native factory returned no actor handle=0x%llX",handle);
    } else log("NATIVE_GHOST_ERROR: decoded data invalid/secondary present; factory not called");
   } else log("NATIVE_GHOST_ERROR: native replay-data allocation failed");
- } else {if(written==0)retryable.store(true);log("NATIVE_GHOST_ERROR: native serialization/eligibility failed written=%d size=%d recorder_count40=%u recorder_count44=%u%s",written,size,get<uint32_t>(recorder+0x40),get<uint32_t>(recorder+0x44),written==0?"; nothing was written, F10 can be retried (walk a few seconds first)":"");}
+ } else {if(written>size)overflowed.store(true);log("NATIVE_GHOST_ERROR: native serialization/eligibility failed written=%d size=%d recorder_count40=%u recorder_count44=%u%s",written,size,get<uint32_t>(recorder+0x40),get<uint32_t>(recorder+0x44),written==0?"; nothing was written":"");}
  releaseTemporary(data);freeNative(buffer);fn<void(*)(void*)>(0x3c12a0)(metadata);
+}
+// A create that ended without a ghost and without writing past the native buffer left the game
+// exactly where its own periodic serializer leaves it (it also skips on these results), so another
+// F10 is allowed. Only a buffer overrun keeps the session locked.
+void create(U nativeContext) {
+ overflowed.store(false);createImpl(nativeContext);
+ if(!snapshot().active){const bool again=!overflowed.load();retryable.store(again);
+  log(again?"NATIVE_GHOST: no ghost this time; F10 can be pressed again (walk a few seconds first)":"NATIVE_GHOST_ERROR: buffer overrun detected; restart the game before another create");}
 }
 void onStep(U child,U context,float dt,U auxiliary) {
  const bool nativeCaller=reinterpret_cast<U>(_ReturnAddress())==base+0xb08422;
@@ -244,7 +251,7 @@ void keys() {
    if(s.active||command.load())log("NATIVE_GHOST_ERROR: create rejected: active/pending command");
    else if(used.load()&&!(deleterDone.load()&&dataReleased.load())&&!retryable.load())log("NATIVE_GHOST_ERROR: previous ghost did not finish native teardown; restart before another create");
    else if(!ready(world(),player,recorder))log("NATIVE_GHOST_ERROR: CREATE refused: player/recorder/world/block not ready; restart required before retry");
-   else {used.store(true);retryable.store(false);deleterDone.store(false);dataReleased.store(false);ghostPhantomOverride.store(-1);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
+   else {used.store(true);retryable.store(false);deleterDone.store(false);dataReleased.store(false);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
   }
   if(r&&!lastRemove) {
    unsigned pending=1;
@@ -253,13 +260,12 @@ void keys() {
    else log("NATIVE_GHOST_ERROR: REMOVE refused: no active Theater-owned ghost");
   }
   if(command.load()&&GetTickCount64()>deadline.load()) {auto kind=command.exchange(0);uint32_t raw=timerBits.load();float timer;memcpy(&timer,&raw,4);if(kind)log("NATIVE_GHOST_ERROR: command=%u TIMEOUT; steps_since_request=%llu periodic_build_calls=%llu last_step_age_ms=%llu native_timer=%.3f context_seen=%u; no arbitrary callback mutation",kind,stepCount.load()-requestStepCount.load(),buildCount.load(),lastStepTick.load()?GetTickCount64()-lastStepTick.load():UINT64_MAX,timer,contextSeen.load());}
-  U p{},rec{};if(!readyLogged.load()&&ready(world(),p,rec)&&!readyLogged.exchange(true))log("NATIVE_GHOST: PLAYER_RECORDER_READY; F10 create, F11 remove, F9 toggle ghost look; F10 again only after a full native teardown");
+  U p{},rec{};if(!readyLogged.load()&&ready(world(),p,rec)&&!readyLogged.exchange(true))log("NATIVE_GHOST: PLAYER_RECORDER_READY; F10 create, F11 remove; F10 again after the previous ghost is gone");
   lastCreate=c;lastRemove=r;Sleep(25);
  }
 }
 }
 
-extern "C" int tm_native_ghost_phantom_override(){return ghostPhantomOverride.load();}
 extern "C" int tm_native_ghost_start(void(*logCallback)(const char*),const size_t* sdkLayout) {
  logger=logCallback;base=reinterpret_cast<U>(GetModuleHandleW(nullptr));memcpy(layout,sdkLayout,sizeof(layout));
  // Caller already passed the shared file/version/AMD64/SHA guard. Also reject
@@ -284,6 +290,6 @@ extern "C" int tm_native_ghost_start(void(*logCallback)(const char*),const size_
  if(created!=std::size(hooks)){for(size_t i=0;i<created;i++)MH_RemoveHook(reinterpret_cast<void*>(base+hooks[i].rva));return 0;}
  for(auto& h:hooks)MH_QueueEnableHook(reinterpret_cast<void*>(base+h.rva));
  auto enabled=MH_ApplyQueued();if(enabled!=MH_OK){for(auto& h:hooks){MH_DisableHook(reinterpret_cast<void*>(base+h.rva));MH_RemoveHook(reinterpret_cast<void*>(base+h.rva));}log("NATIVE_GHOST_ERROR: hook enable failed=%d; feature OFF",enabled);return 0;}
- log("NATIVE_GHOST: experimental hooks installed; default OFF; exact SHA guard passed; one attempt per process; runtime validation REQUIRED");
+ log("NATIVE_GHOST: experimental hooks installed; default OFF; exact SHA guard passed; one ghost at a time");
  std::thread(keys).detach();return 1;
 }
