@@ -1,2 +1,2 @@
 #pragma once
-namespace theater::ingame_editor {void start();void shutdown();void poll();}
+namespace theater::ingame_editor {void start(const wchar_t* test_endpoint=nullptr);void shutdown();void poll();}

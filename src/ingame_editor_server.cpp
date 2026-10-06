@@ -5,7 +5,7 @@
 namespace theater::ingame_editor {
 namespace {std::jthread worker;std::mutex mutex;std::deque<theater_ui::Request> commands;theater_ui::Snapshot cached;std::atomic_bool running{};
 bool transfer(HANDLE h,void*p,DWORD n,bool write){auto*c=static_cast<char*>(p);while(n){DWORD got=0;if(!(write?WriteFile(h,c,n,&got,nullptr):ReadFile(h,c,n,&got,nullptr))||!got)return false;c+=got;n-=got;}return true;}
-void run(){while(running){HANDLE h=CreateNamedPipeW(theater_ui::pipe,PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,PIPE_TYPE_BYTE|PIPE_REJECT_REMOTE_CLIENTS,1,sizeof(cached),sizeof(theater_ui::Request),0,nullptr);
+void run(std::wstring endpoint){while(running){HANDLE h=CreateNamedPipeW(endpoint.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,PIPE_TYPE_BYTE|PIPE_REJECT_REMOTE_CLIENTS,1,sizeof(cached),sizeof(theater_ui::Request),0,nullptr);
  if(h==INVALID_HANDLE_VALUE){Sleep(100);continue;}
  if(ConnectNamedPipe(h,nullptr)||GetLastError()==ERROR_PIPE_CONNECTED){ULONG pid=0;std::uint64_t last=0;
  if(GetNamedPipeClientProcessId(h,&pid)&&pid&&pid==app.game_pid.load())while(running){theater_ui::Request r;if(!transfer(h,&r,sizeof(r),false)||!theater_ui::valid(r,last))break;last=r.sequence;
@@ -15,7 +15,7 @@ void run(){while(running){HANDLE h=CreateNamedPipeW(theater_ui::pipe,PIPE_ACCESS
  DisconnectNamedPipe(h);CloseHandle(h);
 }}
 }
-void start(){running=true;worker=std::jthread(run);}
+void start(const wchar_t* test_endpoint){running=true;worker=std::jthread(run,std::wstring(test_endpoint?test_endpoint:theater_ui::pipe));}
 void shutdown(){running=false;if(worker.joinable()){CancelSynchronousIo(worker.native_handle());worker.join();}}
 // Called on the host UI thread, never on Present or a game callback.
 void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);batch.swap(commands);}

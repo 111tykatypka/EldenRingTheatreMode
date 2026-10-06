@@ -36,7 +36,8 @@ public:
  std::vector<Frame> frames;UINT64 fence_value{};HANDLE fence_event{};HWND hwnd{};WNDPROC previous_proc{};
  ImGuiContext* context{};bool win32_ready{},dx12_ready{},failed{};std::vector<bool> descriptors;
  std::deque<Input> inputs;std::deque<theater_ui::Request> commands;theater_ui::Snapshot snapshot;
- std::atomic_int mode{1};std::atomic_bool running{true},ui_ready{},capture_mouse{},capture_keyboard{};std::thread client;
+ std::atomic_int mode{0};std::atomic_bool running{true},ui_ready{},capture_mouse{},capture_keyboard{};std::thread client;
+ std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
  void command(std::uint32_t kind,std::uint64_t value=0){if(kind==theater_ui::stop&&emergency)emergency();std::lock_guard lock(ipc);if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;commands.push_back(r);}}
@@ -50,12 +51,21 @@ public:
  }if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
  void adopt(IDXGISwapChain*sc,IUnknown*unknown){ComPtr<ID3D12CommandQueue> q;ComPtr<IDXGISwapChain3> c;
   if(FAILED(unknown->QueryInterface(IID_PPV_ARGS(&q)))||q->GetDesc().Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||FAILED(sc->QueryInterface(IID_PPV_ARGS(&c))))return;
-  std::lock_guard lock(graphics);if(chain)return;chain=c;queue=q;log("DX12_QUEUE_BOUND: queue supplied to native CreateSwapChain; no guessed queue");}
+  std::lock_guard lock(graphics);if(chain)return;chain=c;queue=q;
+  DXGI_SWAP_CHAIN_DESC desc{};if(FAILED(chain->GetDesc(&desc))||!IsWindow(desc.OutputWindow)){failed=true;log("DX12_INVALID_WINDOW");return;}
+  hwnd=desc.OutputWindow;
+  // Publish the forwarding target BEFORE another thread can enter our WndProc.
+  // The former SetWindowLongPtr assignment published it only after installation.
+  auto old=reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hwnd,GWLP_WNDPROC));
+  if(!old){failed=true;log("DX12_WNDPROC_READ_FAILED");return;}forward_proc.store(old,std::memory_order_release);
+  SetLastError(0);auto replaced=reinterpret_cast<WNDPROC>(SetWindowLongPtrW(hwnd,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(wndproc)));
+  if(!replaced){failed=true;log("DX12_WNDPROC_INSTALL_FAILED");return;}previous_proc=replaced;forward_proc.store(replaced,std::memory_order_release);
+  char detail[256];snprintf(detail,sizeof(detail),"DX12_QUEUE_BOUND format=%u buffers=%u hwnd=%p; CLEAN startup; Insert enables experimental UI",unsigned(desc.BufferDesc.Format),desc.BufferCount,hwnd);log(detail);}
  bool wait_gpu(){if(!fence||!queue)return true;if(FAILED(queue->Signal(fence.Get(),++fence_value)))return false;
   if(fence->GetCompletedValue()>=fence_value)return true;
   return SUCCEEDED(fence->SetEventOnCompletion(fence_value,fence_event))&&WaitForSingleObject(fence_event,2000)==WAIT_OBJECT_0;}
  void release_resources(){ui_ready=false;if(context){ImGui::SetCurrentContext(context);if(dx12_ready)ImGui_ImplDX12_Shutdown();if(win32_ready)ImGui_ImplWin32_Shutdown();ImGui::DestroyContext(context);}
-  context=nullptr;dx12_ready=win32_ready=false;frames.clear();list.Reset();rtvs.Reset();srvs.Reset();fence.Reset();device.Reset();descriptors.clear();if(fence_event){CloseHandle(fence_event);fence_event=nullptr;}}
+  context=nullptr;diagnostic_frames=0;dx12_ready=win32_ready=false;frames.clear();list.Reset();rtvs.Reset();srvs.Reset();fence.Reset();device.Reset();descriptors.clear();if(fence_event){CloseHandle(fence_event);fence_event=nullptr;}}
  bool initialize_resources(){DXGI_SWAP_CHAIN_DESC desc{};if(!chain||!queue||FAILED(chain->GetDesc(&desc))||FAILED(chain->GetDevice(IID_PPV_ARGS(&device)))||!desc.BufferCount)return false;
   hwnd=desc.OutputWindow;if(!IsWindow(hwnd))return false;
   D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=desc.BufferCount;
@@ -72,7 +82,6 @@ public:
   info.SrvDescriptorAllocFn=[](ImGui_ImplDX12_InitInfo*i,D3D12_CPU_DESCRIPTOR_HANDLE*c,D3D12_GPU_DESCRIPTOR_HANDLE*g){auto*b=static_cast<TheaterRenderBackend*>(i->UserData);auto stride=b->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);for(UINT n=0;n<b->descriptors.size();++n)if(!b->descriptors[n]){b->descriptors[n]=true;c->ptr=b->srvs->GetCPUDescriptorHandleForHeapStart().ptr+n*stride;g->ptr=b->srvs->GetGPUDescriptorHandleForHeapStart().ptr+n*stride;return;}*c={};*g={};b->failed=true;};
   info.SrvDescriptorFreeFn=[](ImGui_ImplDX12_InitInfo*i,D3D12_CPU_DESCRIPTOR_HANDLE c,D3D12_GPU_DESCRIPTOR_HANDLE){auto*b=static_cast<TheaterRenderBackend*>(i->UserData);auto stride=b->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);auto index=(c.ptr-b->srvs->GetCPUDescriptorHandleForHeapStart().ptr)/stride;if(index<b->descriptors.size())b->descriptors[index]=false;};
   dx12_ready=ImGui_ImplDX12_Init(&info);if(!dx12_ready)return false;
-  if(!previous_proc){SetLastError(0);previous_proc=reinterpret_cast<WNDPROC>(SetWindowLongPtrW(hwnd,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(wndproc)));if(!previous_proc)return false;}
   ui_ready=true;log("DX12_IMGUI_INITIALIZED; Insert cycles Overlay/Editor/Clean; runtime visuals require user verification");return true;
  }
  void draw(){theater_ui::Snapshot s;{std::lock_guard lock(ipc);s=snapshot;}auto&io=ImGui::GetIO();io.MouseDrawCursor=mode.load()==2;
@@ -92,26 +101,42 @@ public:
   }ImGui::End();capture_mouse=io.WantCaptureMouse;capture_keyboard=io.WantCaptureKeyboard;
  }
  void render(IDXGISwapChain*sc,UINT flags){if(flags&DXGI_PRESENT_TEST)return;std::lock_guard lock(graphics);if(failed||!chain||sc!=static_cast<IDXGISwapChain*>(chain.Get()))return;
+  if(mode.load()==0&&!context)return; // No ImGui resources or draws until explicit Insert.
+  const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
   if(!context&&!initialize_resources()){log("DX12_RESOURCE_INIT_FAILED; overlay disabled; replay integration unchanged");release_resources();failed=true;return;}
   ImGui::SetCurrentContext(context);{std::lock_guard lock(input_mutex);while(!inputs.empty()){auto m=inputs.front();inputs.pop_front();ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);}}
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
-  ImGui_ImplDX12_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();if(mode.load()!=0)draw();else{capture_mouse=false;capture_keyboard=false;}ImGui::Render();if(mode.load()==0)return;
+  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");if(mode.load()!=0)draw();else{capture_mouse=false;capture_keyboard=false;}ImGui::Render();if(mode.load()==0)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
   D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={f.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET};list->ResourceBarrier(1,&barrier);
-  list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvs.Get();list->SetDescriptorHeaps(1,&heap);ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
-  if(FAILED(list->Close())){failed=true;return;}ID3D12CommandList*cmd=list.Get();queue->ExecuteCommandLists(1,&cmd);f.fence=++fence_value;if(FAILED(queue->Signal(fence.Get(),f.fence))){failed=true;log("DX12_QUEUE_SIGNAL_FAILED; rendering disabled");}
+  list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvs.Get();list->SetDescriptorHeaps(1,&heap);stage("FRAME_RENDER_DRAW_DATA");ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
+  if(FAILED(list->Close())){failed=true;return;}ID3D12CommandList*cmd=list.Get();stage("FRAME_EXECUTE");queue->ExecuteCommandLists(1,&cmd);f.fence=++fence_value;if(FAILED(queue->Signal(fence.Get(),f.fence))){failed=true;log("DX12_QUEUE_SIGNAL_FAILED; rendering disabled");}stage("FRAME_SUBMITTED");++diagnostic_frames;
  }
  static LRESULT CALLBACK wndproc(HWND,UINT,WPARAM,LPARAM);
 };
 // Loaded for process lifetime, like the existing recurring Rust task callbacks.
 // Dynamic FreeLibrary is not supported; explicit shutdown is outside DllMain.
 TheaterRenderBackend&backend(){static auto*b=new TheaterRenderBackend;return *b;}
+// Diagnostic only: never swallow an exception or resume a damaged renderer.
+// No game memory inspection, registry changes, or global exception-filter replacement.
+LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
+ const DWORD code=e->ExceptionRecord->ExceptionCode;
+ if(code!=EXCEPTION_ACCESS_VIOLATION&&code!=EXCEPTION_ILLEGAL_INSTRUCTION&&code!=EXCEPTION_INT_DIVIDE_BY_ZERO&&code!=EXCEPTION_BREAKPOINT)return EXCEPTION_CONTINUE_SEARCH;
+ static std::atomic_uint reports{};static thread_local bool busy=false;if(busy||reports.fetch_add(1)>=3)return EXCEPTION_CONTINUE_SEARCH;busy=true;
+ wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);wcscat_s(path,L"TheaterModeCrash.log");
+ HANDLE file=CreateFileW(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+ if(file!=INVALID_HANDLE_VALUE){
+  auto emit=[&](void*address,const char*kind){HMODULE module{};wchar_t name[MAX_PATH]{};GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(address),&module);if(module)GetModuleFileNameW(module,name,MAX_PATH);
+   char line[1200];int n=snprintf(line,sizeof(line),"tick=%llu pid=%lu code=0x%08lX %s=%p module=%ls base=%p rva=0x%llX\r\n",GetTickCount64(),GetCurrentProcessId(),code,kind,address,name,module,static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(address)-reinterpret_cast<std::uintptr_t>(module)));DWORD wrote;if(n>0)WriteFile(file,line,static_cast<DWORD>(std::min(n,static_cast<int>(sizeof(line)-1))),&wrote,nullptr);};
+  emit(reinterpret_cast<void*>(e->ContextRecord->Rip),"fault_rip");void*stack[16]{};USHORT count=CaptureStackBackTrace(0,16,stack,nullptr);for(USHORT i=0;i<count;++i)emit(stack[i],"observer_stack");FlushFileBuffers(file);CloseHandle(file);
+ }busy=false;return EXCEPTION_CONTINUE_SEARCH;
+}
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
  if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==VK_INSERT){b.mode=(b.mode.load()+1)%3;return 0;}
  if(m==WM_KEYDOWN&&w==VK_F6){b.command(theater_ui::stop);return 0;}
  if(b.mode.load()){std::lock_guard lock(b.input_mutex);if(b.inputs.size()<256)b.inputs.push_back({h,m,w,l});}
  if(b.mode.load()&&((b.capture_mouse&&(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST))||(b.capture_keyboard&&(m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR))))return 0;
- return CallWindowProcW(b.previous_proc,h,m,w,l);
+ auto previous=b.forward_proc.load(std::memory_order_acquire);return previous?CallWindowProcW(previous,h,m,w,l):DefWindowProcW(h,m,w,l);
 }
 BOOL WINAPI on_set_cursor_pos(int x,int y){auto&b=backend();if(b.mode.load()==2&&b.ui_ready.load())return TRUE;return b.set_cursor_pos(x,y);}
 HRESULT STDMETHODCALLTYPE on_present(IDXGISwapChain*s,UINT interval,UINT flags){try{backend().render(s,flags);}catch(...){std::lock_guard lock(backend().graphics);backend().failed=true;backend().log("DX12_RENDER_EXCEPTION; overlay disabled; forwarding original Present");}return backend().present(s,interval,flags);}
@@ -123,7 +148,7 @@ HRESULT STDMETHODCALLTYPE on_create(IDXGIFactory*f,IUnknown*q,DXGI_SWAP_CHAIN_DE
 HRESULT STDMETHODCALLTYPE on_create_hwnd(IDXGIFactory2*f,IUnknown*q,HWND w,const DXGI_SWAP_CHAIN_DESC1*d,const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*full,IDXGIOutput*o,IDXGISwapChain1**out){auto hr=backend().create_hwnd(f,q,w,d,full,o,out);if(SUCCEEDED(hr))backend().adopt(*out,q);return hr;}
 }
 extern "C" int tm_render_start(void(*emergency)()){
- auto&b=backend();b.emergency=emergency;ComPtr<ID3D12Device>d;ComPtr<ID3D12CommandQueue>q;ComPtr<IDXGIFactory4>factory;ComPtr<IDXGISwapChain>swap;
+ auto&b=backend();b.emergency=emergency;b.exception_observer=AddVectoredExceptionHandler(0,observe_exception);b.log("DIAGNOSTIC_BUILD CLEAN startup; UI opt-in; exception observer does not handle faults");ComPtr<ID3D12Device>d;ComPtr<ID3D12CommandQueue>q;ComPtr<IDXGIFactory4>factory;ComPtr<IDXGISwapChain>swap;
  HWND dummy=CreateWindowExW(0,L"STATIC",L"Theater DX12 discovery",WS_POPUP,0,0,1,1,nullptr,nullptr,nullptr,nullptr);if(!dummy)return 0;
  D3D12_COMMAND_QUEUE_DESC qd{};qd.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;DXGI_SWAP_CHAIN_DESC sd{};sd.BufferCount=2;sd.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;sd.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;sd.OutputWindow=dummy;sd.SampleDesc.Count=1;sd.Windowed=TRUE;sd.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;
  bool ok=SUCCEEDED(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&d)))&&SUCCEEDED(d->CreateCommandQueue(&qd,IID_PPV_ARGS(&q)))&&SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))&&SUCCEEDED(factory->CreateSwapChain(q.Get(),&sd,&swap));
@@ -138,6 +163,7 @@ extern "C" int tm_render_start(void(*emergency)()){
 extern "C" void tm_render_shutdown(){auto&b=backend();b.running=false;if(b.client.joinable()){CancelSynchronousIo(b.client.native_handle());b.client.join();}
  for(auto*t:b.targets)MH_DisableHook(t);std::lock_guard lock(b.graphics);if(b.previous_proc&&IsWindow(b.hwnd)&&reinterpret_cast<WNDPROC>(GetWindowLongPtrW(b.hwnd,GWLP_WNDPROC))==TheaterRenderBackend::wndproc)SetWindowLongPtrW(b.hwnd,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(b.previous_proc));
  if(b.wait_gpu())b.release_resources();for(auto*t:b.targets)MH_RemoveHook(t);b.targets.clear();b.chain.Reset();b.queue.Reset();
+ if(b.exception_observer){RemoveVectoredExceptionHandler(b.exception_observer);b.exception_observer=nullptr;}
 }
 // CPU-only UI construction test. Does not install hooks or assert game rendering.
 extern "C" int tm_render_test_ui(){

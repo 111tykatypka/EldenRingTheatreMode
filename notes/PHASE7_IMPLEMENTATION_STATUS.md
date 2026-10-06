@@ -1,5 +1,9 @@
 # Phase7 Runtime/UI — experimental checkpoint
 
+**Oct6 update:** user reported startup crashes of Phase7_Runtime_UI. Exact cause
+is unresolved. Use the separate Hotfix1 diagnostic build and
+PHASE7_CRASH_DIAGNOSTIC.md before any replay test. Hotfix1 starts in Clean mode.
+
 Status: **IMPLEMENTED — RUNTIME VALIDATION REQUIRED**. The requested final milestone
 (grounding stable + one NPC owned + visible WALK + freecam/editor) is **not achieved**.
 Do not infer game success from compilation or automated tests.

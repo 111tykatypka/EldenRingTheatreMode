@@ -1,5 +1,9 @@
 # Phase7 known issues
 
+- User reported two startup crashes of original Phase7_Runtime_UI on Oct6, after
+  DX12 initialization and before PLAYER_FOUND. Exact cause is unresolved.
+  Hotfix1 is a diagnostic mitigation, not a verified fix. See PHASE7_CRASH_DIAGNOSTIC.md.
+
 This is a buildable runtime-validation checkpoint, **not a completed Phase7 release**.
 
 - FULL XYZ replay previously lost grounding/fell/died. No verified final fix yet.
