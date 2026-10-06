@@ -1,6 +1,7 @@
 #include "ingame_editor_server.hpp"
 #include "editor_backend.hpp"
 #include "TheaterUiProtocol.h"
+#include <chrono>
 #include <deque>
 namespace theater::ingame_editor {
 namespace {std::jthread worker;std::mutex mutex;std::deque<theater_ui::Request> commands;theater_ui::Snapshot cached;std::atomic_bool running{};
@@ -19,7 +20,7 @@ void start(const wchar_t* test_endpoint){running=true;worker=std::jthread(run,st
 void shutdown(){running=false;if(worker.joinable()){CancelSynchronousIo(worker.native_handle());worker.join();}}
 // Called on the host UI thread, never on Present or a game callback.
 void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);batch.swap(commands);}
- static std::uint32_t offset=0;
+ static std::uint32_t offset=0,replay_offset=0;
  for(const auto&r:batch){switch(r.command){
  case theater_ui::play:play_replay();break;case theater_ui::pause:pause_replay();break;case theater_ui::stop:emergency_stop();break;case theater_ui::restart:restart_replay();break;
  case theater_ui::seek:seek_replay(r.value);break;case theater_ui::previous:step_replay(-1);break;case theater_ui::next:step_replay(1);break;
@@ -28,6 +29,11 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  case theater_ui::page:offset=static_cast<std::uint32_t>(std::min<std::uint64_t>(r.value,UINT32_MAX));break;
  // Same recorder path as F5 and the host Start button; post_command refuses while a replay is active.
  case theater_ui::record_start:post_command(Command::start);break;case theater_ui::record_stop:post_command(Command::stop);break;
+ case theater_ui::replay_page:replay_offset=static_cast<std::uint32_t>(std::min<std::uint64_t>(r.value,UINT32_MAX));break;
+ // Open by position in the newest-first library; the overlay shows the same list it indexes.
+ case theater_ui::replay_open:{fs::path path;{std::lock_guard lock(app.mutex);if(r.value<app.data.replays.size())path=app.data.replays[static_cast<size_t>(r.value)].path;}
+  if(path.empty()){log_line("OVERLAY_REPLAY_OPEN refused: index out of range");break;}
+  try{open_replay(path);}catch(const std::exception&e){log_line(std::string("OVERLAY_REPLAY_OPEN failed: ")+e.what());}break;}
  default:break;}}
  const auto view=playback_view();const auto remote=app.control.state();theater_ui::Snapshot s;
  s.loaded=view.loaded;s.active=view.active;s.phase=static_cast<std::uint32_t>(view.phase);s.time_ns=view.state.timestamp_ns;s.duration_ns=view.summary.duration_ns;s.playback_speed=view.state.speed;
@@ -35,6 +41,12 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  auto diagnostic=game_launcher::utf8(view.diagnostic);memcpy(s.diagnostic,diagnostic.data(),std::min(diagnostic.size(),sizeof(s.diagnostic)-1));
  s.total=static_cast<std::uint32_t>(app.character_views.size());s.offset=std::min(offset,s.total);s.count=std::min(16u,s.total-s.offset);
  {std::lock_guard lock(app.mutex);const auto rs=app.data.state;s.recording_state=rs==erplay::RecordingState::recording?theater_ui::record_recording:rs==erplay::RecordingState::paused?theater_ui::record_paused:rs==erplay::RecordingState::saving?theater_ui::record_saving:theater_ui::record_idle;s.recording_ns=app.data.active_ns;s.recording_samples=app.data.samples;}
+ {std::lock_guard lock(app.mutex);const auto&list=app.data.replays;s.replay_total=static_cast<std::uint32_t>(list.size());s.replay_offset=std::min(replay_offset,s.replay_total);
+  s.replay_count=std::min(theater_ui::replay_page_size,s.replay_total-s.replay_offset);
+  for(unsigned i=0;i<s.replay_count;++i){const auto&e=list[s.replay_offset+i];auto&o=s.replays[i];const auto name=game_launcher::utf8(e.path.stem().wstring());
+   memcpy(o.name,name.data(),std::min(name.size(),sizeof(o.name)-1));o.duration_ns=e.summary.duration_ns;o.bytes=e.bytes;o.index=s.replay_offset+i;
+   o.modified_unix=static_cast<std::uint64_t>(std::max<long long>(0,std::chrono::duration_cast<std::chrono::seconds>(std::chrono::clock_cast<std::chrono::system_clock>(e.modified).time_since_epoch()).count()));
+   o.loaded=!app.opened_replay.empty()&&app.opened_replay==fs::absolute(e.path);}}
  for(unsigned i=0;i<s.count;++i){const auto&r=app.character_views[s.offset+i].info.registry;s.actors[i]={r.id,r.native_handle,r.entity_id,r.character_type,r.npc_param,0};}
  {std::lock_guard lock(mutex);cached=s;}
 }

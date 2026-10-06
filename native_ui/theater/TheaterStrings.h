@@ -26,6 +26,8 @@ namespace TheaterUI
         // event log
         LogHostLinked, LogHostLost, LogGameConnected, LogGameWaiting, LogPlayerFound, LogPlayerLost,
         LogRecStopped, LogRecStarted, LogRecPaused, LogRecSaving,
+        // replay library
+        Library, Open, NoReplays, LoadedTag, LogReplayOpenSent,
         Count
     };
 
@@ -56,8 +58,8 @@ namespace TheaterUI
           "Свободная камера, слежение, орбита и ключи долли требуют модуль камеры, которого пока нет. Здесь ничего не меняет игру." },
         { "Time of day, weather, fog and exposure controls need engine research first.",
           "Время суток, погода, туман и экспозиция требуют сначала исследования движка." },
-        { "Open, rename and delete replays in the Theater Mode window for now. Record with the button below or F5, stop with F6.",
-          "Открывать, переименовывать и удалять записи пока нужно в окне Theater Mode. Запись: кнопка ниже или F5, стоп: F6." },
+        { "Record with the button below or F5, stop with F6. Click a replay to open it.",
+          "Запись: кнопка ниже или F5, стоп: F6. Нажмите на запись, чтобы открыть её." },
         { "Video export is planned after the camera tools.", "Экспорт видео запланирован после инструментов камеры." },
         { "Host diagnostic", "Диагностика" }, { "Native ghost", "Нативный призрак" }, { "No native ghost status yet", "Статуса нативного призрака пока нет" },
         { "Language", "Язык" }, { "UI scale", "Масштаб интерфейса" },
@@ -69,6 +71,8 @@ namespace TheaterUI
         { "Host connected", "Связь с программой есть" }, { "Host not connected (open the Theater Mode window)", "Нет связи с программой (откройте окно Theater Mode)" },
         { "Game connected", "Игра подключена" }, { "Game waiting", "Ожидание игры" }, { "Player found", "Игрок найден" }, { "Player not found", "Игрок не найден" },
         { "Recording stopped", "Запись остановлена" }, { "Recording started", "Запись начата" }, { "Recording paused", "Запись на паузе" }, { "Saving recording", "Сохранение записи" },
+        { "LIBRARY", "БИБЛИОТЕКА" }, { "Open", "Открыть" }, { "No replays yet. Record one with F5.", "Записей пока нет. Начните запись клавишей F5." },
+        { "LOADED", "ЗАГРУЖЕНА" }, { "Opening replay", "Открытие записи" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

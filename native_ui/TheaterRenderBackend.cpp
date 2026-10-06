@@ -1,6 +1,8 @@
 // Independent DX12 backend. Design references: FreecamMod and dx12-imgui-overlay.
 // No game offsets or character writes are implemented in this translation unit.
 #include <windows.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
@@ -43,6 +45,8 @@ public:
  std::atomic_int mode{0},visibility{int(TheaterUI::UiVisibility::Hidden)};std::atomic<ULONGLONG> hidden_tick{0};
  std::atomic_bool running{true},ui_ready{},capture_mouse{},capture_keyboard{},host_linked{};std::thread client;
  TheaterUI::Overlay overlay;
+ // Game input is blocked only while the UI is shown AND actually rendering, so a failed overlay never traps the player.
+ bool blocking() const {return mode.load()==2&&ui_ready.load()&&!failed;}
  std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
@@ -186,9 +190,40 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  if(m==WM_KEYDOWN&&w==VK_F6){b.command(theater_ui::stop);return 0;}
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
  if(b.mode.load()&&input){std::lock_guard lock(b.input_mutex);if(b.inputs.size()<256)b.inputs.push_back({h,m,w,l});}
- if(b.mode.load()&&((b.capture_mouse&&(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST))||(b.capture_keyboard&&(m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR))))return 0;
+ // While the UI is shown the game gets no mouse or keyboard at all; ImGui already has its copy above.
+ // WM_SYS* keys still pass, so Alt+F4 and Alt+Tab keep working.
+ if(b.blocking()&&((m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR))return 0;
  auto previous=b.forward_proc.load(std::memory_order_acquire);return previous?CallWindowProcW(previous,h,m,w,l):DefWindowProcW(h,m,w,l);
 }
+// Elden Ring reads keyboard and mouse through DirectInput8 (DINPUT8.dll import), not window
+// messages. While the UI is shown, the game's devices still poll normally but report no input.
+using GetDeviceState=HRESULT(STDMETHODCALLTYPE*)(IDirectInputDevice8W*,DWORD,LPVOID);
+using GetDeviceData=HRESULT(STDMETHODCALLTYPE*)(IDirectInputDevice8W*,DWORD,LPDIDEVICEOBJECTDATA,LPDWORD,DWORD);
+GetDeviceState original_state[2]{};GetDeviceData original_data[2]{};
+template<int N> HRESULT STDMETHODCALLTYPE on_device_state(IDirectInputDevice8W*d,DWORD size,LPVOID data){
+ const HRESULT hr=original_state[N](d,size,data);if(SUCCEEDED(hr)&&data&&backend().blocking())memset(data,0,size);return hr;}
+template<int N> HRESULT STDMETHODCALLTYPE on_device_data(IDirectInputDevice8W*d,DWORD object_size,LPDIDEVICEOBJECTDATA data,LPDWORD count,DWORD flags){
+ const HRESULT hr=original_data[N](d,object_size,data,count,flags);if(SUCCEEDED(hr)&&count&&backend().blocking())*count=0;return hr;}
+// Hooks the shared device vtables through throwaway devices. Failure leaves the overlay working
+// with window-message blocking only, and is logged.
+void install_dinput_hooks(){auto&b=backend();
+ auto module=LoadLibraryW(L"dinput8.dll");auto create=module?reinterpret_cast<decltype(&DirectInput8Create)>(GetProcAddress(module,"DirectInput8Create")):nullptr;
+ if(!create){b.log("DINPUT_HOOKS_SKIPPED: dinput8 unavailable; game input blocking uses window messages only");return;}
+ static const GUID iid_w{0xBF798031,0x483A,0x4DA2,{0xAA,0x99,0x5D,0x64,0xED,0x36,0x97,0x00}},iid_a{0xBF798030,0x483A,0x4DA2,{0xAA,0x99,0x5D,0x64,0xED,0x36,0x97,0x00}};
+ static const GUID keyboard{0x6F1D2B61,0xD5A0,0x11CF,{0xBF,0xC7,0x44,0x45,0x53,0x54,0x00,0x00}};
+ void* state_targets[2]{};void* data_targets[2]{};const GUID* iids[2]{&iid_w,&iid_a};
+ for(int i=0;i<2;++i){IUnknown*input=nullptr;if(FAILED(create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,*iids[i],reinterpret_cast<void**>(&input),nullptr))||!input)continue;
+  IDirectInputDevice8W*device=nullptr;if(SUCCEEDED(reinterpret_cast<IDirectInput8W*>(input)->CreateDevice(keyboard,&device,nullptr))&&device){
+   auto vt=*reinterpret_cast<void***>(device);state_targets[i]=vt[9];data_targets[i]=vt[10];device->Release();}
+  input->Release();}
+ int installed=0;
+ auto hook=[&](void*target,void*detour,void**original){if(!target)return;for(auto*t:b.targets)if(t==target)return; // A and W can share one implementation
+  if(MH_CreateHook(target,detour,original)==MH_OK){if(MH_EnableHook(target)==MH_OK){b.targets.push_back(target);++installed;}else MH_RemoveHook(target);}};
+ hook(state_targets[0],reinterpret_cast<void*>(on_device_state<0>),reinterpret_cast<void**>(&original_state[0]));
+ hook(state_targets[1],reinterpret_cast<void*>(on_device_state<1>),reinterpret_cast<void**>(&original_state[1]));
+ hook(data_targets[0],reinterpret_cast<void*>(on_device_data<0>),reinterpret_cast<void**>(&original_data[0]));
+ hook(data_targets[1],reinterpret_cast<void*>(on_device_data<1>),reinterpret_cast<void**>(&original_data[1]));
+ char line[160];snprintf(line,sizeof(line),"DINPUT_HOOKS installed=%d; game keyboard/mouse report no input while the UI is shown",installed);b.log(line);}
 BOOL WINAPI on_set_cursor_pos(int x,int y){auto&b=backend();if(b.mode.load()==2&&b.ui_ready.load())return TRUE;return b.set_cursor_pos(x,y);}
 HRESULT STDMETHODCALLTYPE on_present(IDXGISwapChain*s,UINT interval,UINT flags){try{backend().render(s,flags);}catch(...){std::lock_guard lock(backend().graphics);backend().failed=true;backend().log("DX12_RENDER_EXCEPTION; overlay disabled; forwarding original Present");}return backend().present(s,interval,flags);}
 HRESULT STDMETHODCALLTYPE on_resize(IDXGISwapChain*s,UINT n,UINT w,UINT h,DXGI_FORMAT f,UINT flags){auto&b=backend();std::lock_guard lock(b.graphics);
@@ -210,7 +245,7 @@ extern "C" int tm_render_start(void(*emergency)()){
   if(ok)for(auto*t:b.targets)if(MH_EnableHook(t)!=MH_OK){ok=false;break;}
   if(!ok){for(auto*t:b.targets){MH_DisableHook(t);MH_RemoveHook(t);}b.targets.clear();}
  }DestroyWindow(dummy);
- if(ok){b.client=std::thread([&b]{b.ipc_worker();});b.log("DX12_HOOKS_INSTALLED; waiting for native swapchain creation (restart required for late injection)");}else b.log("DX12_HOOK_INSTALL_FAILED; native replay remains independent");return ok?1:0;
+ if(ok){install_dinput_hooks();b.client=std::thread([&b]{b.ipc_worker();});b.log("DX12_HOOKS_INSTALLED; waiting for native swapchain creation (restart required for late injection)");}else b.log("DX12_HOOK_INSTALL_FAILED; native replay remains independent");return ok?1:0;
 }
 extern "C" void tm_render_shutdown(){auto&b=backend();b.running=false;if(b.client.joinable()){CancelSynchronousIo(b.client.native_handle());b.client.join();}
  for(auto*t:b.targets)MH_DisableHook(t);std::lock_guard lock(b.graphics);if(b.previous_proc&&IsWindow(b.hwnd)&&reinterpret_cast<WNDPROC>(GetWindowLongPtrW(b.hwnd,GWLP_WNDPROC))==TheaterRenderBackend::wndproc)SetWindowLongPtrW(b.hwnd,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(b.previous_proc));
@@ -224,7 +259,8 @@ extern "C" int tm_render_test_ui(){
  b.overlay.Init(io);unsigned char*p=nullptr;int w=0,h=0;io.Fonts->GetTexDataAsRGBA32(&p,&w,&h);
  {std::lock_guard lock(b.ipc);b.snapshot={};b.snapshot.loaded=1;b.snapshot.connected=1;b.snapshot.player_found=1;b.snapshot.duration_ns=134'500'000'000;b.snapshot.time_ns=26'300'000'000;
   b.snapshot.count=16;b.snapshot.total=40;b.snapshot.phase=2;b.snapshot.recording_state=theater_ui::record_recording;b.snapshot.recording_ns=83'400'000'000;b.snapshot.recording_samples=2502;
-  for(unsigned i=0;i<16;++i)b.snapshot.actors[i].id=i+1;}
+  for(unsigned i=0;i<16;++i)b.snapshot.actors[i].id=i+1;
+  b.snapshot.replay_total=30;b.snapshot.replay_count=theater_ui::replay_page_size;for(unsigned i=0;i<theater_ui::replay_page_size;++i){auto&e=b.snapshot.replays[i];snprintf(e.name,sizeof(e.name),"Replay_%03u_Лейнделл",i);e.index=i;e.duration_ns=(i+1)*9000000000ull;e.bytes=(i+1)*1048576ull;e.loaded=i==0;}}
  b.host_linked=true;
  bool valid=true;
  for(auto lang:{TheaterUI::Lang::English,TheaterUI::Lang::Russian}){b.overlay.language=lang;

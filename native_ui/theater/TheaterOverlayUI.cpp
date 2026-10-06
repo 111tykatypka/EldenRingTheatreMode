@@ -423,6 +423,55 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         snprintf(label, sizeof(label), "%s  %s", IconUtf8(rec ? Glyph::Stop : Glyph::Record, icon), T(rec ? Str::StopRecording : Str::Record));
         if (FlatButton("rec_panel", label, ImVec2(-1, Px(Metric::TextButtonHeight, s)), rec ? Color::TintRed : Color::FrameBg, rec ? Color::AccentRed : Color::TextPrimary, f.hostLinked))
             Emit(rec ? theater_ui::record_stop : theater_ui::record_start);
+
+        // Library: newest first, one page at a time from the host. Click a row to open it.
+        section(T(Str::Library));
+        const unsigned shown = std::min<std::uint32_t>(snap.replay_count, theater_ui::replay_page_size);
+        if (!shown) note(Str::NoReplays);
+        const float rowH = Px(Metric::ListRowHeight, s) + Px(8, s);
+        const bool canOpen = f.hostLinked && !snap.active && !rec;
+        for (unsigned i = 0; i < shown; ++i)
+        {
+            const auto& e = snap.replays[i];
+            const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            const float w = ImGui::GetContentRegionAvail().x;
+            ImGui::PushID((int)e.index);
+            ImGui::BeginDisabled(!canOpen);
+            const bool clicked = ImGui::Selectable("##replay", e.loaded != 0, 0, ImVec2(w, rowH));
+            ImGui::EndDisabled();
+            ImGui::PopID();
+            ImDrawList* dl2 = ImGui::GetWindowDrawList();
+            dl2->PushClipRect(p0, ImVec2(p0.x + w, p0.y + rowH), true);
+            PushFont(Font::BodyStrong);
+            dl2->AddText(ImVec2(p0.x + Px(6, s), p0.y + Px(3, s)), (canOpen ? Color::TextPrimary : Color::TextMuted).U32(), e.name);
+            ImGui::PopFont();
+            char meta[96], dur[32];
+            FormatTime(e.duration_ns / 1e9, dur, sizeof(dur));
+            snprintf(meta, sizeof(meta), "%s   %.1f MB", dur, e.bytes / (1024.0 * 1024.0));
+            PushFont(Font::MonoSmall);
+            dl2->AddText(ImVec2(p0.x + Px(6, s), p0.y + rowH * 0.5f + Px(1, s)), Color::TextMuted.U32(), meta);
+            if (e.loaded)
+            {
+                const char* tag = T(Str::LoadedTag);
+                const ImVec2 tsz = ImGui::CalcTextSize(tag);
+                dl2->AddText(ImVec2(p0.x + w - tsz.x - Px(8, s), p0.y + rowH * 0.5f + Px(1, s)), Color::AccentGreen.U32(), tag);
+            }
+            ImGui::PopFont();
+            dl2->PopClipRect();
+            if (clicked && canOpen && !e.loaded) { Emit(theater_ui::replay_open, e.index); }
+        }
+        if (snap.replay_total > theater_ui::replay_page_size)
+        {
+            ImGui::BeginDisabled(snap.replay_offset == 0);
+            if (ImGui::Button(T(Str::Previous))) Emit(theater_ui::replay_page, snap.replay_offset >= theater_ui::replay_page_size ? snap.replay_offset - theater_ui::replay_page_size : 0);
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(snap.replay_offset + theater_ui::replay_page_size >= snap.replay_total);
+            if (ImGui::Button(T(Str::NextPage))) Emit(theater_ui::replay_page, snap.replay_offset + theater_ui::replay_page_size);
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::TextDisabled("%u-%u / %u", snap.replay_offset + 1, snap.replay_offset + shown, snap.replay_total);
+        }
         break;
     }
     case Tool::Debug:

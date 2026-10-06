@@ -12,7 +12,8 @@ int main(){using namespace theater_ui;Request r;r.sequence=1;
  if(!valid(r,0)||valid(r,1))return 1;
  for(auto kind:{play,pause,stop,restart,previous,next,record_start,record_stop}){r.command=kind;if(!valid(r,0))return 2;}
  r.command=record_start;r.value=1;if(valid(r,0))return 8;r.value=0;
- r.command=record_stop+1;if(valid(r,0))return 9;
+ r.command=replay_open+1;if(valid(r,0))return 9;
+ r.command=replay_open;r.value=7;if(!valid(r,0))return 13;r.command=replay_page;r.value=12;if(!valid(r,0))return 14;r.value=0;
  r.command=speed;for(auto value:{10,25,50,100,200,400}){r.value=value;if(!valid(r,0))return 3;}
  r.value=123;if(valid(r,0))return 4;r.value=100;r.reserved=1;if(valid(r,0))return 5;
  r.reserved=0;r.version=1;if(valid(r,0))return 10;r.version=version;
@@ -28,5 +29,5 @@ int main(){using namespace theater_ui;Request r;r.sequence=1;
    std::cerr<<"layout mismatch at "<<c.w<<"x"<<c.h<<" aspect "<<c.aspect<<" game "<<rects.gameMax.x-rects.gameMin.x<<"x"<<rects.gameMax.y-rects.gameMin.y<<" panel "<<panel<<" selection "<<selection<<"\n";return 11;}
   if(TheaterUI::TrackRowsThatFit(rects)<6)return 12;}
  if(!tm_render_test_ui())return 7;
- std::cout<<"Editor wire v2 validation + v3 layout table + overlay construction (EN/RU, 7 resolutions, F4 states, all tools) PASS. No GPU/game verification.\n";
+ std::cout<<"Editor wire v3 validation + v3 layout table + overlay construction (EN/RU, 7 resolutions, F4 states, all tools) PASS. No GPU/game verification.\n";
 }
