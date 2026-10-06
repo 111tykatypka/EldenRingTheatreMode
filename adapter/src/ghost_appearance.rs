@@ -1,13 +1,12 @@
 //! Replay ghosts drawn as normal characters (no phantom transparency, glow or tint).
 //!
-//! The engine renders replay ghosts through the PhantomParam rows named by
-//! NetworkParam.replay_bonfire_phantom_param_id(_for_codename) (910 and 930 on 1.17). Once the
-//! regulation params are loaded, those rows are rewritten in memory, once per game session, to
-//! values that leave the character's own materials untouched. No game file is changed and
+//! The engine renders replay ghosts through PhantomParam. Once the regulation params are loaded,
+//! every PhantomParam row is rewritten in memory, once per game session, to values that leave the
+//! character's own materials untouched. No game file is changed and
 //! there is no toggle. Runs on the game thread only.
 #[cfg(feature="native-replay-ghost-create-remove")]
 mod imp {
-    use eldenring::cs::{NetworkParam, PhantomParam, SoloParamRepository, WorldChrMan};
+    use eldenring::cs::{PhantomParam, SoloParamRepository, WorldChrMan};
     use eldenring::param::PHANTOM_PARAM_ST;
     use fromsoftware_shared::FromStatic;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,22 +29,15 @@ mod imp {
         let player_ready=unsafe{WorldChrMan::instance()}.ok().map(|w|w.main_player.is_some()).unwrap_or(false);
         if !player_ready { return; }
         let Ok(repo)=(unsafe{SoloParamRepository::instance_mut()}) else { return; };
-        let mut ids=Vec::new();
-        if let Some(network)=repo.get::<NetworkParam>(0) {
-            for id in [network.replay_bonfire_phantom_param_id(),network.replay_bonfire_phantom_param_id_for_codename()] {
-                if id>=0 { ids.push(id as u32); }
-            }
-        }
-        ids.sort_unstable();ids.dedup();
         APPLIED.store(true,Ordering::Relaxed);
-        if ids.is_empty() { crate::log_game("GHOST_APPEARANCE_ERROR: NetworkParam has no replay phantom rows; ghosts keep the default look"); return; }
-        for id in ids {
-            match repo.get_mut::<PhantomParam>(id) {
-                Some(row)=>{ let before=format!("{row:?}"); neutral(row);
-                    crate::log_game(&format!("GHOST_APPEARANCE: PhantomParam[{id}] set to normal character look; was {before}")); }
-                None=>crate::log_game(&format!("GHOST_APPEARANCE_ERROR: PhantomParam[{id}] not found")),
-            }
-        }
+        // Live test: neutralizing only the NetworkParam replay rows (910/930) left the ghost
+        // transparent, so the replay ghost takes its phantom look from another row. Every
+        // PhantomParam row is set to the normal look. Side effect, offline only: spirit ashes and
+        // other phantoms also render as normal characters (what the owner's reference mod does).
+        let mut changed=Vec::new();
+        for (id,row) in repo.rows_mut::<PhantomParam>() { neutral(row); changed.push(id); }
+        if changed.is_empty() { crate::log_game("GHOST_APPEARANCE_ERROR: PhantomParam has no rows; ghosts keep the default look"); return; }
+        crate::log_game(&format!("GHOST_APPEARANCE: {} PhantomParam rows set to normal character look: {:?}",changed.len(),changed));
     }
 }
 #[cfg(feature="native-replay-ghost-create-remove")]

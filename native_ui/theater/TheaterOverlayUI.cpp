@@ -915,9 +915,10 @@ void Overlay::DrawCursor()
 
 void Overlay::DrawHiddenHint(const OverlayFrame& f)
 {
+    // Permanent while hidden (Shift+F4 clean mode hides it too), bottom-left, so the key is always known.
+    if (ui_.visibility != UiVisibility::Hidden) return;
     const double age = f.now - f.hiddenAt;
-    if (ui_.visibility != UiVisibility::Hidden || age < 0 || age > 2.4) return;
-    const float alpha = age < 2.0 ? 1.0f : (float)(1.0 - (age - 2.0) / 0.4);
+    const float alpha = (age >= 0 && age < 2.0) ? 1.0f : 0.75f;
     const float s = ui_.rects.uiScale;
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const char* text = T(Str::ShowUiHint);
@@ -925,8 +926,9 @@ void Overlay::DrawHiddenHint(const OverlayFrame& f)
     const float size = Px(FontSize::Body, s);
     const ImVec2 tsz = font->CalcTextSizeA(size, FLT_MAX, 0, text);
     const ImVec2 display = ImGui::GetIO().DisplaySize;
-    const ImVec2 p0(display.x * 0.5f - tsz.x * 0.5f - Px(14, s), display.y - Px(72, s));
-    const ImVec2 p1(display.x * 0.5f + tsz.x * 0.5f + Px(14, s), p0.y + Px(Metric::ToastHeight, s));
+    const float h = Px(Metric::ToastHeight, s);
+    const ImVec2 p0(Px(24, s), display.y - Px(24, s) - h);
+    const ImVec2 p1(p0.x + tsz.x + Px(28, s), p0.y + h);
     dl->AddRectFilled(p0, p1, Color::OverlayBg.Fade(alpha).U32(), Px(Radius::Toast, s));
     dl->AddText(font, size, ImVec2(p0.x + Px(14, s), p0.y + (p1.y - p0.y - tsz.y) * 0.5f), Color::TextPrimary.Fade(alpha).U32(), text);
 }

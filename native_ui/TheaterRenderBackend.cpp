@@ -50,9 +50,9 @@ public:
  bool blocking() const {return mode.load()==2&&ui_ready.load()&&!failed;}
  // Replay state from the latest host snapshot, for keys that only act while a replay is loaded.
  std::atomic_bool replay_loaded{},replay_playing{};
- // TogglePlayback (Space) belongs to Theater Mode while a replay is loaded or the overlay is open;
- // then the game never sees that key (window messages and DirectInput), so no jump.
- bool owns_playback_key() const {return blocking()||replay_loaded.load();}
+ // TogglePlayback (Space) belongs to Theater Mode only while the overlay is open (game input is
+ // blocked then anyway). With the overlay hidden it is always the game's key, replay loaded or not.
+ bool owns_playback_key() const {return blocking();}
  void toggle_playback(){if(!replay_loaded.load())return;command(replay_playing.load()?theater_ui::pause:theater_ui::play);}
  // Virtual cursor. Elden Ring can hold the mouse through DirectInput so Windows never moves
  // the cursor or sends WM_MOUSEMOVE. While the UI is shown, the blocked game mouse deltas and
@@ -163,7 +163,7 @@ public:
   // Draw only when something is visible: the UI, the REC pill (not in Shift+F4 clean mode),
   // the F4 hint, or the noninteractive native ghost HUD, which is independent of F4.
   const auto vis=TheaterUI::UiVisibility(visibility.load());
-  const bool hint=vis==TheaterUI::UiVisibility::Hidden&&GetTickCount64()-hidden_tick.load()<2500;
+  const bool hint=vis==TheaterUI::UiVisibility::Hidden; // permanent "F4 Show UI" hint (same startup rendering as the native HUD)
   const bool needed=vis==TheaterUI::UiVisibility::Shown||native_status_visible.load()||hint||(vis!=TheaterUI::UiVisibility::HiddenClean&&recording_now());
   if(!needed&&!context)return;
   const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
