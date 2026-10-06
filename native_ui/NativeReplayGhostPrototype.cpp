@@ -339,8 +339,23 @@ void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
  // Path used by community tools: CSChrBehaviorModule+0x10 -> +0x30 = hkbCharacter. Walk it fully.
  {U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0;
   log("ANIM_PROBE: behavior+10 = %s @0x%llX; +30 = %s @0x%llX",rttiName(holder).c_str(),holder,rttiName(character).c_str(),character);
-  if(character){allowArrays=true;seen.push_back(character);found.push_back({character,rttiName(character),"hkbCharacter"});walk(character,"hkbCharacter>",0x400,3);allowArrays=false;}
-  if(holder){allowArrays=true;walk(holder,"behavior+10>",0x200,1);allowArrays=false;}}
+  // One line per named pointer; recurse only into Havok ("hk") objects, breadth first, bounded.
+  std::vector<std::pair<U,std::string>> queue{{character,"hkbCharacter"}};
+  if(U hvk=get<U>(behavior+0x15A8))queue.push_back({hvk,"HvkAnim"});
+  for(size_t qi=0;qi<queue.size()&&qi<48;++qi){
+   const U object=queue[qi].first;const std::string path=queue[qi].second;if(!object)continue;
+   const size_t bytes=path=="HvkAnim"?0x1000:0x300;std::vector<unsigned char> b(bytes);if(!read(object,b.data(),bytes))continue;
+   std::string line="ANIM_PROBE: DUMP "+path+" ("+rttiName(object)+"):";
+   for(size_t o=8;o+8<=bytes;o+=8){U v;memcpy(&v,b.data()+o,8);if(!pointerish(v))continue;std::string n=rttiName(v);
+    if(n.empty()){ // array storage: name the first element if it is an object
+     U first=get<U>(v);const auto fn=pointerish(first)?rttiName(first):std::string();if(fn.rfind("hk",0)!=0)continue;
+     char item[96];snprintf(item,sizeof(item)," +%zX:[%s]",o,fn.c_str());line+=item;
+     if(std::find(seen.begin(),seen.end(),first)==seen.end()){seen.push_back(first);queue.push_back({first,path+">"+std::to_string(o)+"[0]"});found.push_back({first,fn,path+">"+std::to_string(o)+"[0]"});}
+     continue;}
+    char item[96];snprintf(item,sizeof(item)," +%zX:%s",o,n.c_str());line+=item;
+    if(n.rfind("hk",0)==0&&std::find(seen.begin(),seen.end(),v)==seen.end()){seen.push_back(v);queue.push_back({v,path+">"+std::to_string(o)});found.push_back({v,n,path+">"+std::to_string(o)});}
+    if(line.size()>1700){log("%s",line.c_str());line="ANIM_PROBE: DUMP "+path+" (cont):";}}
+   log("%s",line.c_str());}}
  walk(timeAct,"time_act",0xD8,3);
  for(const auto& n:found)log("ANIM_PROBE: %s = %s @0x%llX",n.path.c_str(),n.name.c_str(),n.address);
  // Sample candidate objects: first 0x100 bytes as floats, 30 samples x 50 ms; report changing fields.
