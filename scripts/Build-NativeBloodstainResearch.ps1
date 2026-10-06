@@ -1,5 +1,7 @@
 ﻿param(
  [string]$OutputDirectory='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\NativeBloodstainReplayResearch',
+ [ValidateSet('native-bloodstain-readonly','native-payload-capture')]
+ [string]$ResearchFeature='native-bloodstain-readonly',
  [string]$CMakeBin='C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
 )
 $ErrorActionPreference='Stop'
@@ -31,18 +33,18 @@ if($smoke.ExitCode){throw "DX12 smoke test failed: $($smoke.ExitCode)"}
 Get-Content -LiteralPath (Join-Path $build 'native-dx12-smoke.log')
 # Windows PowerShell treats redirected compiler stderr as error records.
 $ErrorActionPreference='Continue'
-& $cargo test --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --features native-bloodstain-readonly --target x86_64-pc-windows-msvc 2>&1 | ForEach-Object { $_.ToString() } | Tee-Object -FilePath (Join-Path $build 'native-rust-tests.log')
+& $cargo test --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --features $ResearchFeature --target x86_64-pc-windows-msvc 2>&1 | ForEach-Object { $_.ToString() } | Tee-Object -FilePath (Join-Path $build 'native-rust-tests.log')
 $cargoTestExit=$LASTEXITCODE
 $ErrorActionPreference='Stop'
 if($cargoTestExit){throw 'Rust tests failed'}
-& $cargo build --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --features native-bloodstain-readonly --target x86_64-pc-windows-msvc
+& $cargo build --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --features $ResearchFeature --target x86_64-pc-windows-msvc
 if($LASTEXITCODE){throw 'DLL Release build failed'}
 Push-Location $repo
 try{& $python -m unittest discover -s tools/research_integration -p test_tools.py;if($LASTEXITCODE){throw 'Research tool tests failed'}}finally{Pop-Location}
 Push-Location $repo
 try{& $python -m unittest discover -s tools/fidelity_capture -p test_capture.py;if($LASTEXITCODE){throw 'Capture parser tests failed'}}finally{Pop-Location}
 $ErrorActionPreference='Continue'
-& $cargo test --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --features native-bloodstain-readonly --target x86_64-pc-windows-msvc sdk_layout_inventory -- --nocapture 2>&1 | ForEach-Object { $_.ToString() } | Tee-Object -FilePath (Join-Path $build 'capture-sdk-layout.log')
+& $cargo test --manifest-path (Join-Path $repo 'adapter\Cargo.toml') --release --locked --offline --features $ResearchFeature --target x86_64-pc-windows-msvc sdk_layout_inventory -- --nocapture 2>&1 | ForEach-Object { $_.ToString() } | Tee-Object -FilePath (Join-Path $build 'capture-sdk-layout.log')
 $layoutExit=$LASTEXITCODE;$ErrorActionPreference='Stop';if($layoutExit){throw 'SDK layout audit failed'}
 & $cmake --build (Join-Path $repo 'probe\build') --config Release --parallel 2
 if($LASTEXITCODE){throw 'Compatibility probe build failed'}
@@ -63,7 +65,12 @@ $branch=& $git -c $safe -C $repo branch --show-current
 $dirty=& $git -c $safe -C $repo status --porcelain
 foreach($name in @('licenses','THIRD_PARTY_NOTICES.txt')){$p=Join-Path (Join-Path $outputs 'TesterBuild') $name;if(Test-Path -LiteralPath $p){Copy-Item -LiteralPath $p -Destination $outputFull -Recurse -Force}}
 Copy-Item -LiteralPath (Join-Path $repo 'research\NATIVE_REPLAY_ACCEPTANCE.md'),(Join-Path $repo 'research\NATIVE_REPLAY_RUNTIME_RESULT.md'),(Join-Path $repo 'research\NATIVE_REPLAY_RUNTIME_RESULT.json') -Destination $outputFull -Force
-$manifest=@('Native bloodstain replay READ-ONLY research checkpoint; NOT native replay implementation',"Branch: $branch","Source parent/commit: $commit","Working tree dirty: $([bool]$dirty)",'Feature: native-bloodstain-readonly; write commands/callback mutations disabled','Target: AMD64 EldenRing_1_17 2.7.0.0 exact disk SHA D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134','Pinned SDK unchanged: 3c8c1d7633a99309fb004c9f894ea10b7967d0e0','Runtime: previous read-only build recorder population VERIFIED; ghost absent. Corrected owner+A8 binary reload unverified; see NATIVE_REPLAY_RUNTIME_RESULT.md')
+if($ResearchFeature -eq 'native-payload-capture'){
+ Copy-Item -LiteralPath (Join-Path $repo 'research\NATIVE_PAYLOAD_GHOST_FINDINGS.md'),(Join-Path $repo 'research\NATIVE_PAYLOAD_RUNTIME_TEST.md'),(Join-Path $repo 'tools\native_replay\payload_codec.py'),(Join-Path $repo 'tools\native_replay\analyze_payload_capture.py') -Destination $outputFull -Force
+ Push-Location $repo
+ try{& $python -m unittest discover -s tools/native_replay -p test_payload.py;if($LASTEXITCODE){throw 'Payload decoder tests failed'}}finally{Pop-Location}
+}
+$manifest=@('Native bloodstain replay READ-ONLY research checkpoint; NOT native replay implementation',"Branch: $branch","Source parent/commit: $commit","Working tree dirty: $([bool]$dirty)","Feature: $ResearchFeature; write commands/callback mutations disabled",'Target: AMD64 EldenRing_1_17 2.7.0.0 exact disk SHA D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134','Pinned SDK unchanged: 3c8c1d7633a99309fb004c9f894ea10b7967d0e0','Runtime: prior recorder population VERIFIED; new payload marker/cadence probe RUNTIME VALIDATION REQUIRED. Ghost creation disabled; see findings.')
 foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','EldenRingCompatibilityProbe.exe')){$p=Join-Path $outputFull $name;$manifest+="$name bytes=$((Get-Item -LiteralPath $p).Length) SHA256=$((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash)"}
 foreach($path in $preserved.Keys){if((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $preserved[$path]){throw "Preserved build changed: $path"};$manifest+="Preserved: $path SHA256=$($preserved[$path])"}
 $manifest|Set-Content -LiteralPath (Join-Path $outputFull 'BUILD_MANIFEST.txt') -Encoding utf8

@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 
 [features]
 native-bloodstain-readonly = []
+native-payload-capture = ["native-bloodstain-readonly"]
 
 [dependencies]
 pelite = "0.10"

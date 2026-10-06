@@ -11,6 +11,7 @@ const MANIPULATOR_OWNER:usize=0xa8;
 const MAX_GHOST_SLOTS:usize=512; // diagnostic sampling budget, not a replay actor cap
 #[link(name="kernel32")]unsafe extern "system"{
  fn GetCurrentProcess()->*mut c_void;
+ fn GetCurrentProcessId()->u32;
  fn ReadProcessMemory(process:*mut c_void,address:*const c_void,output:*mut c_void,size:usize,read:*mut usize)->i32;
 }
 fn read(address:usize,size:usize)->Option<Vec<u8>>{
@@ -48,13 +49,21 @@ fn literal_kind(code:&[u8])->Option<u32>{if code.len()!=6||code[0]!=0xb8||code[5
 pub fn write_command(kind:u16)->bool{matches!(kind,3|5|6|7|11|14|15)}
 struct Row{prefix:&'static str,message:String,address:usize,bytes:Vec<u8>}
 struct Batch{timestamp:u64,rows:Vec<Row>,dropped:u64}
-pub struct Capture{tx:Option<SyncSender<Batch>>,next:u64,base:usize,image_size:usize,dropped:u64}
+#[derive(Default)]struct PayloadCapture{active:bool,start:u64,marker:usize,keys:[bool;2],callbacks:u64,observed_nodes:u64,last_tail:usize,last_player:usize,last_accum:Option<u32>,accum_changes:u64}
+const PAYLOAD_MARKERS:[&str;9]=["IDLE","WALK","ROTATE","ROLL","LIGHT_ATTACK","JUMP","FALL","LAND","FINAL_IDLE"];
+#[link(name="user32")]unsafe extern "system"{
+ fn GetAsyncKeyState(key:i32)->i16;
+ fn GetForegroundWindow()->*mut c_void;
+ fn GetWindowThreadProcessId(window:*mut c_void,pid:*mut u32)->u32;
+}
+fn pool_node_valid(address:usize,pool:usize,capacity:u32)->bool{capacity>0&&capacity<=512&&address>=pool&&address.checked_sub(pool).is_some_and(|d|d%NODE_BYTES==0&&d/NODE_BYTES<(capacity as usize))}
+pub struct Capture{tx:Option<SyncSender<Batch>>,next:u64,base:usize,image_size:usize,dropped:u64,payload:PayloadCapture}
 impl Capture{
  pub fn new()->Self{
-  if !cfg!(feature="native-bloodstain-readonly"){return Self{tx:None,next:0,base:0,image_size:0,dropped:0};}
+  if !cfg!(feature="native-bloodstain-readonly"){return Self{tx:None,next:0,base:0,image_size:0,dropped:0,payload:PayloadCapture::default()};}
   let base=unsafe{crate::GetModuleHandleW(std::ptr::null())}as usize;
   let image_size=read(base,0x1000).and_then(|h|{let nt=u32_at(&h,0x3c)?as usize;u32_at(&h,nt+24+56)}).unwrap_or(0)as usize;
-  let(tx,rx)=sync_channel::<Batch>(8);
+  let(tx,rx)=sync_channel::<Batch>(64);
   let started=std::thread::Builder::new().name("TheaterMode.NativeReplayEvidence".into()).spawn(move||{
    let root=std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("EldenRingTheaterMode/native-replay");
    if let Err(e)=std::fs::create_dir_all(&root){crate::log_game(&format!("NATIVE_REPLAY: STORAGE_ERROR {e}"));return;}
@@ -62,15 +71,16 @@ impl Capture{
    let Ok(mut file)=std::fs::File::create(&path)else{crate::log_game("NATIVE_REPLAY: STORAGE_ERROR create journal");return;};
    crate::log_game(&format!("NATIVE_REPLAY: READONLY=ON profile=EldenRing_1_17 interval=1s; engine calls/writes blocked; journal={}",path.display()));
    while let Ok(batch)=rx.recv(){for row in batch.rows{
-    crate::log_game(&format!("{}: t={} {}",row.prefix,batch.timestamp,row.message));
+    if row.prefix!="PAYLOAD_TICK"&&row.prefix!="PAYLOAD_CONTEXT"&&!row.message.starts_with("role=observed_write") {crate::log_game(&format!("{}: t={} {}",row.prefix,batch.timestamp,row.message));}
     let line=format!("{{\"schema\":1,\"time_ns\":{},\"source_drops\":{},\"prefix\":{},\"address\":\"0x{:x}\",\"message\":{},\"raw_hex\":{}}}\n",batch.timestamp,batch.dropped,json_quote(row.prefix),row.address,json_quote(&row.message),json_quote(&hex(&row.bytes)));
     if let Err(e)=file.write_all(line.as_bytes()){crate::log_game(&format!("NATIVE_REPLAY: JOURNAL_ERROR {e}"));return;}
    }if let Err(e)=file.flush(){crate::log_game(&format!("NATIVE_REPLAY: FLUSH_ERROR {e}"));return;}}
   });
-  if started.is_err(){crate::log_game("NATIVE_REPLAY: WORKER_UNAVAILABLE");return Self{tx:None,next:0,base,image_size,dropped:0};}
-  Self{tx:Some(tx),next:0,base,image_size,dropped:0}
+  if started.is_err(){crate::log_game("NATIVE_REPLAY: WORKER_UNAVAILABLE");return Self{tx:None,next:0,base,image_size,dropped:0,payload:PayloadCapture::default()};}
+  Self{tx:Some(tx),next:0,base,image_size,dropped:0,payload:PayloadCapture::default()}
  }
  pub fn tick(&mut self,now:u64){
+  if cfg!(feature="native-payload-capture"){self.payload_tick(now);}
   let Some(tx)=self.tx.as_ref()else{return;};if now<self.next{return;}self.next=now.saturating_add(1_000_000_000);
   let mut rows=Vec::new();
   if let Ok(world)=unsafe{WorldChrMan::instance()}{
@@ -97,6 +107,55 @@ impl Capture{
   }else{rows.push(Row{prefix:"NATIVE_REPLAY",address:0,message:"WORLD_UNAVAILABLE".into(),bytes:Vec::new()});}
   if tx.try_send(Batch{timestamp:now,rows,dropped:self.dropped}).is_err(){self.dropped+=1;}
  }
+ fn payload_tick(&mut self,now:u64){
+  if self.tx.is_none(){return;}
+  let mut foreground_pid=0;
+  unsafe{GetWindowThreadProcessId(GetForegroundWindow(),&mut foreground_pid);}
+  let foreground=foreground_pid==unsafe{GetCurrentProcessId()};
+  let keys=[foreground&&unsafe{GetAsyncKeyState(0x79)}<0,foreground&&unsafe{GetAsyncKeyState(0x7a)}<0];
+  let rising=[keys[0]&&!self.payload.keys[0],keys[1]&&!self.payload.keys[1]];self.payload.keys=keys;
+  if rising[0]{
+   if self.payload.active{self.payload.active=false;crate::log_game(&format!("NATIVE_PAYLOAD: STOP callbacks={} observed_new_nodes={} accumulator_changes={} queue_drops={}; no writes",self.payload.callbacks,self.payload.observed_nodes,self.payload.accum_changes,self.dropped));}
+   else{self.payload=PayloadCapture{active:true,start:now,keys, ..Default::default()};crate::log_game("NATIVE_PAYLOAD: START; F11 next user marker, F10 stop; per game callback observations, not engine-hook write count; no ghost creation");}
+  }
+  if !self.payload.active{return;}
+  if rising[1]{self.payload.marker=(self.payload.marker+1)%PAYLOAD_MARKERS.len();crate::log_game(&format!("NATIVE_PAYLOAD: MARK={} elapsed_ns={}",PAYLOAD_MARKERS[self.payload.marker],now.saturating_sub(self.payload.start)));}
+  self.payload.callbacks+=1;
+  let player=match unsafe{WorldChrMan::instance()}.ok().and_then(|w|w.main_player.as_ref()){
+   Some(p)=>p,None=>{self.payload.active=false;crate::log_game("NATIVE_PAYLOAD: STOP reason=PLAYER_UNAVAILABLE; no retained game pointer");return;}
+  };
+  let address=&**player as *const PlayerIns as usize;
+  if self.payload.last_player!=0&&self.payload.last_player!=address{self.payload.active=false;crate::log_game("NATIVE_PAYLOAD: STOP reason=PLAYER_CHANGED");return;}
+  self.payload.last_player=address;
+  let recorder=read(address+offset_of!(PlayerIns,replay_recorder),8).map(|b|pointer(&b,0)).unwrap_or(0);
+  let Some(prefix)=read(recorder,0x70)else{self.payload.active=false;crate::log_game("NATIVE_PAYLOAD: STOP reason=RECORDER_UNREADABLE");return;};
+  let capacity=u32_at(&prefix,0x40).unwrap_or(0);let count=u32_at(&prefix,0x44).unwrap_or(0);let pool=pointer(&prefix,0x18);let tail=pointer(&prefix,0x28);
+  if pointer(&prefix,0).checked_sub(self.base)!=Some(RECORDER_VTABLE)||pointer(&prefix,0x10)!=address||capacity==0||capacity>512||count>capacity{self.payload.active=false;crate::log_game("NATIVE_PAYLOAD: STOP reason=RECORDER_LAYOUT_INVALID");return;}
+  let accum=u32_at(&prefix,0x48).unwrap_or(0);
+  if self.payload.last_accum.is_some_and(|a|a!=accum){self.payload.accum_changes+=1;}
+  self.payload.last_accum=Some(accum);
+  let mut rows=vec![Row{prefix:"PAYLOAD_TICK",address:recorder,message:format!("user_marker={} callback={} count={count} capacity={capacity} tail=0x{tail:X} accumulator_bits=0x{accum:08X}; observed from PostPhysics, not hook",PAYLOAD_MARKERS[self.payload.marker],self.payload.callbacks),bytes:prefix.clone()}];
+  if count>0&&tail!=self.payload.last_tail{
+   if !pool_node_valid(tail,pool,capacity){self.payload.active=false;crate::log_game("NATIVE_PAYLOAD: STOP reason=TAIL_OUTSIDE_POOL");return;}
+   let Some(node)=read(tail,NODE_BYTES)else{self.payload.active=false;crate::log_game("NATIVE_PAYLOAD: STOP reason=NODE_UNREADABLE");return;};
+   if u32_at(&node,0).unwrap_or(u32::MAX)>256||u32_at(&node,0x104).unwrap_or(u32::MAX)>256{self.payload.active=false;crate::log_game("NATIVE_PAYLOAD: STOP reason=PAYLOAD_LENGTH_INVALID");return;}
+   self.payload.observed_nodes+=1;
+   rows.push(Row{prefix:"REPLAY_FRAME",address:tail,message:format!("role=observed_write user_marker={} observed_node={} callback={} start_ns={} first_is_existing={} native payload raw, no game calls",PAYLOAD_MARKERS[self.payload.marker],self.payload.observed_nodes,self.payload.callbacks,self.payload.start,self.payload.last_tail==0),bytes:node});
+   let physics=&player.chr_ins.modules.physics;let action=crate::player_action::observe(player);
+   rows.push(Row{prefix:"PAYLOAD_CONTEXT",address,message:format!("user_marker={} position={:?} quaternion={:?} euler_raw={:?} animation_id={} action={} action_flags={} animation_time={} animation_length={} raw_request_bits=0x{:X}; semantic action labels not inferred",PAYLOAD_MARKERS[self.payload.marker],[physics.position.0,physics.position.1,physics.position.2],[physics.orientation.0,physics.orientation.1,physics.orientation.2,physics.orientation.3],[physics.orientation_euler.0,physics.orientation_euler.1,physics.orientation_euler.2],action.animation_id,action.action,action.flags,action.animation_time,action.animation_length,action.raw_action_bits),bytes:Vec::new()});
+   self.payload.last_tail=tail;
+  }
+  if self.payload.callbacks==1{
+   let mut at=pointer(&prefix,0x20);let mut visited=Vec::new();
+   for index in 0..count{
+    if at==0||!pool_node_valid(at,pool,capacity)||visited.contains(&at){crate::log_game("NATIVE_PAYLOAD: POOL_SNAPSHOT_TRUNCATED invalid linkage");break;}
+    visited.push(at);let Some(node)=read(at,NODE_BYTES)else{break;};let next=pointer(&node,0x240);
+    rows.push(Row{prefix:"REPLAY_FRAME",address:at,message:format!("role=pool_active index={index} user_marker={} start_ns={}; linked active pool snapshot, NOT time sequence from old test",PAYLOAD_MARKERS[self.payload.marker],self.payload.start),bytes:node});at=next;
+   }
+   rows.push(Row{prefix:"NATIVE_PAYLOAD",address,message:format!("POOL_SNAPSHOT count={count} captured={} capacity={capacity}; F10/F11 controls scoped to game foreground",visited.len()),bytes:Vec::new()});
+  }
+  if self.tx.as_ref().unwrap().try_send(Batch{timestamp:now,rows,dropped:self.dropped}).is_err(){self.dropped+=1;}
+ }
  fn actor(&self,rows:&mut Vec<Row>,address:usize,source:&str,set:i32,slot:usize){
   let Some(b)=read(address,size_of::<ChrIns>())else{return;};
   let ctrl=pointer(&b,offset_of!(ChrIns,chr_ctrl));let modules=pointer(&b,offset_of!(ChrIns,modules));
@@ -117,6 +176,7 @@ impl Capture{
  }
 }
 #[cfg(test)]mod tests{use super::*;
+ #[test]fn verified_pool_bounds(){assert!(pool_node_valid(0x10000+59*NODE_BYTES,0x10000,60));assert!(!pool_node_valid(0x10000+60*NODE_BYTES,0x10000,60));assert!(!pool_node_valid(0x10001,0x10000,60));assert!(!pool_node_valid(0x10000,0x10000,0));}
  #[test]fn known_sdk_prefix(){assert_eq!(size_of::<ReplayRecorder>(),0x70);assert_eq!(offset_of!(ReplayRecorder,owning_player),0x10);assert_eq!(offset_of!(ReplayRecorder,frame_counter),0x44);assert_eq!(offset_of!(PlayerIns,replay_recorder),0x5c8);assert_eq!(offset_of!(ChrCtrl,manipulator),0x18);}
  #[test]fn owner_pointer_uses_exact_a8(){let mut b=[0u8;0xc0];b[0xa0..0xa8].copy_from_slice(&0x7ff100000000u64.to_le_bytes());b[0xa8..0xb0].copy_from_slice(&0x7ff177d09800u64.to_le_bytes());assert_eq!(pointer(&b,MANIPULATOR_OWNER),0x7ff177d09800);assert_ne!(pointer(&b,0xa0),pointer(&b,MANIPULATOR_OWNER));}
  #[test]fn scalar_kind_without_virtual_call(){assert_eq!(literal_kind(&[0xb8,3,0,0,0,0xc3]),Some(3));assert_eq!(literal_kind(&[0xb8,1,0,0,0,0xc3]),Some(1));assert_eq!(literal_kind(&[0x48,0,0,0,0,0xc3]),None);assert_eq!(literal_kind(&[0xb8,9,0,0,0,0xc3]),None);}
