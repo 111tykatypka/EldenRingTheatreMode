@@ -14,6 +14,7 @@ enum class Action : std::uint32_t {
     TogglePlayback,      // Space: play/pause the timeline, only while a replay is loaded or the overlay is open
     GhostCreateTest,     // F10: experimental native ghost create
     GhostRemoveTest,     // F11: experimental native ghost remove
+    AnimProbe,           // F9: read-only animation probe (replay system research)
     Count
 };
 
@@ -34,6 +35,7 @@ inline constexpr Binding kDefaults[] = {
     { Action::TogglePlayback,  "toggle_playback",   "Play / pause timeline",         0x20 /*VK_SPACE*/, Scope::ReplayOrOverlay },
     { Action::GhostCreateTest, "ghost_create_test", "Native ghost: create (test)",   0x79 /*VK_F10*/,   Scope::GameWindow },
     { Action::GhostRemoveTest, "ghost_remove_test", "Native ghost: remove (test)",   0x7A /*VK_F11*/,   Scope::GameWindow },
+    { Action::AnimProbe,       "anim_probe",        "Animation probe (research)",    0x78 /*VK_F9*/,    Scope::GameWindow },
 };
 static_assert(sizeof(kDefaults) / sizeof(kDefaults[0]) == static_cast<std::size_t>(Action::Count), "one row per action");
 

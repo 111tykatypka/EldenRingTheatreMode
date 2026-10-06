@@ -10,6 +10,10 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <array>
+#include <functional>
+#include <string>
+#include <vector>
 #include <thread>
 #include <mutex>
 #include "NativeGhostFingerprints.h"
@@ -18,7 +22,7 @@ extern "C" void tm_render_native_status(const char*);
 
 namespace {
 using U=uintptr_t;
-U base{}, layout[8]{}; // [7] = ChrIns::chr_model_ins (SDK offset)
+U base{}, layout[10]{}; // [7] ChrIns::chr_model_ins, [8] modules.behavior, [9] modules.time_act (SDK offsets)
 void(*logger)(const char*){};
 void log(const char* fmt,...) { char text[2048];va_list a;va_start(a,fmt);vsnprintf(text,sizeof(text),fmt,a);va_end(a);logger(text);if(strncmp(text,"NATIVE_GHOST",12)==0)tm_render_native_status(text); }
 bool read(U address,void* out,size_t bytes) { SIZE_T n{};return address>=0x10000 && address<=UINTPTR_MAX-bytes && ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes; }
@@ -290,6 +294,68 @@ void renderDiff(U actor) {
  logBlockDiff("CSChrModelIns",gm,pm,0x28);
  logBlockDiff("CSFD4ModelItem",gm?get<U>(gm+0x10):0,pm?get<U>(pm+0x10):0,0x6d0);
  logBlockDiff("ModelDispEntity",gm?get<U>(gm+0x18):0,pm?get<U>(pm+0x18):0,0x400);}
+// ---------------------------------------------------------------------------
+// Animation probe (replay system Step 1, spike 1). READ-ONLY.
+// Maps the player's Havok animation objects by walking pointers from the behavior and TimeAct
+// modules and naming each object by its MSVC RTTI, then samples their first words for 1.5 s so
+// the local-time / weight / speed fields can be identified. Nothing is written.
+// ---------------------------------------------------------------------------
+std::string rttiName(U object) {
+ U vtable{};if(!read(object,&vtable,8)||vtable<0x10000)return {};
+ U col{};if(!read(vtable-8,&col,8)||col<0x10000)return {};
+ uint32_t signature{},typeRva{},selfRva{};
+ if(!read(col,&signature,4)||signature!=1||!read(col+0xC,&typeRva,4)||!read(col+0x14,&selfRva,4))return {};
+ const U image=col-selfRva;char name[96]{};
+ if(!read(image+typeRva+0x10,name,sizeof(name)-1)||strncmp(name,".?AV",4))return {};
+ std::string n(name+4);const auto at=n.find("@@");return at==std::string::npos?n:n.substr(0,at);
+}
+bool pointerish(U v){return v>=0x10000000000ull&&v<0x800000000000ull&&(v&7)==0;}
+struct ProbeNode{U address;std::string name;std::string path;};
+void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
+ U modules=get<U>(player+modulesOffset);
+ U behavior=get<U>(modules+behaviorOffset),timeAct=get<U>(modules+timeActOffset);
+ log("ANIM_PROBE: start player=0x%llX behavior=0x%llX(%s) time_act=0x%llX(%s)",player,behavior,rttiName(behavior).c_str(),timeAct,rttiName(timeAct).c_str());
+ std::vector<ProbeNode> found;std::vector<U> seen;
+ auto interesting=[](const std::string&n){return n.find("hk")!=std::string::npos||n.find("Anim")!=std::string::npos||n.find("Behavior")!=std::string::npos||n.find("Clip")!=std::string::npos||n.find("TimeAct")!=std::string::npos;};
+ std::function<void(U,const std::string&,size_t,int)> walk=[&](U object,const std::string& path,size_t bytes,int depth){
+  if(found.size()>=400)return;
+  std::vector<unsigned char> buffer(bytes);if(!read(object,buffer.data(),bytes))return;
+  for(size_t o=8;o+8<=bytes&&found.size()<400;o+=8){
+   U p;memcpy(&p,buffer.data()+o,8);if(!pointerish(p)||std::find(seen.begin(),seen.end(),p)!=seen.end())continue;
+   const auto name=rttiName(p);if(name.empty()||!interesting(name))continue;
+   seen.push_back(p);char step[48];snprintf(step,sizeof(step),"+%zX",o);
+   found.push_back({p,name,path+step});
+   if(depth>0)walk(p,path+step+">",0x300,depth-1);
+  }};
+ seen.push_back(behavior);seen.push_back(timeAct);
+ walk(behavior,"behavior",0x1A00,3);
+ walk(timeAct,"time_act",0xD8,3);
+ for(const auto& n:found)log("ANIM_PROBE: %s = %s @0x%llX",n.path.c_str(),n.name.c_str(),n.address);
+ // Sample candidate objects: first 0x100 bytes as floats, 30 samples x 50 ms; report changing fields.
+ std::vector<const ProbeNode*> targets;
+ for(const auto& n:found)if(n.name.find("AnimationControl")!=std::string::npos||n.name.find("ClipGenerator")!=std::string::npos||n.name.find("AnimatedSkeleton")!=std::string::npos||n.name.find("hkbCharacter")!=std::string::npos)if(targets.size()<12)targets.push_back(&n);
+ constexpr int samples=30;constexpr size_t words=0x100/4;
+ std::vector<std::vector<float>> series(targets.size(),std::vector<float>(samples*words));
+ std::vector<std::array<float,4>> tae(samples);
+ for(int i=0;i<samples;++i){
+  for(size_t t=0;t<targets.size();++t)read(targets[t]->address,series[t].data()+i*words,words*4);
+  const uint32_t idx=get<uint32_t>(timeAct+0x20+10*16+4); // read_idx after anim_queue[10]
+  const U slot=timeAct+0x20+(idx%10)*16;tae[i]={float(get<int32_t>(slot)),get<float>(slot+4),get<float>(slot+8),get<float>(slot+12)};
+  Sleep(50);}
+ char line[1900];
+ {int n=snprintf(line,sizeof(line),"ANIM_PROBE: time_act[read] id/play/play2/len:");
+  for(int i=0;i<samples&&n<int(sizeof(line))-48;++i)n+=snprintf(line+n,sizeof(line)-n," %.0f/%.3f/%.3f/%.3f",tae[i][0],tae[i][1],tae[i][2],tae[i][3]);
+  log("%s",line);}
+ for(size_t t=0;t<targets.size();++t)for(size_t w=0;w<words;++w){
+  float first=series[t][w];bool changes=false,finite=true;
+  for(int i=0;i<samples;++i){const float v=series[t][i*words+w];if(!std::isfinite(v)||std::fabs(v)>1e7f){finite=false;break;}if(v!=first)changes=true;}
+  if(!finite||!changes)continue;
+  int n=snprintf(line,sizeof(line),"ANIM_PROBE: %s %s +%zX floats:",targets[t]->name.c_str(),targets[t]->path.c_str(),w*4);
+  for(int i=0;i<samples&&n<int(sizeof(line))-16;++i)n+=snprintf(line+n,sizeof(line)-n," %.3f",series[t][i*words+w]);
+  log("%s",line);}
+ log("ANIM_PROBE: done; %zu objects, %zu sampled",found.size(),targets.size());
+}
+std::atomic<bool> probeRunning{};
 void keys() {
  bool lastCreate=false,lastRemove=false;
  for(;;) {
@@ -309,6 +375,12 @@ void keys() {
    else if(!ready(world(),player,recorder))log("NATIVE_GHOST_ERROR: CREATE refused: player/recorder/world/block not ready; restart required before retry");
    else {used.store(true);retryAt.store(0);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
   }
+  {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
+   if(probe&&!lastProbe&&!probeRunning.exchange(true)){
+    std::thread([]{U w=world(),player{},recorder{};
+     if(ready(w,player,recorder))animProbe(player,layout[1],layout[8],layout[9]);else log("ANIM_PROBE: player not ready");
+     probeRunning=false;}).detach();}
+   lastProbe=probe;}
   if(r&&!lastRemove) {
    unsigned pending=1;
    if(command.compare_exchange_strong(pending,0)||retryAt.exchange(0)){retryAt.store(0);log("NATIVE_GHOST_REMOVE: pending create cancelled; no actor owned");}
