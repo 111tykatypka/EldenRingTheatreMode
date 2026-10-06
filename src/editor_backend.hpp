@@ -48,6 +48,8 @@ struct Snapshot {
   bool connected{}, player{};
   erplay::RecordingState state{erplay::RecordingState::idle};
   std::uint64_t samples{}, dropped{}, reconnects{}, bytes{}, active_ns{};
+  std::uint64_t capture_frames{},capture_drops{};
+  std::uint16_t sample_protocol{};
   erplay::ActionState action;
   double rate{}, latency_ms{};
   std::vector<ReplayEntry> replays;

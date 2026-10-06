@@ -10,6 +10,7 @@
 #include "player_action.hpp"
 #include "character_track.hpp"
 #include "character_visual.hpp"
+#include "capture_track.hpp"
 
 namespace erplay {
 
@@ -22,6 +23,8 @@ struct Sample {
     Vec3 position{};
     Quaternion orientation{};
     std::optional<ActionState> action;
+    std::optional<CaptureFrame> capture;
+    std::uint64_t source_sequence{};
 };
 struct Metadata {
     std::uint32_t format_version{2};
@@ -44,6 +47,8 @@ struct Summary {
     bool animation_sync_observations{};
     std::uint64_t character_count{},character_sample_count{};
     std::uint64_t visual_snapshot_count{};
+    std::array<std::uint64_t,9> capture_record_counts{};
+    std::uint64_t capture_source_drops{};
 };
 enum class RecordingState { idle, recording, paused, saving, ready, error };
 
@@ -107,6 +112,7 @@ public:
     [[nodiscard]] std::vector<CharacterRecord> character_preview(std::uint64_t id,std::size_t maximum=3000)const;
     [[nodiscard]] std::optional<CharacterRecord> character_at(std::uint64_t id,std::uint64_t time)const;
     [[nodiscard]] std::optional<std::pair<CharacterRecord,CharacterRecord>> character_bracket(std::uint64_t id,std::uint64_t time)const;
+    [[nodiscard]] std::optional<CaptureRecord> capture_at(unsigned track,std::uint64_t time)const;
     [[nodiscard]] std::optional<VisualState> visual_at(std::uint64_t id,std::uint64_t time)const;
 private:
     struct Impl;

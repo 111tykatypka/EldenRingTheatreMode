@@ -4,6 +4,8 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <functional>
+#include <bit>
+#include <string_view>
 namespace editor {
 using namespace theater;
 void zoom_timeline_item(TimeView &view, double duration) {
@@ -579,6 +581,8 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
   ImGui::Text("Samples %llu | %.2f Hz\nData %.2f MB | Drops %llu",
               recorder.samples, recorder.rate, double(recorder.bytes) / 1048576,
               recorder.dropped);
+  ImGui::Text("Sample IPC v%u | Fidelity frames %llu | source queue drops %llu",unsigned(recorder.sample_protocol),recorder.capture_frames,recorder.capture_drops);
+  ImGui::TextDisabled("%u raw fields / 9 tracks; new reads require runtime correlation",unsigned(std::size(erplay::capture_fields)));
   auto cs = app.characters.stats();
   ImGui::Text("Characters %llu | %.1f Hz | queue %llu/16 | drops %llu/%llu",
               cs.tracked, cs.rate, cs.queued, cs.dropped, cs.source_drops);
@@ -634,6 +638,32 @@ void draw(const Snapshot &recorder, const PlaybackView &p,
       if(visual->flags&16)ImGui::Text("Native bounded face snapshot: 288 bytes | body archetype %u",visual->archetype);
       ImGui::TextDisabled("Captured state only; equipment/face/HP are not written into the game.");
     }
+  }
+  if(p.loaded && ImGui::CollapsingHeader("Player capture tracks (read only)")){
+    std::lock_guard lock(app.replay_mutex);
+    auto &reader=app.replay_player->reader();
+    ImGui::TextDisabled("Raw REFERENCE observations; no animation/pose reconstruction promised.");
+    ImGui::Text("Source queue drops: %llu",p.summary.capture_source_drops);
+    for(const auto&track:erplay::capture_tracks){
+      ImGui::PushID(int(track.id));
+      if(ImGui::TreeNode(track.name,"%s (%llu samples)",track.name,p.summary.capture_record_counts[track.id-5])){
+        auto record=reader.capture_at(track.id,p.state.timestamp_ns);
+        if(!record)ImGui::TextDisabled("UNAVAILABLE in this replay");
+        else for(const auto&field:erplay::capture_fields){if(field.track!=track.id)continue;
+          const auto local=field.offset-track.begin;bool available=true;
+          for(unsigned i=0;i<field.words;++i)available&=record->available(local+i);
+          if(!available){ImGui::TextDisabled("%s: UNAVAILABLE",field.name);continue;}
+          if(field.words==1 && std::string_view(field.kind)=="f32"){
+            const auto value=std::bit_cast<float>(record->values[local]);
+            ImGui::Text("%s: %.6g [raw %08X]%s",field.name,double(value),record->values[local],std::isfinite(value)?"":" NONFINITE");
+          }else if(field.words==1){const auto bits=record->values[local];const auto value=std::string_view(field.kind)=="i16"?int(static_cast<std::int16_t>(bits)):std::bit_cast<std::int32_t>(bits);ImGui::Text("%s: %d [raw %08X]",field.name,value,bits);}
+          else {ImGui::Text("%s: %u words",field.name,field.words);for(unsigned i=0;i<field.words;++i){if(i%4)ImGui::SameLine();ImGui::Text("%08X",record->values[local+i]);}}
+        }
+        ImGui::TreePop();
+      }
+      ImGui::PopID();
+    }
+    ImGui::TextDisabled("Pose / HKS VM / blend weights / proxy velocity / full SpEffect list: UNAVAILABLE.");
   }
   for (const auto &actor : app.character_views)
     if (actor.info.registry.id == selected_actor) {

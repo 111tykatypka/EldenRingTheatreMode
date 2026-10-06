@@ -1,0 +1,2036 @@
+{
+  "schema": 1,
+  "word_count": 455,
+  "mask_words": 15,
+  "wire_bytes": 1896,
+  "sdk": "3c8c1d7633a99309fb004c9f894ea10b7967d0e0",
+  "target_sha256": "D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134",
+  "tracks": [
+    {
+      "id": 5,
+      "name": "PhysicsTrack",
+      "fields": [
+        {
+          "name": "position",
+          "expression": "p.position",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "RUNTIME_READ_VERIFIED",
+          "offset": 0
+        },
+        {
+          "name": "last_update_position",
+          "expression": "p.last_update_position",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 4
+        },
+        {
+          "name": "interpolated_orientation",
+          "expression": "p.interpolated_orientation",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 8
+        },
+        {
+          "name": "additional_rotation",
+          "expression": "p.additional_rotation",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 12
+        },
+        {
+          "name": "orientation_euler",
+          "expression": "p.orientation_euler",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 16
+        },
+        {
+          "name": "rotation_multiplier",
+          "expression": "p.rotation_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 20
+        },
+        {
+          "name": "motion_multiplier",
+          "expression": "p.motion_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 21
+        },
+        {
+          "name": "gravity_multiplier",
+          "expression": "p.gravity_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 22
+        },
+        {
+          "name": "chr_push_up_factor",
+          "expression": "p.chr_push_up_factor",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 23
+        },
+        {
+          "name": "default_max_turn_rate",
+          "expression": "p.default_max_turn_rate",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 24
+        },
+        {
+          "name": "hit_height",
+          "expression": "p.hit_height",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 25
+        },
+        {
+          "name": "hit_radius",
+          "expression": "p.hit_radius",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 26
+        },
+        {
+          "name": "weight",
+          "expression": "p.weight",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 27
+        },
+        {
+          "name": "chr_proxy_pos_update_requested",
+          "expression": "p.chr_proxy_pos_update_requested",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 28
+        },
+        {
+          "name": "standing_on_solid_ground",
+          "expression": "p.standing_on_solid_ground",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 29
+        },
+        {
+          "name": "touching_solid_ground",
+          "expression": "p.touching_solid_ground",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 30
+        },
+        {
+          "name": "is_falling",
+          "expression": "p.is_falling",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 31
+        },
+        {
+          "name": "is_touching_ground",
+          "expression": "p.is_touching_ground",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 32
+        },
+        {
+          "name": "gravity_disabled",
+          "expression": "p.gravity_disabled",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 33
+        },
+        {
+          "name": "fade_out_gravity_disabled",
+          "expression": "p.fade_out_gravity_disabled",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 34
+        },
+        {
+          "name": "flying_character_fall_requested",
+          "expression": "p.flying_character_fall_requested",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 35
+        },
+        {
+          "name": "use_world_y_alignment_logic",
+          "expression": "p.use_world_y_alignment_logic",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 36
+        },
+        {
+          "name": "is_surface_constrained",
+          "expression": "p.is_surface_constrained",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 37
+        },
+        {
+          "name": "adjust_to_hi_collision",
+          "expression": "p.adjust_to_hi_collision",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 38
+        },
+        {
+          "name": "move_type_flags",
+          "expression": "p.move_type_flags",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 39
+        },
+        {
+          "name": "physics_model_matrix",
+          "expression": "ctrl.physics_model_matrix",
+          "kind": "f32",
+          "words": 16,
+          "confidence": "REFERENCE",
+          "offset": 40
+        },
+        {
+          "name": "model_matrix",
+          "expression": "ctrl.model_matrix",
+          "kind": "f32",
+          "words": 16,
+          "confidence": "REFERENCE",
+          "offset": 56
+        },
+        {
+          "name": "additional_orientation_quat",
+          "expression": "ctrl.additional_orientation_quat",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 72
+        },
+        {
+          "name": "vertical_position_offset",
+          "expression": "ctrl.vertical_position_offset",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 76
+        },
+        {
+          "name": "scale_size_x",
+          "expression": "ctrl.scale_size_x",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 77
+        },
+        {
+          "name": "scale_size_y",
+          "expression": "ctrl.scale_size_y",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 78
+        },
+        {
+          "name": "scale_size_z",
+          "expression": "ctrl.scale_size_z",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 79
+        },
+        {
+          "name": "offset_y",
+          "expression": "ctrl.offset_y",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 80
+        },
+        {
+          "name": "ragdoll_revive_time",
+          "expression": "ctrl.ragdoll_revive_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 81
+        },
+        {
+          "name": "foot_ik_error_height_limit",
+          "expression": "ctrl.foot_ik_error_height_limit",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 82
+        },
+        {
+          "name": "disable_move",
+          "expression": "ctrl.disable_move",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 83
+        },
+        {
+          "name": "height_correction_request",
+          "expression": "ctrl.height_correction_request",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 84
+        },
+        {
+          "name": "chr_ragdoll_state",
+          "expression": "ctrl.chr_ragdoll_state",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 85
+        },
+        {
+          "name": "flags",
+          "expression": "ctrl.flags",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 86
+        },
+        {
+          "name": "flags_copy",
+          "expression": "ctrl.flags_copy",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 87
+        },
+        {
+          "name": "chr_proxy_flags",
+          "expression": "ctrl.chr_proxy_flags",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 88
+        },
+        {
+          "name": "fall_timer",
+          "expression": "fall.fall_timer",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 89
+        },
+        {
+          "name": "force_max_fall_height",
+          "expression": "fall.force_max_fall_height",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 90
+        },
+        {
+          "name": "disable_fall_motion",
+          "expression": "fall.disable_fall_motion",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 91
+        },
+        {
+          "name": "chr_hit_height",
+          "expression": "p.chr_hit_height",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 92
+        },
+        {
+          "name": "chr_hit_radius",
+          "expression": "p.chr_hit_radius",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 93
+        },
+        {
+          "name": "step_disp_interpolate_time",
+          "expression": "p.step_disp_interpolate_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 94
+        },
+        {
+          "name": "step_disp_interpolate_trigger_value",
+          "expression": "p.step_disp_interpolate_trigger_value",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 95
+        },
+        {
+          "name": "is_enable_step_disp_interpolate",
+          "expression": "p.is_enable_step_disp_interpolate",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 96
+        },
+        {
+          "name": "is_watcher_stones",
+          "expression": "p.is_watcher_stones",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 97
+        },
+        {
+          "name": "physics_transform_matrix_squared",
+          "expression": "ctrl.physics_transform_matrix_squared",
+          "kind": "f32",
+          "words": 16,
+          "confidence": "REFERENCE",
+          "offset": 98
+        },
+        {
+          "name": "model_matrix_squared",
+          "expression": "ctrl.model_matrix_squared",
+          "kind": "f32",
+          "words": 16,
+          "confidence": "REFERENCE",
+          "offset": 114
+        },
+        {
+          "name": "foot_ik_error_on_gain",
+          "expression": "ctrl.foot_ik_error_on_gain",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 130
+        },
+        {
+          "name": "foot_ik_error_off_gain",
+          "expression": "ctrl.foot_ik_error_off_gain",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 131
+        },
+        {
+          "name": "forward_undulation_limit_radians",
+          "expression": "ctrl.forward_undulation_limit_radians",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 132
+        },
+        {
+          "name": "backward_undulation_limit_radians",
+          "expression": "ctrl.backward_undulation_limit_radians",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 133
+        },
+        {
+          "name": "side_undulation",
+          "expression": "ctrl.side_undulation",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 134
+        },
+        {
+          "name": "undulation_correction_gain",
+          "expression": "ctrl.undulation_correction_gain",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 135
+        },
+        {
+          "name": "weight_type",
+          "expression": "ctrl.weight_type",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 136
+        },
+        {
+          "name": "is_undulation",
+          "expression": "ctrl.is_undulation",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 137
+        },
+        {
+          "name": "use_ik_normal_by_undulation",
+          "expression": "ctrl.use_ik_normal_by_undulation",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 138
+        },
+        {
+          "name": "hit_group_and_navimesh",
+          "expression": "ctrl.hit_group_and_navimesh",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 139
+        }
+      ],
+      "begin": 0,
+      "words": 140,
+      "mask_words": 5,
+      "record_bytes": 612
+    },
+    {
+      "id": 6,
+      "name": "AnimationTrack",
+      "fields": [
+        {
+          "name": "read_idx",
+          "expression": "tae.read_idx",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 140
+        },
+        {
+          "name": "write_idx",
+          "expression": "tae.write_idx",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 141
+        },
+        {
+          "name": "queue_0_anim_id",
+          "expression": "tae.anim_queue[0].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 142
+        },
+        {
+          "name": "queue_0_play_time",
+          "expression": "tae.anim_queue[0].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 143
+        },
+        {
+          "name": "queue_0_anim_length",
+          "expression": "tae.anim_queue[0].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 144
+        },
+        {
+          "name": "queue_1_anim_id",
+          "expression": "tae.anim_queue[1].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 145
+        },
+        {
+          "name": "queue_1_play_time",
+          "expression": "tae.anim_queue[1].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 146
+        },
+        {
+          "name": "queue_1_anim_length",
+          "expression": "tae.anim_queue[1].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 147
+        },
+        {
+          "name": "queue_2_anim_id",
+          "expression": "tae.anim_queue[2].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 148
+        },
+        {
+          "name": "queue_2_play_time",
+          "expression": "tae.anim_queue[2].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 149
+        },
+        {
+          "name": "queue_2_anim_length",
+          "expression": "tae.anim_queue[2].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 150
+        },
+        {
+          "name": "queue_3_anim_id",
+          "expression": "tae.anim_queue[3].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 151
+        },
+        {
+          "name": "queue_3_play_time",
+          "expression": "tae.anim_queue[3].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 152
+        },
+        {
+          "name": "queue_3_anim_length",
+          "expression": "tae.anim_queue[3].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 153
+        },
+        {
+          "name": "queue_4_anim_id",
+          "expression": "tae.anim_queue[4].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 154
+        },
+        {
+          "name": "queue_4_play_time",
+          "expression": "tae.anim_queue[4].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 155
+        },
+        {
+          "name": "queue_4_anim_length",
+          "expression": "tae.anim_queue[4].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 156
+        },
+        {
+          "name": "queue_5_anim_id",
+          "expression": "tae.anim_queue[5].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 157
+        },
+        {
+          "name": "queue_5_play_time",
+          "expression": "tae.anim_queue[5].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 158
+        },
+        {
+          "name": "queue_5_anim_length",
+          "expression": "tae.anim_queue[5].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 159
+        },
+        {
+          "name": "queue_6_anim_id",
+          "expression": "tae.anim_queue[6].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 160
+        },
+        {
+          "name": "queue_6_play_time",
+          "expression": "tae.anim_queue[6].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 161
+        },
+        {
+          "name": "queue_6_anim_length",
+          "expression": "tae.anim_queue[6].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 162
+        },
+        {
+          "name": "queue_7_anim_id",
+          "expression": "tae.anim_queue[7].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 163
+        },
+        {
+          "name": "queue_7_play_time",
+          "expression": "tae.anim_queue[7].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 164
+        },
+        {
+          "name": "queue_7_anim_length",
+          "expression": "tae.anim_queue[7].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 165
+        },
+        {
+          "name": "queue_8_anim_id",
+          "expression": "tae.anim_queue[8].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 166
+        },
+        {
+          "name": "queue_8_play_time",
+          "expression": "tae.anim_queue[8].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 167
+        },
+        {
+          "name": "queue_8_anim_length",
+          "expression": "tae.anim_queue[8].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 168
+        },
+        {
+          "name": "queue_9_anim_id",
+          "expression": "tae.anim_queue[9].anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 169
+        },
+        {
+          "name": "queue_9_play_time",
+          "expression": "tae.anim_queue[9].play_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 170
+        },
+        {
+          "name": "queue_9_anim_length",
+          "expression": "tae.anim_queue[9].anim_length",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 171
+        },
+        {
+          "name": "animation_speed",
+          "expression": "behavior.animation_speed",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 172
+        },
+        {
+          "name": "max_ankle_pitch_angle_rad",
+          "expression": "behavior.max_ankle_pitch_angle_rad",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 173
+        },
+        {
+          "name": "max_ankle_roll_angle_rad",
+          "expression": "behavior.max_ankle_roll_angle_rad",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 174
+        },
+        {
+          "name": "ground_touch_state",
+          "expression": "behavior.ground_touch_state",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 175
+        },
+        {
+          "name": "root_motion",
+          "expression": "behavior.root_motion",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 176
+        },
+        {
+          "name": "request_animation_id",
+          "expression": "event.request_animation_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 180
+        },
+        {
+          "name": "idle_anim_id",
+          "expression": "event.idle_anim_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 181
+        },
+        {
+          "name": "ez_state_request_ladder",
+          "expression": "event.ez_state_request_ladder",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 182
+        },
+        {
+          "name": "ez_state_request_ladder_output",
+          "expression": "event.ez_state_request_ladder_output",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 183
+        },
+        {
+          "name": "flags",
+          "expression": "event.flags",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 184
+        }
+      ],
+      "begin": 140,
+      "words": 45,
+      "mask_words": 2,
+      "record_bytes": 220
+    },
+    {
+      "id": 7,
+      "name": "ActionTrackRaw",
+      "fields": [
+        {
+          "name": "action_requests",
+          "expression": "action.action_requests",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 185
+        },
+        {
+          "name": "previous_action_requests",
+          "expression": "action.previous_action_requests",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 187
+        },
+        {
+          "name": "new_action_presses",
+          "expression": "action.new_action_presses",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 189
+        },
+        {
+          "name": "released_actions",
+          "expression": "action.released_actions",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 191
+        },
+        {
+          "name": "cancel_ready_actions",
+          "expression": "action.cancel_ready_actions",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 193
+        },
+        {
+          "name": "queued_action_inputs",
+          "expression": "action.queued_action_inputs",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 195
+        },
+        {
+          "name": "disabled_action_inputs",
+          "expression": "action.disabled_action_inputs",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 197
+        },
+        {
+          "name": "possible_action_inputs",
+          "expression": "action.possible_action_inputs",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 199
+        },
+        {
+          "name": "possible_action_cancels",
+          "expression": "action.possible_action_cancels",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 201
+        },
+        {
+          "name": "prev_possible_action_inputs",
+          "expression": "action.prev_possible_action_inputs",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 203
+        },
+        {
+          "name": "readback_new_presses",
+          "expression": "action.readback_new_presses",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 205
+        },
+        {
+          "name": "readback_cancel_ready",
+          "expression": "action.readback_cancel_ready",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 207
+        },
+        {
+          "name": "readback_queued_inputs",
+          "expression": "action.readback_queued_inputs",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 209
+        },
+        {
+          "name": "readback_possible_inputs",
+          "expression": "action.readback_possible_inputs",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 211
+        },
+        {
+          "name": "readback_possible_cancels",
+          "expression": "action.readback_possible_cancels",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 213
+        },
+        {
+          "name": "npc_action_id",
+          "expression": "action.npc_action_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 215
+        },
+        {
+          "name": "requested_gesture",
+          "expression": "action.requested_gesture",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 216
+        },
+        {
+          "name": "readback_npc_action_id",
+          "expression": "action.readback_npc_action_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 217
+        },
+        {
+          "name": "queue_tae_id_override",
+          "expression": "action.queue_tae_id_override",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 218
+        },
+        {
+          "name": "queue_current_tae_id",
+          "expression": "action.action_request_queue.current_tae_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 219
+        },
+        {
+          "name": "tae_cancels",
+          "expression": "action.tae_cancels",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 220
+        },
+        {
+          "name": "movement_request_flags",
+          "expression": "action.movement_request_flags",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 221
+        },
+        {
+          "name": "queue_mode_enabled",
+          "expression": "action.queue_mode_enabled",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 222
+        },
+        {
+          "name": "timer_r1",
+          "expression": "action.action_timers.r1",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 223
+        },
+        {
+          "name": "timer_r2",
+          "expression": "action.action_timers.r2",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 224
+        },
+        {
+          "name": "timer_l1",
+          "expression": "action.action_timers.l1",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 225
+        },
+        {
+          "name": "timer_l2",
+          "expression": "action.action_timers.l2",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 226
+        },
+        {
+          "name": "timer_action",
+          "expression": "action.action_timers.action",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 227
+        },
+        {
+          "name": "timer_roll",
+          "expression": "action.action_timers.roll",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 228
+        },
+        {
+          "name": "timer_jump",
+          "expression": "action.action_timers.jump",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 229
+        },
+        {
+          "name": "timer_use_item",
+          "expression": "action.action_timers.use_item",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 230
+        },
+        {
+          "name": "timer_switch_spell",
+          "expression": "action.action_timers.switch_spell",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 231
+        },
+        {
+          "name": "timer_change_weapon_r",
+          "expression": "action.action_timers.change_weapon_r",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 232
+        },
+        {
+          "name": "timer_change_weapon_l",
+          "expression": "action.action_timers.change_weapon_l",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 233
+        },
+        {
+          "name": "timer_change_item",
+          "expression": "action.action_timers.change_item",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 234
+        },
+        {
+          "name": "timer_r3",
+          "expression": "action.action_timers.r3",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 235
+        },
+        {
+          "name": "timer_l3",
+          "expression": "action.action_timers.l3",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 236
+        },
+        {
+          "name": "timer_touch_r",
+          "expression": "action.action_timers.touch_r",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 237
+        },
+        {
+          "name": "timer_touch_l",
+          "expression": "action.action_timers.touch_l",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 238
+        }
+      ],
+      "begin": 185,
+      "words": 54,
+      "mask_words": 2,
+      "record_bytes": 256
+    },
+    {
+      "id": 8,
+      "name": "LocomotionBehaviorTrack",
+      "fields": [
+        {
+          "name": "hks_root_motion_mult",
+          "expression": "behavior_data.hks_root_motion_mult",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 239
+        },
+        {
+          "name": "turn_speed",
+          "expression": "behavior_data.turn_speed",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 240
+        },
+        {
+          "name": "hks_animation_speed_multiplier",
+          "expression": "behavior_data.hks_animation_speed_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 241
+        },
+        {
+          "name": "fixed_rotation_direction",
+          "expression": "behavior_data.fixed_rotation_direction",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 242
+        },
+        {
+          "name": "has_twist_modifier",
+          "expression": "behavior_data.has_twist_modifier",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 243
+        },
+        {
+          "name": "root_motion_reduction",
+          "expression": "modifier.root_motion_reduction",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 244
+        },
+        {
+          "name": "movement_limit",
+          "expression": "modifier.movement_limit",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 245
+        },
+        {
+          "name": "action_flags",
+          "expression": "modifier.action_flags",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 246
+        },
+        {
+          "name": "hks_flags",
+          "expression": "modifier.hks_flags",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 247
+        },
+        {
+          "name": "movement_request_duration",
+          "expression": "action.movement_request_duration",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 248
+        },
+        {
+          "name": "normal_vector",
+          "expression": "p.material_info.normal_vector",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 249
+        },
+        {
+          "name": "orientation_matrix",
+          "expression": "p.material_info.orientation_matrix",
+          "kind": "f32",
+          "words": 16,
+          "confidence": "REFERENCE",
+          "offset": 253
+        },
+        {
+          "name": "hit_material",
+          "expression": "p.material_info.hit_material",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 269
+        },
+        {
+          "name": "is_slippery_surface",
+          "expression": "p.material_info.is_slippery_surface",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 270
+        },
+        {
+          "name": "is_non_slippery_surface",
+          "expression": "p.material_info.is_non_slippery_surface",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 271
+        },
+        {
+          "name": "slide_vector",
+          "expression": "p.slide_info.slide_vector",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 272
+        },
+        {
+          "name": "normal_angle",
+          "expression": "p.slide_info.normal_angle",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 276
+        },
+        {
+          "name": "normal_angle_deg",
+          "expression": "p.slide_info.normal_angle_deg",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 277
+        },
+        {
+          "name": "is_sliding",
+          "expression": "p.slide_info.is_sliding",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 278
+        },
+        {
+          "name": "enable_angle_check",
+          "expression": "p.slide_info.enable_angle_check",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 279
+        },
+        {
+          "name": "enabled",
+          "expression": "p.slide_info.enabled",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 280
+        },
+        {
+          "name": "enable_slide_interpolation",
+          "expression": "p.slide_info.enable_slide_interpolation",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 281
+        },
+        {
+          "name": "min_twist_rank",
+          "expression": "behavior_data.min_twist_rank",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 282
+        }
+      ],
+      "begin": 239,
+      "words": 44,
+      "mask_words": 2,
+      "record_bytes": 216
+    },
+    {
+      "id": 9,
+      "name": "EquipmentTrack",
+      "fields": [
+        {
+          "name": "equipment_param_ids",
+          "expression": "asm.equipment_param_ids",
+          "kind": "i32",
+          "words": 22,
+          "confidence": "REFERENCE",
+          "offset": 283
+        },
+        {
+          "name": "left_weapon_slot",
+          "expression": "asm.equipment.selected_slots.left_weapon_slot",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 305
+        },
+        {
+          "name": "right_weapon_slot",
+          "expression": "asm.equipment.selected_slots.right_weapon_slot",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 306
+        },
+        {
+          "name": "left_arrow_slot",
+          "expression": "asm.equipment.selected_slots.left_arrow_slot",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 307
+        },
+        {
+          "name": "right_arrow_slot",
+          "expression": "asm.equipment.selected_slots.right_arrow_slot",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 308
+        },
+        {
+          "name": "left_bolt_slot",
+          "expression": "asm.equipment.selected_slots.left_bolt_slot",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 309
+        },
+        {
+          "name": "right_bolt_slot",
+          "expression": "asm.equipment.selected_slots.right_bolt_slot",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 310
+        },
+        {
+          "name": "arm_style",
+          "expression": "asm.equipment.arm_style",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 311
+        }
+      ],
+      "begin": 283,
+      "words": 29,
+      "mask_words": 1,
+      "record_bytes": 152
+    },
+    {
+      "id": 10,
+      "name": "AppearanceTrack",
+      "fields": [
+        {
+          "name": "face_buffer",
+          "expression": "game_data.face_data.face_data_buffer",
+          "kind": "bytes",
+          "words": 72,
+          "confidence": "REFERENCE",
+          "offset": 312
+        },
+        {
+          "name": "gender",
+          "expression": "game_data.gender",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 384
+        },
+        {
+          "name": "archetype",
+          "expression": "game_data.archetype",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 385
+        }
+      ],
+      "begin": 312,
+      "words": 74,
+      "mask_words": 3,
+      "record_bytes": 340
+    },
+    {
+      "id": 11,
+      "name": "GameplayStateTrack",
+      "fields": [
+        {
+          "name": "hp",
+          "expression": "data.hp",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 386
+        },
+        {
+          "name": "max_hp",
+          "expression": "data.max_hp",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 387
+        },
+        {
+          "name": "max_uncapped_hp",
+          "expression": "data.max_uncapped_hp",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 388
+        },
+        {
+          "name": "base_hp",
+          "expression": "data.base_hp",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 389
+        },
+        {
+          "name": "fp",
+          "expression": "data.fp",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 390
+        },
+        {
+          "name": "max_fp",
+          "expression": "data.max_fp",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 391
+        },
+        {
+          "name": "base_fp",
+          "expression": "data.base_fp",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 392
+        },
+        {
+          "name": "stamina",
+          "expression": "data.stamina",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 393
+        },
+        {
+          "name": "max_stamina",
+          "expression": "data.max_stamina",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 394
+        },
+        {
+          "name": "base_stamina",
+          "expression": "data.base_stamina",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 395
+        },
+        {
+          "name": "chara_init_param_id",
+          "expression": "data.chara_init_param_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 396
+        },
+        {
+          "name": "recoverable_hp",
+          "expression": "data.recoverable_hp",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 397
+        },
+        {
+          "name": "recoverable_hp_time",
+          "expression": "data.recoverable_hp_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 398
+        },
+        {
+          "name": "sa_durability",
+          "expression": "armor.sa_durability",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 399
+        },
+        {
+          "name": "sa_durability_max",
+          "expression": "armor.sa_durability_max",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 400
+        },
+        {
+          "name": "armor_recover_time",
+          "expression": "armor.recover_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 401
+        },
+        {
+          "name": "poise_broken_state",
+          "expression": "armor.poise_broken_state",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 402
+        },
+        {
+          "name": "toughness",
+          "expression": "toughness.toughness",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 403
+        },
+        {
+          "name": "toughness_max",
+          "expression": "toughness.toughness_max",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 404
+        },
+        {
+          "name": "toughness_recover_time",
+          "expression": "toughness.recover_time",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 405
+        },
+        {
+          "name": "stamina_recovery_remainder",
+          "expression": "chr.stamina_recovery_remainder",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 406
+        },
+        {
+          "name": "stamina_recovery_modifier",
+          "expression": "chr.stamina_recovery_modifier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 407
+        },
+        {
+          "name": "draw_params",
+          "expression": "data.draw_params",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 408
+        },
+        {
+          "name": "block_id_origin",
+          "expression": "data.block_id_origin",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 409
+        },
+        {
+          "name": "trigger_max_toughness_update",
+          "expression": "toughness.trigger_max_toughness_update",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 410
+        }
+      ],
+      "begin": 386,
+      "words": 25,
+      "mask_words": 1,
+      "record_bytes": 136
+    },
+    {
+      "id": 12,
+      "name": "EffectSignalsTrack",
+      "fields": [
+        {
+          "name": "item_use_cast_sfx_id",
+          "expression": "chr.item_use_cast_sfx_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 411
+        },
+        {
+          "name": "item_use_fire_sfx_id",
+          "expression": "chr.item_use_fire_sfx_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 412
+        },
+        {
+          "name": "item_use_effect_sfx_id",
+          "expression": "chr.item_use_effect_sfx_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 413
+        },
+        {
+          "name": "tae_queued_use_item",
+          "expression": "chr.tae_queued_use_item",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 414
+        }
+      ],
+      "begin": 411,
+      "words": 4,
+      "mask_words": 1,
+      "record_bytes": 52
+    },
+    {
+      "id": 13,
+      "name": "CombatStateTrack",
+      "fields": [
+        {
+          "name": "is_locked_on",
+          "expression": "chr.is_locked_on",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 415
+        },
+        {
+          "name": "lock_on_target_position",
+          "expression": "chr.lock_on_target_position",
+          "kind": "f32",
+          "words": 4,
+          "confidence": "REFERENCE",
+          "offset": 416
+        },
+        {
+          "name": "animation_action_flags",
+          "expression": "action_flag.animation_action_flags",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 420
+        },
+        {
+          "name": "action_modifiers_flags",
+          "expression": "action_flag.action_modifiers_flags",
+          "kind": "u64",
+          "words": 2,
+          "confidence": "REFERENCE",
+          "offset": 421
+        },
+        {
+          "name": "damage_level",
+          "expression": "action_flag.damage_level",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 423
+        },
+        {
+          "name": "guard_level",
+          "expression": "action_flag.guard_level",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 424
+        },
+        {
+          "name": "received_damage_type",
+          "expression": "action_flag.received_damage_type",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 425
+        },
+        {
+          "name": "turn_speed",
+          "expression": "action_flag.turn_speed",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 426
+        },
+        {
+          "name": "lock_on_turn_speed",
+          "expression": "action_flag.lock_on_turn_speed",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 427
+        },
+        {
+          "name": "joint_turn_speed",
+          "expression": "action_flag.joint_turn_speed",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 428
+        },
+        {
+          "name": "facing_angle_correction_rad",
+          "expression": "action_flag.facing_angle_correction_rad",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 429
+        },
+        {
+          "name": "root_motion_div",
+          "expression": "action_flag.root_motion_div",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 430
+        },
+        {
+          "name": "root_motion_mult_min_dist",
+          "expression": "action_flag.root_motion_mult_min_dist",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 431
+        },
+        {
+          "name": "speed_default",
+          "expression": "action_flag.speed_default",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 432
+        },
+        {
+          "name": "speed_extra",
+          "expression": "action_flag.speed_extra",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 433
+        },
+        {
+          "name": "speed_boost",
+          "expression": "action_flag.speed_boost",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 434
+        },
+        {
+          "name": "root_motion_mult_target_radius",
+          "expression": "action_flag.root_motion_mult_target_radius",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 435
+        },
+        {
+          "name": "disable_lock_on_angle",
+          "expression": "action_flag.disable_lock_on_angle",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 436
+        },
+        {
+          "name": "mov_dist_multiplier",
+          "expression": "action_flag.mov_dist_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 437
+        },
+        {
+          "name": "cam_turn_dist_multiplier",
+          "expression": "action_flag.cam_turn_dist_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 438
+        },
+        {
+          "name": "ladder_dist_multiplier",
+          "expression": "action_flag.ladder_dist_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 439
+        },
+        {
+          "name": "sa_durability_multiplier",
+          "expression": "action_flag.sa_durability_multiplier",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 440
+        },
+        {
+          "name": "knockback_value",
+          "expression": "action_flag.knockback_value",
+          "kind": "f32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 441
+        },
+        {
+          "name": "camera_lock_on_param_id",
+          "expression": "action_flag.camera_lock_on_param_id",
+          "kind": "i32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 442
+        },
+        {
+          "name": "guard_behavior_judge_id",
+          "expression": "action_flag.guard_behavior_judge_id",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 443
+        },
+        {
+          "name": "action_flags",
+          "expression": "action_flag.action_flags",
+          "kind": "u32",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 444
+        },
+        {
+          "name": "weapon_model_location_overridden",
+          "expression": "action_flag.weapon_model_location_overridden",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 445
+        },
+        {
+          "name": "sp_effect_wet_condition_depth",
+          "expression": "action_flag.sp_effect_wet_condition_depth",
+          "kind": "u8",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 446
+        },
+        {
+          "name": "bullet_aim_angle_up_limit",
+          "expression": "action_flag.bullet_aim_angle_up_limit",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 447
+        },
+        {
+          "name": "bullet_aim_angle_down_limit",
+          "expression": "action_flag.bullet_aim_angle_down_limit",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 448
+        },
+        {
+          "name": "bullet_aim_angle_right_limit",
+          "expression": "action_flag.bullet_aim_angle_right_limit",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 449
+        },
+        {
+          "name": "bullet_aim_angle_left_limit",
+          "expression": "action_flag.bullet_aim_angle_left_limit",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 450
+        },
+        {
+          "name": "bullet_aim_angle_up_dead_zone",
+          "expression": "action_flag.bullet_aim_angle_up_dead_zone",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 451
+        },
+        {
+          "name": "bullet_aim_angle_down_dead_zone",
+          "expression": "action_flag.bullet_aim_angle_down_dead_zone",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 452
+        },
+        {
+          "name": "bullet_aim_angle_right_dead_zone",
+          "expression": "action_flag.bullet_aim_angle_right_dead_zone",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 453
+        },
+        {
+          "name": "bullet_aim_angle_left_dead_zone",
+          "expression": "action_flag.bullet_aim_angle_left_dead_zone",
+          "kind": "i16",
+          "words": 1,
+          "confidence": "REFERENCE",
+          "offset": 454
+        }
+      ],
+      "begin": 415,
+      "words": 40,
+      "mask_words": 2,
+      "record_bytes": 200
+    }
+  ]
+}

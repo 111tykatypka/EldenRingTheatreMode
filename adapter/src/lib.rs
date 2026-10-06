@@ -30,6 +30,7 @@ mod world_observation;
 mod research_readonly;
 mod actor_replay;
 mod visual_capture;
+mod fidelity_capture;
 const STATE_WAITING:u32=0;const DLL_LOADED:u32=1;const PROFILE_VALIDATING:u32=2;const PROFILE_READY:u32=3;const TASK_SIGNATURE_SCAN:u32=10;const TASK_SIGNATURE_READY:u32=11;const TASK_RUNTIME_SEARCH:u32=12;const TASK_RUNTIME_READY:u32=13;const WORLDCHR_SEARCH:u32=20;const WORLDCHR_READY:u32=21;const PLAYER_SEARCH:u32=22;const PLAYER_FOUND:u32=23;const STATE_READY:u32=24;
 const ERR_TASK_TIMEOUT:u32=0x201;const ERR_INIT_PANIC:u32=0x202;const ERR_SAMPLER_THREAD:u32=0x203;const ERR_IPC_THREAD:u32=0x204;const ERR_TASK_SIGNATURE:u32=0x205;
 const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_CHECK_PRODUCT_VERSION:u32=0x0004;const TM_CHECK_ARCH:u32=0x0008;const TM_CHECK_SHA256:u32=0x0010;const TM_CHECK_IMAGE_BASE:u32=0x0020;
@@ -89,7 +90,31 @@ fn check_text(report:&TmValidationReport,flag:u32)->&'static str{if report.check
     if status==0{log_game("Runtime signatures/task validation: pending CSTaskImp initialization");}status
 }
 #[cfg(not(windows))]fn validate_runtime_profile()->u32{0x101}
-#[cfg(windows)]fn pipe_worker(){use std::os::windows::ffi::OsStrExt;type Handle=*mut c_void;#[link(name="kernel32")]unsafe extern "system"{fn CreateFileW(n:*const u16,a:u32,s:u32,sa:*mut c_void,c:u32,f:u32,t:Handle)->Handle;fn WriteFile(h:Handle,b:*const c_void,n:u32,w:*mut u32,o:*mut c_void)->i32;fn CloseHandle(h:Handle)->i32;fn Sleep(ms:u32);}const INVALID:Handle=-1isize as Handle;let name=std::ffi::OsStr::new(r"\\.\pipe\EldenRingTheaterMode_1_17").encode_wide().chain(Some(0)).collect::<Vec<_>>();let handle=loop{let h=unsafe{CreateFileW(name.as_ptr(),0x40000000,0,std::ptr::null_mut(),3,0,std::ptr::null_mut())};if h!=INVALID{break h;}unsafe{Sleep(500)}};let mut last=0u64;let mut last_state=u32::MAX;let mut last_send=std::time::Instant::now()-Duration::from_secs(3);let mut ready_sent=false;loop{let state=INIT_STATE.load(Ordering::Acquire);let err=PROFILE.load(Ordering::Acquire);if err!=STATE_WAITING{let msg=WireMessage{magic:0x544D5354,version:2,kind:5,sequence:err as u64,..Default::default()};let mut written=0;unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut());CloseHandle(handle);}return;}if state==STATE_WAITING{unsafe{Sleep(100)};continue;}if state!=STATE_READY{if state!=last_state||last_send.elapsed()>=Duration::from_secs(1){let msg=WireMessage{magic:0x544D5354,version:2,kind:4,sequence:state as u64,..Default::default()};let mut written=0;if unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut())}==0{break;}last_state=state;last_send=std::time::Instant::now();}unsafe{Sleep(50)};continue;}let msg=if let Some((s,action))=latest_pair(){if s.sequence==last&&last_send.elapsed()<Duration::from_secs(2){unsafe{Sleep(8)};continue;}last=s.sequence;ready_sent=true;WireMessage{magic:0x544D5354,version:2,kind:if s.player_present!=0{2}else{3},sequence:s.sequence,timestamp_ns:s.timestamp_ns,position:s.position,quaternion_xyzw:s.quaternion_xyzw,euler_raw:s.euler_raw,player_present:s.player_present,reserved:0,action}}else{if ready_sent&&last_send.elapsed()<Duration::from_secs(2){unsafe{Sleep(8)};continue;}ready_sent=true;WireMessage{magic:0x544D5354,version:2,kind:1,..Default::default()}};let mut written=0;let ok=unsafe{WriteFile(handle,&msg as*const _ as*const c_void,std::mem::size_of::<WireMessage>() as u32,&mut written,std::ptr::null_mut())};if ok==0||written as usize!=std::mem::size_of::<WireMessage>(){break;}last_send=std::time::Instant::now();unsafe{Sleep(8)}}unsafe{CloseHandle(handle)};}
+#[cfg(windows)]fn pipe_worker(){
+ use std::os::windows::ffi::OsStrExt;
+ type Handle=*mut c_void;
+ #[link(name="kernel32")]unsafe extern "system"{fn CreateFileW(n:*const u16,a:u32,s:u32,sa:*mut c_void,c:u32,f:u32,t:Handle)->Handle;fn WriteFile(h:Handle,b:*const c_void,n:u32,w:*mut u32,o:*mut c_void)->i32;fn CloseHandle(h:Handle)->i32;fn Sleep(ms:u32);}
+ let rx=fidelity_capture::receiver();
+ let name=std::ffi::OsStr::new(r"\\.\pipe\EldenRingTheaterMode_1_17").encode_wide().chain(Some(0)).collect::<Vec<_>>();
+ let handle=loop{let h=unsafe{CreateFileW(name.as_ptr(),0x40000000,0,std::ptr::null_mut(),3,0,std::ptr::null_mut())};if h!=(-1isize as Handle){break h;}unsafe{Sleep(500)}};
+ let send=|m:&WireMessage|{let mut written=0;unsafe{WriteFile(handle,m as*const _ as*const c_void,104,&mut written,std::ptr::null_mut())!=0&&written==104}};
+ let mut last_state=u32::MAX;let mut last_send=Instant::now()-Duration::from_secs(3);
+ fidelity_capture::connected(true);
+ log_game(&format!("CAPTURE_FIDELITY schema=1 words={} tracks=9 confidence=REFERENCE read_only=YES queue={} callbacks; nonfinite raw bits retained",fidelity_capture::WORDS,fidelity_capture::queue_capacity()));
+ loop{
+  let state=INIT_STATE.load(Ordering::Acquire);let err=PROFILE.load(Ordering::Acquire);
+  if err!=STATE_WAITING{let _=send(&WireMessage{magic:0x544D5354,version:2,kind:5,sequence:err as u64,..Default::default()});break;}
+  if state!=STATE_READY{if state!=last_state||last_send.elapsed()>=Duration::from_secs(1){if !send(&WireMessage{magic:0x544D5354,version:2,kind:4,sequence:state as u64,..Default::default()}){break;}last_state=state;last_send=Instant::now();}unsafe{Sleep(50)};continue;}
+  match rx.recv_timeout(Duration::from_millis(500)){
+   Ok(packet)=>{let s=packet.sample;let m=WireMessage{magic:0x544D5354,version:3,kind:if s.player_present!=0{2}else{3},sequence:s.sequence,timestamp_ns:s.timestamp_ns,position:s.position,quaternion_xyzw:s.quaternion_xyzw,euler_raw:s.euler_raw,player_present:s.player_present,reserved:fidelity_capture::WIRE_BYTES as u32,action:packet.action};
+    if !send(&m){break;}let bytes=packet.capture.encode();let mut written=0;if unsafe{WriteFile(handle,bytes.as_ptr().cast(),bytes.len() as u32,&mut written,std::ptr::null_mut())}==0||written as usize!=bytes.len(){break;}
+   },
+   Err(std::sync::mpsc::RecvTimeoutError::Timeout)=>{if !send(&WireMessage{magic:0x544D5354,version:2,kind:1,..Default::default()}){break;}},
+   Err(_)=>break
+  }
+ }
+ fidelity_capture::connected(false);unsafe{CloseHandle(handle)};
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)->i32 {
     if reason==1 {
@@ -134,6 +159,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let mut probe=probe_runtime::GameProbe::default();
                 let mut replay=replay_runtime::GameReplay::default();
                 let mut trace=locomotion_trace::Capture::default();
+                fidelity_capture::initialize();
                 let mut characters=character_capture::Capture::new();
                 grounding::initialize();
 
@@ -171,12 +197,14 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                                 let action=player_action::observe(player);
                                 if action.animation_id!=last_animation_id{log_game(&format!("PLAYER_ANIMATION_OBSERVED id={} action={} flags={} time={} length={} raw_requests=0x{:X}; semantic mapping unverified",action.animation_id,action.action,action.flags,action.animation_time,action.animation_length,action.raw_action_bits));last_animation_id=action.animation_id;}
                                 publish(PlayerSample{sequence:0,timestamp_ns:now,position:pos,quaternion_xyzw:q,euler_raw:e,player_present:1},action);
+                                fidelity_capture::publish(PlayerSample{sequence:SEQ.load(Ordering::Acquire)/2,timestamp_ns:now,position:pos,quaternion_xyzw:q,euler_raw:e,player_present:1},action,Some(player));
                                 set_state(STATE_READY,"READY");
                                 return;
                             }
                         }
                     }
                     publish(PlayerSample{sequence:0,timestamp_ns:now,player_present:0,..Default::default()},player_action::State::default());
+                    fidelity_capture::publish(PlayerSample{sequence:SEQ.load(Ordering::Acquire)/2,timestamp_ns:now,player_present:0,..Default::default()},player_action::State::default(),None);
                     if player_found.swap(false,Ordering::AcqRel){log_game("main_player LOST; no cached PlayerIns retained");}
                     if world_ready.load(Ordering::Acquire){set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}
                 });

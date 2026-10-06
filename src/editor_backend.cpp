@@ -11,8 +11,9 @@ struct WireMessage {
   float position[3], quaternion_xyzw[4], euler_raw[3];
   std::uint32_t player_present, reserved;
   erplay::ActionState action;
+  erplay::CaptureFrame capture;
 };
-static_assert(sizeof(WireMessage) == 104 &&
+static_assert(sizeof(WireMessage) == 104 + erplay::capture_wire_bytes &&
               offsetof(WireMessage, action) == 72);
 PlaybackView playback_view() {
   std::lock_guard lock(app.replay_mutex);
@@ -129,10 +130,12 @@ bool read_message(HANDLE h, WireMessage &m) {
   };
   if (!read(reinterpret_cast<char *>(&m), 72))
     return false;
-  if (m.magic != MAGIC || (m.version != 1 && m.version != 2))
+  if (m.magic != MAGIC || (m.version != 1 && m.version != 2 && m.version != 3))
     return false;
-  return m.version == 1 ||
-         (m.reserved == 0 && read(reinterpret_cast<char *>(&m.action), 32));
+  if(m.version==1)return true;
+  if((m.version==2&&m.reserved!=0)||(m.version==3&&m.reserved!=erplay::capture_wire_bytes))return false;
+  if(!read(reinterpret_cast<char*>(&m.action),32))return false;
+  return m.version==2||(read(reinterpret_cast<char*>(&m.capture),erplay::capture_wire_bytes)&&erplay::capture_frame_valid(m.capture));
 }
 std::vector<ReplayEntry> scan_replays() {
   std::vector<ReplayEntry> out;
@@ -449,7 +452,7 @@ void pipe_worker() {
                  std::to_string(result.sample_count) +
                  " duration_ns=" + std::to_string(result.duration_ns) +
                  " actual_hz=" + std::to_string(result.actual_rate_hz) +
-                 " chunks=" + std::to_string(result.chunk_count));
+                 " chunks=" + std::to_string(result.chunk_count)+" fidelity_frames="+std::to_string(result.capture_record_counts[0])+" fidelity_source_drops="+std::to_string(result.capture_source_drops));
       } catch (const std::exception &e) {
         snap.state = erplay::RecordingState::error;
         snap.error = std::wstring(e.what(), e.what() + std::strlen(e.what()));
@@ -471,17 +474,22 @@ void pipe_worker() {
         if(c==Command::start&&!snap.player){
           snap.error=L"Recording blocked: no live PLAYER_STATE. Wait for Player FOUND in Recorder.";
           log_line("Recording START rejected: no live player sample");
+        } else if(c==Command::start&&snap.sample_protocol<3){
+          snap.error=L"Fidelity recording requires the new TheaterMode.dll (sample IPC v3). Restart game with the sibling DLL.";
+          log_line("Recording START rejected: old sample protocol; new fidelity DLL required");
         } else if (c == Command::start &&
             (snap.state != erplay::RecordingState::recording &&
              snap.state != erplay::RecordingState::paused) &&
             snap.player) {
           erplay::Metadata md;
           md.format_version = 3;
-          md.mod_version = "0.6.0";
+          md.mod_version = "0.7.0-fidelity1";
           md.game_version = "2.7.0.0";
           md.recording_start_unix_ns = unix_ns();
           md.requested_rate_hz = 60.0;
           md.title = "Elden Ring recording";
+          md.tags = "capture-fidelity-v1,raw-state,read-only";
+          md.description = "Raw player tracks schema1. New fields REFERENCE; pose, HKS VM, full effect/queue data UNAVAILABLE. Animation reconstruction not implemented.";
           auto stem = file_stem();
           auto final = app.replays / (stem + L".erplay");
           for (unsigned i = 1;
@@ -493,6 +501,7 @@ void pipe_worker() {
           writer = std::make_unique<erplay::Writer>(final, std::move(md), 600);
           session = std::make_unique<erplay::RecordingSession>(*writer);
           session->start();
+          snap.capture_frames=0;snap.capture_drops=0;
           character_min_source = monotonic_ns();
           character_known.clear();
           character_last_written.clear();
@@ -589,7 +598,7 @@ void pipe_worker() {
       WireMessage m{};
       if (!read_message(pipe, m))
         break;
-      if (m.magic != MAGIC || (m.version != 1 && m.version != 2))
+      if (m.magic != MAGIC || (m.version != 1 && m.version != 2 && m.version != 3))
         continue;
       if (m.kind == 4)
         continue;
@@ -603,6 +612,7 @@ void pipe_worker() {
       if (m.kind != 2 && m.kind != 3)
         continue;
       snap.player = m.kind == 2 && m.player_present != 0;
+      snap.sample_protocol=m.version;
       snap.action = m.action;
       if (last_seq && m.sequence > last_seq + 1)
         snap.dropped += m.sequence - last_seq - 1;
@@ -631,14 +641,16 @@ void pipe_worker() {
           s.position = {m.position[0], m.position[1], m.position[2]};
           s.orientation = {m.quaternion_xyzw[0], m.quaternion_xyzw[1],
                            m.quaternion_xyzw[2], m.quaternion_xyzw[3]};
-          if (m.version == 2) {
+          if (m.version >= 2) {
             if (!m.action.valid())
               throw std::invalid_argument("invalid native action observation");
             s.action = m.action;
           }
+          if(m.version==3){s.capture=m.capture;s.source_sequence=m.sequence;}
           if (!first_source)
             first_source = m.timestamp_ns;
           session->ingest(s);
+          if(m.version==3){++snap.capture_frames;snap.capture_drops=m.capture.source_drops;}
           snap.samples = session->accepted_samples();
           snap.active_ns =
               m.timestamp_ns - first_source - session->paused_duration_ns();
