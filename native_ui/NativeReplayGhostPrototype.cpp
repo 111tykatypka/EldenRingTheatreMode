@@ -37,9 +37,12 @@ std::atomic<bool> used{}, contextSeen{}, readyLogged{};
 // (deleter returned and the replay data's final reference released). Any other ending keeps
 // the one-attempt rule until restart.
 std::atomic<bool> deleterDone{}, dataReleased{};
-// The native serializer returned 0 (wrote nothing). The game's own caller just skips in that
-// case, so another F10 is allowed.
-std::atomic<bool> retryable{};
+// Create gate. One ghost at a time; a new one only after the previous ghost finished the full
+// native teardown. A create that produced no ghost is retried automatically (the game's own
+// eligibility check often refuses until the recorder holds enough frames). Only a buffer
+// overrun locks creation until restart.
+std::atomic<bool> ghostCreated{}, overrunLock{};
+std::atomic<ULONGLONG> retryAt{};
 std::atomic<ULONGLONG> deadline{};
 std::atomic<uint64_t> stepCount{},buildCount{},requestStepCount{};
 std::atomic<ULONGLONG> lastStepTick{};
@@ -156,7 +159,7 @@ void createImpl(U nativeContext) {
     creating=false;
     if(factoryActor) {
      auto actor=factoryActor;U entry=get<U>(actor+0x10);
-     {std::lock_guard g(stateMutex);state.active=true;state.actor=actor;state.entry=entry;state.data=data;state.handle=handle;state.world=w;state.slot=uint32_t(handle)&0xfffff;state.manipulator=get<U>(actor+0x588);}
+     {std::lock_guard g(stateMutex);state.active=true;state.actor=actor;state.entry=entry;state.data=data;state.handle=handle;state.world=w;state.slot=uint32_t(handle)&0xfffff;state.manipulator=get<U>(actor+0x588);}ghostCreated.store(true);deleterDone.store(false);dataReleased.store(false);
      observe(actor,"NATIVE_GHOST_CREATE");
      log("NATIVE_GHOST: OWNED epoch=%llu; F11 REMOVE ONCE; activation is native, gate132 never written by Theater",snapshot().epoch);
     } else log("NATIVE_GHOST_ERROR: native factory returned no actor handle=0x%llX",handle);
@@ -170,8 +173,10 @@ void createImpl(U nativeContext) {
 // F10 is allowed. Only a buffer overrun keeps the session locked.
 void create(U nativeContext) {
  overflowed.store(false);createImpl(nativeContext);
- if(!snapshot().active){const bool again=!overflowed.load();retryable.store(again);
-  log(again?"NATIVE_GHOST: no ghost this time; F10 can be pressed again (walk a few seconds first)":"NATIVE_GHOST_ERROR: buffer overrun detected; restart the game before another create");}
+ if(snapshot().active)return;
+ if(overflowed.load()){overrunLock.store(true);log("NATIVE_GHOST_ERROR: buffer overrun detected; restart the game before another create");return;}
+ if(GetTickCount64()+1000<deadline.load()){retryAt.store(GetTickCount64()+1000);log("NATIVE_GHOST: the game is not ready to make a ghost yet; retrying automatically every second (keep moving)");}
+ else log("NATIVE_GHOST_ERROR: the game did not accept a ghost within 60 seconds; press F10 to try again");
 }
 void onStep(U child,U context,float dt,U auxiliary) {
  const bool nativeCaller=reinterpret_cast<U>(_ReturnAddress())==base+0xb08422;
@@ -276,17 +281,20 @@ void keys() {
   if(c&&!lastCreate) {
    U player{},recorder{};auto s=snapshot();
    if(s.active||command.load())log("NATIVE_GHOST_ERROR: create rejected: active/pending command");
-   else if(used.load()&&!(deleterDone.load()&&dataReleased.load())&&!retryable.load())log("NATIVE_GHOST_ERROR: previous ghost did not finish native teardown; restart before another create");
+   else if(overrunLock.load())log("NATIVE_GHOST_ERROR: a buffer overrun happened earlier; restart the game before another create");
+   else if(ghostCreated.load()&&!(deleterDone.load()&&dataReleased.load()))log("NATIVE_GHOST_ERROR: previous ghost has not finished its native cleanup yet; wait for it to disappear");
    else if(!ready(world(),player,recorder))log("NATIVE_GHOST_ERROR: CREATE refused: player/recorder/world/block not ready; restart required before retry");
-   else {used.store(true);retryable.store(false);deleterDone.store(false);dataReleased.store(false);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
+   else {used.store(true);retryAt.store(0);requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
   }
   if(r&&!lastRemove) {
    unsigned pending=1;
-   if(command.compare_exchange_strong(pending,0))log("NATIVE_GHOST_REMOVE: pending create cancelled; no actor owned");
+   if(command.compare_exchange_strong(pending,0)||retryAt.exchange(0)){retryAt.store(0);log("NATIVE_GHOST_REMOVE: pending create cancelled; no actor owned");}
    else if(snapshot().active) {deadline.store(GetTickCount64()+60000);command.store(2);log("NATIVE_GHOST_REMOVE: command queued for native world removal drain");}
    else log("NATIVE_GHOST_ERROR: REMOVE refused: no active Theater-owned ghost");
   }
-  if(command.load()&&GetTickCount64()>deadline.load()) {auto kind=command.exchange(0);uint32_t raw=timerBits.load();float timer;memcpy(&timer,&raw,4);if(kind)log("NATIVE_GHOST_ERROR: command=%u TIMEOUT; steps_since_request=%llu periodic_build_calls=%llu last_step_age_ms=%llu native_timer=%.3f context_seen=%u; no arbitrary callback mutation",kind,stepCount.load()-requestStepCount.load(),buildCount.load(),lastStepTick.load()?GetTickCount64()-lastStepTick.load():UINT64_MAX,timer,contextSeen.load());}
+  {const ULONGLONG at=retryAt.load();if(at&&GetTickCount64()>=at&&!command.load()&&!snapshot().active&&[&]{ULONGLONG expected=at;return retryAt.compare_exchange_strong(expected,0);}()){
+    if(GetTickCount64()<deadline.load())command.store(1);}}
+  if(command.load()&&GetTickCount64()>deadline.load()) {retryAt.store(0);auto kind=command.exchange(0);uint32_t raw=timerBits.load();float timer;memcpy(&timer,&raw,4);if(kind)log("NATIVE_GHOST_ERROR: command=%u TIMEOUT; steps_since_request=%llu periodic_build_calls=%llu last_step_age_ms=%llu native_timer=%.3f context_seen=%u; no arbitrary callback mutation",kind,stepCount.load()-requestStepCount.load(),buildCount.load(),lastStepTick.load()?GetTickCount64()-lastStepTick.load():UINT64_MAX,timer,contextSeen.load());}
   U p{},rec{};if(!readyLogged.load()&&ready(world(),p,rec)&&!readyLogged.exchange(true))log("NATIVE_GHOST: PLAYER_RECORDER_READY; F10 create, F11 remove; F10 again after the previous ghost is gone");
   lastCreate=c;lastRemove=r;Sleep(25);
  }
