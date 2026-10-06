@@ -106,7 +106,7 @@ fn status(version:u16)->wire::Packet {
     let (replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence)=crate::replay_runtime::status();
     wire::Packet {version,player_action:Default::default(),replay_state,replay_detail,session,replay_timestamp_ns,applied_sequence,kind:wire::STATUS,sequence:COMMAND_SEQUENCE.load(Ordering::Acquire),timestamp_ns:sample.timestamp_ns,
         position:sample.position,quaternion:sample.quaternion_xyzw,state:STATE.load(Ordering::Acquire),detail:DETAIL.load(Ordering::Acquire),
-        flags:(if ready(){1}else{0}) | (if version>=2 {2}else{0}) | (if version==3 {crate::locomotion_trace::flags()|32|64|128|256}else{0}) }
+        flags:(if ready(){1}else{0}) | (if version>=2&&!cfg!(feature="native-bloodstain-readonly") {2}else{0}) | (if version==3&&!cfg!(feature="native-bloodstain-readonly") {crate::locomotion_trace::flags()|32|64|128|256}else{0}) }
 }
 pub fn pipe_worker() {
     use std::os::windows::ffi::OsStrExt;
@@ -125,6 +125,12 @@ pub fn pipe_worker() {
                 Ok(packet)=>packet,Err(e)=>{stop(8);crate::log_game(&format!("CONTROL_ERROR=MALFORMED_PACKET ({e}); PROBE_STATE=OFF"));break;}
             };
             last_sequence=packet.sequence;COMMAND_SEQUENCE.store(packet.sequence,Ordering::Release);HEARTBEAT_NS.store(now_ns,Ordering::Release);crate::replay_runtime::heartbeat(now_ns);
+            if cfg!(feature="native-bloodstain-readonly") && crate::native_bloodstain::write_command(packet.kind) {
+                stop(40);crate::log_game("NATIVE_REPLAY: WRITE_COMMAND_REJECTED research build is read-only");
+                let response=status(packet.version);let reply=response.encode();let mut written=0;
+                if unsafe{WriteFile(h,reply.as_ptr().cast(),response.byte_count() as u32,&mut written,std::ptr::null_mut())}==0 || written != response.byte_count() as u32 {break;}
+                continue;
+            }
             if packet.kind==wire::OWNERSHIP_PROBE && ready() && !crate::replay_runtime::active(){crate::grounding::start(now_ns);crate::ownership_probe::receive(packet);}
             if packet.kind==wire::ACTOR_APPLY && ready(){crate::actor_replay::receive(packet,now_ns);}
             if packet.kind==wire::RUNTIME_TRACE_START&&ready(){crate::grounding::start(now_ns);crate::log_game("RUNTIME_TRACE_START window_s=10 read_only=true");}

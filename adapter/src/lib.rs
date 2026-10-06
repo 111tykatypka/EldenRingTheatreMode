@@ -29,6 +29,7 @@ mod grounding;
 mod ownership_probe;
 mod world_observation;
 mod research_readonly;
+mod native_bloodstain;
 mod actor_replay;
 mod visual_capture;
 mod fidelity_capture;
@@ -169,8 +170,9 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 // Warm reflected singleton resolution outside game callbacks; instance may not yet exist.
                 let _=unsafe{eldenring::cs::CSLuaEventManImp::instance()};
                 let mut research=research_readonly::Capture::new();
+                let mut native_replay=native_bloodstain::Capture::new();
                 let mut actors=actor_replay::Actors::new();
-                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{let now=monotonic_ns();grounding::player(now,"player_pre_behavior");local_input::early_tick(now);actor_replay::early_tick(now);} )));
+                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{let now=monotonic_ns();grounding::player(now,"player_pre_behavior");if !cfg!(feature="native-bloodstain-readonly"){local_input::early_tick(now);actor_replay::early_tick(now);}} )));
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PreBehaviorSafe,early);}
                 log_game("EXPERIMENTAL normalized input callback registered at ChrIns_PreBehaviorSafe; inactive unless replay owns local player");
                 let mut last_animation_id=-1i32;
@@ -180,12 +182,14 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     grounding::player(now,"player_post_physics_before");
                     world_observation.tick(now);
                     research.tick(now);
+                    native_replay.tick(now);
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||replay.tick(now))).is_err(){replay.fail();}
+                    if !cfg!(feature="native-bloodstain-readonly") {
+                      if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
+                      if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||replay.tick(now))).is_err(){replay.fail();}
+                    }
                     grounding::player(now,"player_post_physics_after");
-                    ownership.tick(now);
-                    actors.tick(now);
+                    if !cfg!(feature="native-bloodstain-readonly") {ownership.tick(now);actors.tick(now);}
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {
                         if !world_ready.swap(true,Ordering::AcqRel){log_game(&format!("WorldChrMan READY; instance={:p}",world));set_state(WORLDCHR_READY,"WORLDCHR_READY");set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}
                         if let Some(player)=world.main_player.as_ref() {
