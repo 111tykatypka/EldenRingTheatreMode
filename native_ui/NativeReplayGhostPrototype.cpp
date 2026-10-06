@@ -122,7 +122,10 @@ void create(U nativeContext) {
  // Pass it exactly as the original call does; the one-actor guarantee is enforced below
  // on the decoded data (secondary count must be 0 or the factory is never called).
  log("NATIVE_GHOST: alternate metadata=0x%llX passed as the native call does; one-actor check uses decoded secondary count",alternate);
- int size=fn<int(*)(U,uint8_t)>(0x6f1ec0)(recorder,0);
+ // The original call is `test rax,rax; setne dl; call 1406f1ec0` (1407049bc): the size
+ // includes the alternate stream when one exists. Passing 0 here under-sized the buffer
+ // (live: written=4391 size=4262).
+ int size=fn<int(*)(U,uint8_t)>(0x6f1ec0)(recorder,alternate!=0);
  if(size<=0){fn<void(*)(void*)>(0x3c12a0)(metadata);log("NATIVE_GHOST_ERROR: native serialized size invalid=%d",size);return;}
  U buffer=reinterpret_cast<U(*)(U,size_t,size_t)>(get<U>(get<U>(bufferAllocator)+0x50))(bufferAllocator,size,1);
  if(!buffer){fn<void(*)(void*)>(0x3c12a0)(metadata);log("NATIVE_GHOST_ERROR: native buffer allocation failed");return;}
