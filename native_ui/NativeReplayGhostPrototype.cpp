@@ -32,6 +32,9 @@ std::atomic<uint64_t> retiredEpoch{};
 std::atomic<unsigned> command{}; // 0=OFF, 1=create, 2=remove
 std::atomic<bool> used{}, contextSeen{}, readyLogged{};
 std::atomic<ULONGLONG> deadline{};
+std::atomic<uint64_t> stepCount{},buildCount{},requestStepCount{};
+std::atomic<ULONGLONG> lastStepTick{};
+std::atomic<uint32_t> timerBits{};
 thread_local bool localStep{}, creating{};
 thread_local U factoryActor{};
 using LocalStep=void(*)(U,U,float,U); LocalStep stepOriginal{};
@@ -148,10 +151,24 @@ void create(U nativeContext) {
  releaseTemporary(data);freeNative(buffer);fn<void(*)(void*)>(0x3c12a0)(metadata);
 }
 void onStep(U child,U context,float dt,U auxiliary) {
- bool old=localStep;localStep=true;stepOriginal(child,context,dt,auxiliary);localStep=old;
+ const bool nativeCaller=reinterpret_cast<U>(_ReturnAddress())==base+0xb08422;
+ bool old=localStep;localStep=nativeCaller;
+ stepOriginal(child,context,dt,auxiliary);
+ if(nativeCaller){stepCount.fetch_add(1);lastStepTick.store(GetTickCount64());timerBits.store(get<uint32_t>(child+0x38));}
+ unsigned expected=1;
+ // Use the SAME native TestNetStep dynamic context, after the original manager
+ // update has completed. Do not wait for its periodic serialize/upload timer,
+ // mutate that timer, cache context pointers, or invent a CSTask callback.
+ // Require prior observation of the native 703f37 builder call in this process.
+ if(nativeCaller&&contextSeen.load()&&std::isfinite(dt)&&dt>=0&&command.compare_exchange_strong(expected,0)) {
+  log("NATIVE_GHOST_CREATE: one-shot consumed after original TestNetStep update; caller=140b0841d thread=%lu native_steps=%llu periodic_build_calls=%llu",GetCurrentThreadId(),stepCount.load(),buildCount.load());
+  create(context);
+ }
+ localStep=old;
 }
 void onBuild(U child,U context) {
  const bool valid=localStep && reinterpret_cast<U>(_ReturnAddress())==base+0x703f3c;
+ if(valid)buildCount.fetch_add(1);
  if(valid&&!contextSeen.exchange(true))log("NATIVE_GHOST: native local replay context observed at 140703f37; thread=%lu",GetCurrentThreadId());
  unsigned expected=1;
  if(valid&&command.compare_exchange_strong(expected,0)) {log("NATIVE_GHOST_CREATE: one-shot command consumed in original local native callsite");create(context);return;}
@@ -213,7 +230,7 @@ void keys() {
    if(s.active||command.load())log("NATIVE_GHOST_ERROR: create rejected: active/pending command");
    else if(used.exchange(true))log("NATIVE_GHOST_ERROR: one create attempt per process; restart before another test");
    else if(!ready(world(),player,recorder))log("NATIVE_GHOST_ERROR: CREATE refused: player/recorder/world/block not ready; restart required before retry");
-   else {deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for original native local callsite (maximum 60s); context_seen=%u",contextSeen.load());}
+   else {requestStepCount.store(stepCount.load());deadline.store(GetTickCount64()+60000);command.store(1);log("NATIVE_GHOST_CREATE: REQUESTED; waiting for native TestNetStep (maximum 60s); context_seen=%u steps=%llu periodic_build_calls=%llu",contextSeen.load(),stepCount.load(),buildCount.load());}
   }
   if(r&&!lastRemove) {
    unsigned pending=1;
@@ -221,7 +238,7 @@ void keys() {
    else if(snapshot().active) {deadline.store(GetTickCount64()+60000);command.store(2);log("NATIVE_GHOST_REMOVE: command queued for native world removal drain");}
    else log("NATIVE_GHOST_ERROR: REMOVE refused: no active Theater-owned ghost");
   }
-  if(command.load()&&GetTickCount64()>deadline.load()) {auto kind=command.exchange(0);if(kind)log("NATIVE_GHOST_ERROR: command=%u TIMEOUT; required native context not observed; no fallback world mutation",kind);}
+  if(command.load()&&GetTickCount64()>deadline.load()) {auto kind=command.exchange(0);uint32_t raw=timerBits.load();float timer;memcpy(&timer,&raw,4);if(kind)log("NATIVE_GHOST_ERROR: command=%u TIMEOUT; steps_since_request=%llu periodic_build_calls=%llu last_step_age_ms=%llu native_timer=%.3f context_seen=%u; no arbitrary callback mutation",kind,stepCount.load()-requestStepCount.load(),buildCount.load(),lastStepTick.load()?GetTickCount64()-lastStepTick.load():UINT64_MAX,timer,contextSeen.load());}
   U p{},rec{};if(!readyLogged.load()&&ready(world(),p,rec)&&!readyLogged.exchange(true))log("NATIVE_GHOST: PLAYER_RECORDER_READY; F10 CREATE ONCE, F11 REMOVE ONCE (game focus); existing payload/legacy write controls disabled in this feature");
   lastCreate=c;lastRemove=r;Sleep(25);
  }

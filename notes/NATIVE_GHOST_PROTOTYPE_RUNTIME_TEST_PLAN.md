@@ -7,7 +7,7 @@ No build needed if using the supplied Release artifacts. To rebuild, run from re
 ```
 
 1. Close Elden Ring and all old Theater Mode hosts. The DLL cannot be replaced/reloaded reliably while the game is running.
-2. Open `NativeReplayGhostPrototypeHUD/EldenRingTheaterMode.exe` from the new isolated output. Keep its sibling `TheaterMode.dll` there. Do not overwrite Phase5 or the game directory. The top-right noninteractive HUD shows native status even without Insert.
+2. Open the latest `NativeReplayGhostPrototypeStep/EldenRingTheaterMode.exe` from the isolated output. Keep its sibling `TheaterMode.dll` there. Do not overwrite Phase5 or the game directory. The top-right noninteractive HUD shows native status even without Insert. This build consumes commands at the verified native TestNetStep rather than waiting solely for the periodic builder branch.
 3. Use the existing host Launch Game/YAFSML workflow with offline, anti-cheat-disabled single-player setup already established by the user. The launcher uses the sibling DLL and stages its own YAFSML config; no replacement of the original loader is required. If launching YAFSML manually, set its Theater DLL path to this new output DLL before launching; do not leave it pointing at an old diagnostics build.
 4. Load an existing save in a safe, open, flat area; stand on foot, not mounted. No boss fight, death, warp, grace interaction or map transition during this one test.
 5. Wait for PLAYER_FOUND/READY, then make a few seconds of normal walking. Check `%TEMP%/TheaterModeGame.log` for `NATIVE_GHOST: PLAYER_RECORDER_READY` and bridge initialization=1. If installation failed, do not press create; send the log.

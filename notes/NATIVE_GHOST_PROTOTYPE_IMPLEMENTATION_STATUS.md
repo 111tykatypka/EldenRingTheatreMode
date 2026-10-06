@@ -10,7 +10,15 @@ Observed log from PID33112: hooks installed, bridge initialization=1, native loc
 
 Added a noninteractive native status HUD in the top-right corner, independent of Insert. Native command messages appear immediately; pending commands show a 60-second countdown. Errors/cancellation stay visible. Existing controls and lifetime guards are unchanged. The HUD does not capture mouse/keyboard when the editor is closed. Graphics/runtime appearance still requires user verification.
 
-Updated package is staged in `../outputs/EldenRingTheaterMode/NativeReplayGhostPrototypeHUD`, because the initial prototype EXE/DLL are still running and cannot be replaced. Use the HUD package's EXE and sibling DLL after exiting the current game/host.
+HUD checkpoint was staged in `../outputs/EldenRingTheaterMode/NativeReplayGhostPrototypeHUD`.
+
+## Native-step command fix (latest package; supersedes builder-only consumption below)
+
+PID24580 confirmed context_seen=1 and PLAYER_RECORDER_READY, then CREATE requested and timed out without consumption. The timeout text "context not observed" was misleading: context HAD been observed, but the periodic builder branch did not consume the new command within 60 seconds. Native 703e30 disassembly gates its 703f37 call on child+38 countdown. Previous logs did not measure countdown/ongoing step frequency, so their precise runtime values are not claimed.
+
+Latest output: `../outputs/EldenRingTheaterMode/NativeReplayGhostPrototypeStep`. CREATE is now additionally consumed after original 140703e30 returns, ONLY with genuine TestNetStep caller return address 140b08422 (CALL140b0841d), prior observed 703f37 builder invocation, and finite nonnegative native dt. It uses callback-local native context, never cached context or an invented task phase. The original builder path remains; compare/exchange allows only one consumer. No timer/debug flag changes.
+
+New timeout evidence: steps_since_request, periodic_build_calls, last_step_age_ms, native_timer and context_seen. If native steps cease after world load, this still fails closed. Post-update execution placement is experimental within the original native context and requires the controlled user test; no ghost success claimed. Added exact callsite fingerprint (26 guards total). The older builder-only description below is historical and superseded by this section.
 
 ## Scope and isolation
 
