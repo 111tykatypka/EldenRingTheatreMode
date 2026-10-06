@@ -6,6 +6,8 @@ use std::{ffi::c_void,mem::{offset_of,size_of},sync::mpsc::{sync_channel,SyncSen
 const RECORDER_VTABLE:usize=0x2a4aa40;
 const RECORDER_BYTES:usize=0x860;
 const NODE_BYTES:usize=0x248;
+// Exact base constructor and runtime snapshots agree; +A0 is scalar state, not owner.
+const MANIPULATOR_OWNER:usize=0xa8;
 const MAX_GHOST_SLOTS:usize=512; // diagnostic sampling budget, not a replay actor cap
 #[link(name="kernel32")]unsafe extern "system"{
  fn GetCurrentProcess()->*mut c_void;
@@ -107,8 +109,8 @@ impl Capture{
   rows.push(Row{prefix:"ACTOR_CONTROL",address,message:format!("source={source} set={set} slot={slot} chr=0x{address:X} class={class} chr_type={} ctrl=0x{ctrl:X} ctrl_owner_matches={} manipulator=0x{manip:X} manip_class={manip_class} type_literal={kind:?} flags=0x{flags:X} recorder_enabled={} authority={} net_position_sync={:?} block={} origin={} override={} physics=0x{physics:X} behavior=0x{behavior:X} pos={} quat={}; no virtual call",r(offset_of!(ChrIns,chr_type)),c.as_ref().is_some_and(|v|pointer(v,offset_of!(ChrCtrl,owner))==address),flags&8!=0,r(offset_of!(ChrIns,network_authority)),b.get(offset_of!(ChrIns,net_position_synchronized)),r(offset_of!(ChrIns,block_id))as i32,r(offset_of!(ChrIns,block_origin))as i32,r(offset_of!(ChrIns,block_origin_override))as i32,float_text(p),float_text(q)),bytes:b});
   if let Some(m)=read(manip,if kind==Some(3)&&manip_class==".?AVReplayManipulator@CS@@"{0x150}else{0xc0}){
    let data=if m.len()>=0x150{pointer(&m,0x100)}else{0};
-   let owned=pointer(&m,0xa0)==address;
-   rows.push(Row{prefix:"REPLAY_MANIPULATOR",address:manip,message:format!("class={manip_class} type_literal={kind:?} ownerA0=0x{:X} owner_matches={owned} data100=0x{data:X}; no engine call",pointer(&m,0xa0)),bytes:m});
+   let owned=pointer(&m,MANIPULATOR_OWNER)==address;
+   rows.push(Row{prefix:"REPLAY_MANIPULATOR",address:manip,message:format!("class={manip_class} type_literal={kind:?} ownerA8=0x{:X} owner_matches={owned} data100=0x{data:X}; no engine call",pointer(&m,MANIPULATOR_OWNER)),bytes:m});
    if owned&&data!=0{if let Some(bytes)=read(data,0x240){rows.push(Row{prefix:"REPLAY_FRAME",address:data,message:"kind=attached_data_prefix size=0x240; consumer at RVA3df010 references +220/+230; NOT a decoded frame; no followed buffer pointers".into(),bytes});}}
   }
   if class==".?AVReplayGhostIns@CS@@"{if let Some(bytes)=read(address,0x760){rows.push(Row{prefix:"BLOODSTAIN_GHOST",address,message:format!("class=ReplayGhostIns data740=0x{:X} full_760_snapshot=true; ChrType10 association requires actual observation",pointer(&bytes,0x740)),bytes});}}
@@ -116,6 +118,7 @@ impl Capture{
 }
 #[cfg(test)]mod tests{use super::*;
  #[test]fn known_sdk_prefix(){assert_eq!(size_of::<ReplayRecorder>(),0x70);assert_eq!(offset_of!(ReplayRecorder,owning_player),0x10);assert_eq!(offset_of!(ReplayRecorder,frame_counter),0x44);assert_eq!(offset_of!(PlayerIns,replay_recorder),0x5c8);assert_eq!(offset_of!(ChrCtrl,manipulator),0x18);}
+ #[test]fn owner_pointer_uses_exact_a8(){let mut b=[0u8;0xc0];b[0xa0..0xa8].copy_from_slice(&0x7ff100000000u64.to_le_bytes());b[0xa8..0xb0].copy_from_slice(&0x7ff177d09800u64.to_le_bytes());assert_eq!(pointer(&b,MANIPULATOR_OWNER),0x7ff177d09800);assert_ne!(pointer(&b,0xa0),pointer(&b,MANIPULATOR_OWNER));}
  #[test]fn scalar_kind_without_virtual_call(){assert_eq!(literal_kind(&[0xb8,3,0,0,0,0xc3]),Some(3));assert_eq!(literal_kind(&[0xb8,1,0,0,0,0xc3]),Some(1));assert_eq!(literal_kind(&[0x48,0,0,0,0,0xc3]),None);assert_eq!(literal_kind(&[0xb8,9,0,0,0,0xc3]),None);}
  #[test]fn bounded_decode_and_readonly_command_policy(){assert_eq!(u64_at(&[0;7],0),None);assert_eq!(u32_at(&[0;4],usize::MAX),None);for k in [3,5,6,7,11,14,15]{assert!(write_command(k));}for k in [1,2,4,8,9,10,12,13]{assert!(!write_command(k));}}
 }

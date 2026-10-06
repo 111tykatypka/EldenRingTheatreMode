@@ -4,7 +4,7 @@
 
 [STATIC_VERIFIED] attach VA1403df010 refcounts incoming data and stores it at+100. Mode byte+14c chooses data+220/+230, then calls1403dfd50. That function chooses count at data+d0 or+224 and sums results from1403dfdc0. Frame decoding/advance1403dfdc0 still needs full disassembly correlation.
 
-Owner reference+ a0 is REFERENCE from pinned manipulator prefix; runtime checks compare to current actor. +132 toggled by tiny methods1403dee00/1403deec0; these are enable/disable-like setters, NOT proven update methods. Do not mistake adjacent linear disassembly for their body.
+Owner is +a8, supported by pinned aligned layout, exact native constructor and runtime snapshots. Original probe incorrectly used +a0; its owner_matches=false messages are diagnostic errors, not control ownership failures. +132 toggled by tiny methods1403dee00/1403deec0; these are enable/disable-like setters, NOT proven update methods. Do not mistake adjacent linear disassembly for their body.
 
 Pad vtable RVA2a2e788 / constructor3d8670 / literal type1; Network RVA2a2e1b8 / constructor3d4a00 / type2 candidate; NetAI RVA2a2d858 / constructor3d2f00 / type4 candidate. Read actual actors before treating these as ownership behavior.
 
@@ -14,7 +14,7 @@ No manipulator swapping, initialization or update virtual calls implemented. Res
 
 Exact target disk SHA256: D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134; version2.7.0.0, AMD64, patch1.17. VAs assume preferred image base0x140000000; runtime addresses are ASLR base+RVA.
 
-STATIC_VERIFIED means exact image bytes support the stated operation; REFERENCE means SDK/source only. Runtime measurements in this checkpoint: NONE. Decompiler names/argument reconstruction are hypotheses. Linear extraction may include padding/adjacent functions after RET; these bytes do not belong to the preceding function automatically.
+STATIC_VERIFIED means exact image bytes support the stated operation; REFERENCE means SDK/source only. At the initial checkpoint runtime measurements were absent; subsequent read-only results are in NATIVE_REPLAY_RUNTIME_RESULT.md. Decompiler names/argument reconstruction are hypotheses. Linear extraction may include padding/adjacent functions after RET; these bytes do not belong to the preceding function automatically.
 
 Evidence artifacts (kept outside repository): `../research/ghidra-eldenring/targeted/native_bloodstain/verified_bytes/<VA>.json` include exact bytes, indexed callers/callees, pseudocode and disassembly. Partial Ghidra analysis does not guarantee complete xrefs.
 

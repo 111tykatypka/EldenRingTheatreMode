@@ -6,12 +6,12 @@
 
 RTTI identifies BloodstainGhostDownloadJob, BloodstainUploadJob, BloodstainListDownloadJob, FNBloodstain/FNBloodstainImpl. Their codec and route to140404570 are unresolved. Ordinary own-death recoverable-rune metadata must not be conflated with downloaded other-player ghost recording.
 
-Runtime acceptance: recorder buffer changes with gameplay; observed ReplayGhostIns has type3 manipulator, owning actor matches, ghost+740 matches manipulator+100, attached buffers are bounded and evolve during playback. NONE observed yet. Offline session may contain no usable bloodstain ghost: record absence; do not enable online play for this experiment.
+Runtime acceptance: recorder buffer changes with gameplay; observed ReplayGhostIns has type3 manipulator, owning actor matches, ghost+740 matches manipulator+100, attached buffers are bounded and evolve during playback. Recorder buffer population is runtime-verified (see NATIVE_REPLAY_RUNTIME_RESULT.md); ghost identity and playback remain unobserved. Offline session may contain no usable bloodstain ghost: record absence; do not enable online play for this experiment.
 
 ## Evidence rules
 
 Exact target disk SHA256: D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134; version2.7.0.0, AMD64, patch1.17. VAs assume preferred image base0x140000000; runtime addresses are ASLR base+RVA.
 
-STATIC_VERIFIED means exact image bytes support the stated operation; REFERENCE means SDK/source only. Runtime measurements in this checkpoint: NONE. Decompiler names/argument reconstruction are hypotheses. Linear extraction may include padding/adjacent functions after RET; these bytes do not belong to the preceding function automatically.
+STATIC_VERIFIED means exact image bytes support the stated operation; REFERENCE means SDK/source only. At the initial checkpoint runtime measurements were absent; subsequent read-only results are in NATIVE_REPLAY_RUNTIME_RESULT.md. Decompiler names/argument reconstruction are hypotheses. Linear extraction may include padding/adjacent functions after RET; these bytes do not belong to the preceding function automatically.
 
 Evidence artifacts (kept outside repository): `../research/ghidra-eldenring/targeted/native_bloodstain/verified_bytes/<VA>.json` include exact bytes, indexed callers/callees, pseudocode and disassembly. Partial Ghidra analysis does not guarantee complete xrefs.

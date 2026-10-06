@@ -1,6 +1,6 @@
 # Native replay acceptance checklist
 
-This is a buildable research checkpoint, NOT task completion. No new game session or bloodstain observation yet. Preserve Phase5.
+This is a buildable research checkpoint, NOT task completion. Read-only game session completed; native recorder population verified, bloodstain ghost absent. Preserve Phase5.
 
 |Section|Requirement|Status|
 |---|---|---|
@@ -48,10 +48,10 @@ This is a buildable research checkpoint, NOT task completion. No new game sessio
 |---|---|
 |Recorder layout sufficiently mapped|0x860 object, prefix, node0x248; payload schema incomplete|
 |Update task callback found|STATIC_VERIFIED +4d8/task+500→3f92b0→virtual+c0→660ac0→4e5af0; live scheduling pending|
-|Actual recorded buffer|Static pool identified; runtime population/change pending|
+|Actual recorded buffer|RUNTIME_VERIFIED pool/owner/capacity/node payload changes; full codec pending|
 |ReplayManipulator concrete class|RTTI/vtable/ctor and type3 exact bytes|
 |Ghost creation|Factory404570→ReplayGhostIns4f1840→ReplayManipulator data attachment; bloodstain provenance pending|
-|Ghost actual manipulator runtime verified|NOT OBSERVED|
+|Ghost actual manipulator runtime verified|NOT OBSERVED — offline session has no ghost|
 |Data→ghost consumer|Static slot10→3df190→3df650→native decoder; runtime behavior pending|
 |Clear next implementation step|Read-only recorder/node diffs + real ghost identity/data equality; then codec research. No ghost spawning before lifecycle verified|
 
@@ -62,3 +62,7 @@ C++ CTest14/14; Rust research feature35/35; Rust default35/35; Python existing3+
 ## Open questions
 
 Full native codec and action semantics; downloaded bloodstain local decoder/manager linkage; map/streaming conversion; recorder retention observed duration; safe extension/concatenation; native ghost lifecycle/update ownership; grounding and input isolation. No performance numbers measured in Elden Ring.
+
+Runtime result: NATIVE_REPLAY_RUNTIME_RESULT.md / .json. +A0 owner diagnostic corrected to+A8 after exact-byte and275 real snapshot checks.
+
+Hotfix1 build: CTest14/14, Rust research36/36, Python10/10, DX12 smoke PASS. Native recorder observations refer to initial build; corrected owner+A8 binary itself not reloaded in game yet.

@@ -1,0 +1,78 @@
+{
+  "source": "C:\\Users\\user\\AppData\\Local\\EldenRingTheaterMode\\native-replay\\native_replay_21240_124323613409900.jsonl",
+  "snapshot": "C:\\Users\\user\\Documents\\ChatGPT\\elden ring theater mode\\research\\native-replay-runtime\\native_replay_21240_124323613409900.jsonl",
+  "snapshot_sha256": "979679b26882470e199c1ae58a107c50013f8cb2a5441f5878342af0c5e00b0c",
+  "snapshot_bytes": 2426308,
+  "rows": 1262,
+  "errors": [],
+  "queue_drops": 0,
+  "recorder_snapshots": 139,
+  "recorder_observation_seconds": 139.1788874,
+  "observation_rate_hz": 0.9915296966226502,
+  "capacity_values": [
+    60
+  ],
+  "active_count_range": [
+    0,
+    59
+  ],
+  "recorder_owner_all_match": true,
+  "full_object_all_match": true,
+  "position_ranges": [
+    [
+      -7.2641664,
+      0.9835942
+    ],
+    [
+      5.959843,
+      93.96789
+    ],
+    [
+      -83.08161,
+      -2.419782
+    ]
+  ],
+  "unique_live_positions": 36,
+  "unique_live_quaternions": 31,
+  "tail_primary_length_values": [
+    72,
+    127,
+    132,
+    133,
+    139,
+    150,
+    151,
+    154,
+    157,
+    161,
+    175,
+    181,
+    189,
+    206
+  ],
+  "tail_secondary_length_values": [
+    0
+  ],
+  "tail_payload_unique_sha256": 121,
+  "all_node_lengths_bounded": true,
+  "nonzero_tail_duration_range": [
+    0.0,
+    0.1833338439464569
+  ],
+  "ghost_counts_observed": [
+    0
+  ],
+  "literal_types": [
+    [
+      ".?AVPadManipulator@CS@@",
+      "Some(1)"
+    ]
+  ],
+  "note": "1Hz observer rate is not native frame/sample rate; no ghost observed; no decoded action semantics proved.",
+  "pool_pointer_checks": 556,
+  "pool_pointer_checks_pass": true,
+  "manipulator_ownerA8_checks": 275,
+  "manipulator_ownerA8_all_match": true,
+  "count_decreases": 26,
+  "user_confirmed_ghost_unavailable": true
+}
