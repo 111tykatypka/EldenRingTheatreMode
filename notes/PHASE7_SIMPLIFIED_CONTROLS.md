@@ -15,3 +15,10 @@
 
 ## Manual check
 Close host and Elden Ring before changing DLL. Launch Hotfix5/EldenRingTheaterMode.exe and use its existing YAFSML launcher. Load the same save/location. Open replay; hover timeline and turn wheel both directions without Shift. Verify Play/Stop, recording F5/F6 and in-game overlay. No Pause/Resume controls should appear.
+
+## Hotfix6 — Shift vertical scrolling
+- Shift+wheel down/up scrolls timeline actor rows vertically. No-modifier wheel still zooms time around cursor.
+- Explicit handling avoids ImGui's default Shift axis swap. Scrolling is font-relative (DPI-scaled), clamped to child scroll limits; parent stays fixed.
+- Added event-based regression for Shift down/up, top/bottom clamping, unchanged time scale, and zoom after releasing Shift.
+- Release x64 build passed; CTest 13/13, Rust 25/25, Python 3/3 and separate real-device DX12 smoke passed. Real application validation required.
+- Launch package Phase7_Runtime_UI_Hotfix6 after closing the previous host; DLL behavior unchanged from Hotfix5.

@@ -11,6 +11,13 @@ void zoom_timeline_item(TimeView &view, double duration) {
   ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
   const auto &io = ImGui::GetIO();
   if (ImGui::IsItemHovered() && io.MouseWheel != 0) {
+    if (io.KeyShift) {
+      // Own the wheel explicitly: ImGui otherwise maps Shift+wheel to X.
+      // Font-relative vertical scrolling stays proportional at high DPI.
+      ImGui::SetScrollY(std::clamp(ImGui::GetScrollY() -
+          io.MouseWheel * ImGui::GetFontSize() * 5.f, 0.f, ImGui::GetScrollMaxY()));
+      return;
+    }
     const auto left = ImGui::GetItemRectMin().x;
     const auto width = std::max(1.f, ImGui::GetItemRectSize().x);
     view.zoom(std::pow(.8, io.MouseWheel),
@@ -163,7 +170,7 @@ void draw_timeline(const PlaybackView &p, const game_control::State &remote) {
         static_cast<std::uint64_t>(std::clamp(jump, 0.0, duration) * 1e9));
   });
   ImGui::TextDisabled(
-      "Wheel up/down: zoom in/out | Middle drag: pan | Drag ruler: seek (native writes stop)");
+      "Wheel: zoom | Shift+wheel: scroll tracks up/down | Middle drag: pan | Drag ruler: seek (native writes stop)");
   ImGui::BeginChild("Track scroll");
   auto origin = ImGui::GetCursorScreenPos();
   auto size = ImGui::GetContentRegionAvail();

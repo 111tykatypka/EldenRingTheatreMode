@@ -87,6 +87,7 @@ int main() {
   view.fit(60);
   io.DisplaySize = {800,600};
   io.AddMousePosEvent(150,150);
+  float child_scroll{}, parent_scroll{};
   auto wheel_frame = [&](float wheel) {
     if(wheel) io.AddMouseWheelEvent(0,wheel);
     ImGui::NewFrame();
@@ -96,9 +97,9 @@ int main() {
     ImGui::BeginChild("Overflow",{0,0});
     ImGui::InvisibleButton("canvas",{300,1000});
     editor::zoom_timeline_item(view,60);
-    const float child_scroll=ImGui::GetScrollY();
+    child_scroll=ImGui::GetScrollY();
     ImGui::EndChild();
-    const float parent_scroll=ImGui::GetScrollY();
+    parent_scroll=ImGui::GetScrollY();
     ImGui::End();
     ImGui::Render();
     return child_scroll==0 && parent_scroll==0;
@@ -110,6 +111,27 @@ int main() {
     const auto zoomed=view.span;
     if(!wheel_frame(-1)||view.span<=zoomed||io.KeyShift) return 7;
   }
+  // Shift scrolls vertically in both directions without changing time scale.
+  io.AddKeyEvent(ImGuiMod_Shift,true);
+  wheel_frame(0);
+  const auto span=view.span, begin=view.begin;
+  wheel_frame(-1); wheel_frame(0);
+  const float down=child_scroll;
+  if(down<=0 || parent_scroll!=0 || view.span!=span || view.begin!=begin) return 8;
+  wheel_frame(1); wheel_frame(0);
+  if(child_scroll>=down || child_scroll!=0 || view.span!=span) return 9;
+  // Clamp at both ends, then restore ordinary zoom without a stuck modifier.
+  for(int i=0;i<20;++i)wheel_frame(-1);
+  wheel_frame(0);
+  const float bottom=child_scroll;
+  wheel_frame(-1);wheel_frame(0);
+  if(bottom<=0 || child_scroll!=bottom || parent_scroll!=0 || view.span!=span) return 10;
+  for(int i=0;i<20;++i)wheel_frame(1);
+  wheel_frame(0);
+  if(child_scroll!=0) return 11;
+  io.AddKeyEvent(ImGuiMod_Shift,false);
+  wheel_frame(0);wheel_frame(1);
+  if(view.span>=span || child_scroll!=0) return 12;
   ImGui::DestroyContext();
   std::cout << "ImGui docking/render construction at five resolutions passed "
                "(no visual/runtime assertion)\n";

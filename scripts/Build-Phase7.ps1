@@ -1,14 +1,14 @@
 param(
- [string]$OutputDirectory='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Phase7_Runtime_UI_Hotfix5',
+ [string]$OutputDirectory='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode\Phase7_Runtime_UI_Hotfix6',
  [string]$CMakeBin='C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
 )
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 $outputFull=[IO.Path]::GetFullPath($OutputDirectory)
-if($outputFull -match '\\(Phase5[^\\]*|TesterBuild|Nightly_ResearchIntegration|Phase7_Runtime_UI|Phase7_Runtime_UI_Hotfix1|Phase7_Runtime_UI_Hotfix2|Phase7_Runtime_UI_Hotfix3|Phase7_Runtime_UI_Hotfix4)(\\|$)'){throw 'Preserved build directory cannot be an output'}
+if($outputFull -match '\\(Phase5[^\\]*|TesterBuild|Nightly_ResearchIntegration|Phase7_Runtime_UI|Phase7_Runtime_UI_Hotfix1|Phase7_Runtime_UI_Hotfix2|Phase7_Runtime_UI_Hotfix3|Phase7_Runtime_UI_Hotfix4|Phase7_Runtime_UI_Hotfix5)(\\|$)'){throw 'Preserved build directory cannot be an output'}
 $preserved=@{}
 $outputs='C:\Users\user\Documents\Codex\2026-10-04\outputs\EldenRingTheaterMode'
-foreach($folder in @('Phase5','TesterBuild','Nightly_ResearchIntegration','Phase7_Runtime_UI','Phase7_Runtime_UI_Hotfix1','Phase7_Runtime_UI_Hotfix2','Phase7_Runtime_UI_Hotfix3','Phase7_Runtime_UI_Hotfix4')){
+foreach($folder in @('Phase5','TesterBuild','Nightly_ResearchIntegration','Phase7_Runtime_UI','Phase7_Runtime_UI_Hotfix1','Phase7_Runtime_UI_Hotfix2','Phase7_Runtime_UI_Hotfix3','Phase7_Runtime_UI_Hotfix4','Phase7_Runtime_UI_Hotfix5')){
  foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','BUILD_MANIFEST.txt')){
   $path=Join-Path (Join-Path $outputs $folder) $name
   if(Test-Path -LiteralPath $path){$preserved[$path]=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
@@ -73,6 +73,7 @@ $manifest+='User verified Hotfix1 loads world and displays Overlay; game termina
 $manifest+='User subsequently verified Hotfix2 UI/mouse. Hotfix3 host-only global recording hotkey dispatch fix: live F5 validation REQUIRED.'
 $manifest+='Hotfix3 live F5/start/stop/file finalization verified in logs. Hotfix4 fixes callback-vs-IPC clock ordering; new DLL runtime validation REQUIRED; timeout limits unchanged.'
 $manifest+='Hotfix4 moving replay user-confirmed on flat indoor floor: path repeated without falls/jerks; sliding model, animations not implemented. Hotfix5 removes Pause/Resume UI + F7/F8 and owns timeline wheel; new UI runtime validation REQUIRED.'
+$manifest+='Hotfix6: Shift+wheel vertically scrolls timeline tracks; wheel without modifiers retains cursor-anchored zoom; automated bidirectional/bounds tests PASS, manual validation REQUIRED.'
 $manifest+='Real-device DX12 smoke: PASS (120 Presents, Clean/Overlay/Editor, mouse buttons, ResizeBuffers, shutdown); separate from Elden Ring verification; see phase7-dx12-smoke.log.'
 foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','EldenRingCompatibilityProbe.exe')){
  $p=Join-Path $outputFull $name;$manifest+="$name bytes=$((Get-Item -LiteralPath $p).Length) SHA256=$((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash)"
