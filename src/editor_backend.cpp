@@ -94,16 +94,26 @@ void playback_tick() {
     perf_start = now;
   }
 }
+bool handle_global_hotkey(UINT id) {
+  if(id<1||id>4)return false;
+  log_line("GLOBAL_HOTKEY received id="+std::to_string(id));
+  if(id==2)emergency_stop();
+  else post_command(id==1?Command::start:id==3?Command::pause:Command::resume);
+  return true;
+}
 void post_command(Command c) {
   if ((c == Command::start || c == Command::resume) && playback_view().active) {
     log_line("Recording refused while in-game replay is active; press STOP / "
              "F6 first");
+    {std::lock_guard lock(app.mutex);app.data.error=L"Recording blocked: stop replay with F6 first.";}
     return;
   }
   {
     std::lock_guard lock(app.commands_mutex);
     app.commands.push(c);
   }
+  const char* name=c==Command::start?"START":c==Command::pause?"PAUSE":c==Command::resume?"RESUME":"STOP";
+  log_line(std::string("RECORD_COMMAND queued ")+name);
   PostMessageW(app.window, WM_REFRESH, 0, 0);
 }
 bool read_message(HANDLE h, WireMessage &m) {
@@ -458,7 +468,10 @@ void pipe_worker() {
       auto c = pending_commands.front();
       pending_commands.pop();
       try {
-        if (c == Command::start &&
+        if(c==Command::start&&!snap.player){
+          snap.error=L"Recording blocked: no live PLAYER_STATE. Wait for Player FOUND in Recorder.";
+          log_line("Recording START rejected: no live player sample");
+        } else if (c == Command::start &&
             (snap.state != erplay::RecordingState::recording &&
              snap.state != erplay::RecordingState::paused) &&
             snap.player) {
@@ -485,6 +498,7 @@ void pipe_worker() {
           character_last_written.clear();
           character_samples = 0;
           snap.state = erplay::RecordingState::recording;
+          snap.error.clear();
           snap.samples = 0;
           snap.bytes = 0;
           snap.active_ns = 0;

@@ -105,6 +105,7 @@ void refresh_character_cursor(std::uint64_t);
 void initialize(HWND);
 void shutdown();
 void post_command(Command);
+bool handle_global_hotkey(UINT);
 void emergency_stop();
 void play_replay();
 void pause_replay();

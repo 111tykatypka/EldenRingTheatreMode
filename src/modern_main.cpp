@@ -47,17 +47,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 LRESULT CALLBACK modern_proc(HWND w, UINT m, WPARAM a, LPARAM b) {
   if(m==WM_APP+77){theater::ingame_editor::poll();return 0;}
   if (m == WM_HOTKEY) {
-    if (a == 2)
-      theater::emergency_stop();
-    else if (!ImGui::GetCurrentContext() ||
-             !ImGui::GetIO().WantCaptureKeyboard) {
-      if (a == 1)
-        theater::post_command(theater::Command::start);
-      if (a == 3)
-        theater::post_command(theater::Command::pause);
-      if (a == 4)
-        theater::post_command(theater::Command::resume);
-    }
+    // RegisterHotKey is application-wide, independent of foreground ImGui focus.
+    theater::handle_global_hotkey(static_cast<UINT>(a));
     return 0;
   }
   if (ImGui_ImplWin32_WndProcHandler(w, m, a, b))

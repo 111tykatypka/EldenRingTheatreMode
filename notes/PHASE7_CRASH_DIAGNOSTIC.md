@@ -1,5 +1,13 @@
 # Phase7 crash investigation — 2026-10-06
 
+## Latest user validation
+
+User reported "все работает" after testing Hotfix2 UI and mouse handling. Mark
+world loading, mode switching/cursor and mouse-click crash regression as
+USER-VERIFIED for this session. This is not evidence of replay, NPC ownership,
+grounding, resizing or every input path. Next checkpoint is a fresh short recording
+and player-only XZ replay on the same flat loaded scene (test B/C below).
+
 ## Hotfix2 — mouse-input regression
 
 User verified Hotfix1 loads into the world and Insert displays Overlay, then right

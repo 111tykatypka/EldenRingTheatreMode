@@ -1,5 +1,9 @@
 # Phase7 — точный порядок проверки
 
+**Текущий статус:** пользователь подтвердил работу Hotfix2 интерфейса/мыши.
+Далее тест B/C: короткая новая запись, guard и player-only XZ replay на ровной
+площадке. Известные FULL XYZ grounding и NPC проблемы ещё не подтверждены исправленными.
+
 **Hotfix2:** сначала проверяйте правую кнопку в Overlay/Editor по
 PHASE7_CRASH_DIAGNOSTIC.md; запуск через Phase7_Runtime_UI_Hotfix2. Replay пока не нужен.
 

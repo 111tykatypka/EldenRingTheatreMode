@@ -5,6 +5,16 @@ int main() {
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   auto &io = ImGui::GetIO();
+  // Regression: captured keyboard focus must not suppress Windows global hotkeys.
+  io.WantCaptureKeyboard=true;
+  for(auto entry:{std::pair<UINT,theater::Command>{1,theater::Command::start},{3,theater::Command::pause},{4,theater::Command::resume}}){
+    if(!theater::handle_global_hotkey(entry.first))return 3;
+    std::lock_guard lock(theater::app.commands_mutex);
+    if(theater::app.commands.size()!=1||theater::app.commands.front()!=entry.second)return 4;
+    theater::app.commands.pop();
+  }
+  if(theater::handle_global_hotkey(99))return 5;
+  io.WantCaptureKeyboard=false;
   io.IniFilename = nullptr;
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   io.DeltaTime = 1.f / 60;
