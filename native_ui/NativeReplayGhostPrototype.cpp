@@ -117,9 +117,11 @@ void create(U nativeContext) {
  fn<U(*)(void*)>(0x6514f0)(metadata);
  if(!fn<uint8_t(*)(U,void*)>(0x25f810)(assembly,metadata)){fn<void(*)(void*)>(0x3c12a0)(metadata);log("NATIVE_GHOST_ERROR: metadata fill failed");return;}
  U alternate=fn<U(*)(U)>(0x25f7e0)(assembly);
- // This prototype must create ONE actor. Reject the native mounted/secondary
- // stream before serialization/factory rather than tampering with its data.
- if(alternate){fn<void(*)(void*)>(0x3c12a0)(metadata);log("NATIVE_GHOST_ERROR: secondary metadata present; one-ghost prototype refuses mounted/paired replay");return;}
+ // Live tests (2026-10-06, owner on foot, not mounted) returned a non-null alternate
+ // metadata pointer, so its presence alone does not mean a mounted/paired recording.
+ // Pass it exactly as the original call does; the one-actor guarantee is enforced below
+ // on the decoded data (secondary count must be 0 or the factory is never called).
+ log("NATIVE_GHOST: alternate metadata=0x%llX passed as the native call does; one-actor check uses decoded secondary count",alternate);
  int size=fn<int(*)(U,uint8_t)>(0x6f1ec0)(recorder,0);
  if(size<=0){fn<void(*)(void*)>(0x3c12a0)(metadata);log("NATIVE_GHOST_ERROR: native serialized size invalid=%d",size);return;}
  U buffer=reinterpret_cast<U(*)(U,size_t,size_t)>(get<U>(get<U>(bufferAllocator)+0x50))(bufferAllocator,size,1);

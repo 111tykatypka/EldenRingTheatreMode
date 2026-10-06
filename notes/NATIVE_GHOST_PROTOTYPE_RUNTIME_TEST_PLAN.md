@@ -1,3 +1,5 @@
+> Step 2 build (2026-10-06): the earlier Step test reached the native callsite but refused because alternate metadata was non-null while the owner was on foot. Step 2 passes it as the original call does and keeps the decoded secondary-count check. Expect a `NATIVE_GHOST: alternate metadata=...` line, then `NATIVE_REPLAY_DATA ... secondary=` and either OWNED or a specific error. Same one-attempt rules apply. The build also contains the v3 UI (F4 shows it; the ghost HUD works without it).
+
 # ONE test: native ghost CREATE → REMOVE
 
 No build needed if using the supplied Release artifacts. To rebuild, run from repository root:
