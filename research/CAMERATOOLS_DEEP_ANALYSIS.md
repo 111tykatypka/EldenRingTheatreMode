@@ -1,4 +1,4 @@
-# CameraTools v1.0.18 РІР‚вЂќ deep analysis and independent Theater port
+# CameraTools v1.0.18 Р Р†Р вЂљРІР‚Сњ deep analysis and independent Theater port
 
 Date: 2026-10-07. Active checkout: EldenRingTheatreMode-P2b-independent; branch codex/cinematic-editor-pass. Reference folder remains read-only. No original game files or stable Phase5/C4 packages changed.
 
@@ -51,7 +51,7 @@ Elden Ring engine
 
 MessageHandler.cs and ConstantsEnums.cs establish the two pipe names. IGCS messages start with type byte then ID byte; setting messages type 1, binding messages type 2, actions type 7. Float payloads use BitConverter/IEEE binary32 on Windows, not strings or pointers. CameraPathsState reads four little-endian int32 values at payload offsets 2/6/10/14 and a playback-state byte at 18; it marshals UI updates through SynchronizationContext. Framing and native dispatcher must not be confused with Theater's existing versioned IPC. Our port retains YAFSML and Theater IPC; it does not add the IGCS injector or pipes.
 
-## 3. Timescale РІР‚вЂќ complete demonstrated chain
+## 3. Timescale Р Р†Р вЂљРІР‚Сњ complete demonstrated chain
 
 **STATIC_VERIFIED:** ImageAdjustmentsPage -> AppState settings -> Setting<T>.SendValueAsMessage -> MessageHandler.SendSettingMessage -> type 1/id 12 enabled boolean or id 13 float -> native RVA 0x21E260 -> feature fields +0x1EC (enabled), +0x1E8 (value) -> RVA 0x21E350 -> getter RVA 0x218A00 -> dereference global DLL RVA 0x2A19C8 -> native object +0x2CC float.
 
@@ -74,7 +74,7 @@ Constructor candidate game RVA 0xE843E0 has a vtable write at VA 0x140E843EA. RI
 
 Evidence: CAMERATOOLS_NATIVE_TRACE.json and CAMERATOOLS_GAME_TIMING_TRACE.json. Archived reference log reports AOB time site RVA DEB30F; it does not record the game's hash, so matching RVA alone is not an identity check.
 
-### Menu behavior and range РІР‚вЂќ limits of the evidence
+### Menu behavior and range Р Р†Р вЂљРІР‚Сњ limits of the evidence
 
 No verified menu-specific clock, inventory/map exclusion or menu restoration branch was found in the reference path. Feature-valid gating at RVA 0x04C1F0 is not evidence of a gameplay-only check. Documentation describes engine speed, but per-system coverage and menu response require live observation. Smoothness comes from a native multiplier while the reference camera uses a separate real-time clock; a guarantee of normal render FPS cannot be derived from the scalar alone.
 

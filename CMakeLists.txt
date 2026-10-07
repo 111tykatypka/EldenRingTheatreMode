@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(EldenRingTheaterMode LANGUAGES C CXX)
+project(EldenRingTheaterMode LANGUAGES C CXX ASM_MASM)
 add_subdirectory(shared)
 add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
  native_ui/CinematicCameraRuntime.cpp
- native_ui/GameTimingAdapter.cpp
+ native_ui/EldenRingCameraIntercept.asm
+ native_ui/EldenRingTimingAdapter.cpp
 
  native_ui/theater/TheaterOverlayUI.cpp
  native_ui/theater/TheaterSounds.cpp
@@ -16,7 +17,7 @@ target_compile_features(TheaterRenderBackend PRIVATE cxx_std_20)
 target_link_libraries(TheaterRenderBackend PUBLIC GameProfile)
 target_compile_definitions(TheaterRenderBackend PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 if(MSVC)
- target_compile_options(TheaterRenderBackend PRIVATE /utf-8 /EHsc)
+ target_compile_options(TheaterRenderBackend PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
 endif()
 
 

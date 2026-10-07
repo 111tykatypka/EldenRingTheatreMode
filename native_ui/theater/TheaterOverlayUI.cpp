@@ -2,7 +2,7 @@
 #include "TheaterSounds.h"
 #include "imgui_internal.h"
 #include "../CinematicCameraRuntime.h"
-#include "../GameTimingAdapter.h"
+#include "../EldenRingTimingAdapter.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -557,7 +557,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         const char* modes[]={"Default","Free","Dolly","Bone"};
         ImGui::Text("Selection: %s | F3: cycle",modes[runtime.mode]);
         int selectedMode=static_cast<int>(runtime.mode);if(ImGui::Combo("Camera mode",&selectedMode,modes,4)){camera_runtime::mode(selectedMode);camera_runtime::enable(selectedMode!=0);}
-        ImGui::Text("Copy hook: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
+        ImGui::Text("Native interception: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
         ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
         ImGui::TextWrapped("Runtime validation required. Test the two-second probe first; F6 immediately disables camera overrides.");
         if(ImGui::Button("2-second +0.25 X camera probe"))camera_runtime::probe();
@@ -595,7 +595,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         for(auto cut:runtime.cuts){ImGui::PushID(static_cast<int>(cut.id));ImGui::Text("%.3f - %.3f: %s",double(cut.start_ns)/1e9,double(cut.end_ns)/1e9,cut.mode==cinematic::CutMode::Player?"Player":"Dolly");ImGui::SameLine();if(ImGui::Button("Remove cut")){auto cuts=runtime.cuts;std::erase_if(cuts,[&](auto&c){return c.id==cut.id;});camera_runtime::cuts(runtime.cuts_enabled,std::move(cuts));}ImGui::PopID();}
         ImGui::TextDisabled("Gaps use Player camera; one Dolly path. Arm writes separately.");
         ImGui::TextWrapped("%s",runtime.status.c_str());
-        bool worldTiming=game_timing::enabled();if(ImGui::Checkbox("Apply timescale to live world during replay (experimental)",&worldTiming))game_timing::enable(worldTiming);
+        ImGui::TextDisabled("World speed: CameraTools scalar, synchronized while replay is playing.");
         ImGui::TextWrapped("%s",game_timing::status().c_str());
         for(auto key:runtime.keys){ImGui::PushID(static_cast<int>(key.id));
             if(ImGui::TreeNode("edit","Key %llu at %.3fs",static_cast<unsigned long long>(key.id),double(key.time_ns)/1e9)){
@@ -1208,7 +1208,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     }
     const float knobX=sliderMin.x+sliderWidth*(float)theater_timescale::normalized(value);
     dl->AddCircleFilled(ImVec2(knobX,cy),Px(5,s),Color::AccentBlue.U32());
-    if (sliderHovered) ImGui::SetTooltip("Timescale 0.001x to 10x, continuous. Shift: fine; Ctrl: ultra-fine.\nRight/middle/double click resets rate only. World control is an explicit Camera-panel option.");
+    if (sliderHovered) ImGui::SetTooltip("Timescale 0.001x to 10x, continuous. Shift: fine; Ctrl: ultra-fine.\nRight/middle/double click resets rate only. World speed follows the same rate during active replay.");
     ImGui::SameLine(0,Px(6,s));
     if (timescaleInput_[0]==0) theater_timescale::format(value,timescaleInput_,sizeof(timescaleInput_));
     ImGui::SetNextItemWidth(Px(98,s));

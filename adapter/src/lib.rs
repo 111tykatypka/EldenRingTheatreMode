@@ -139,12 +139,8 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 log_game(&format!("IN_GAME_UI_HOOKS={graphics}; visuals UNVERIFIED"));
                 if graphics!=0 {
                     let base=unsafe{GetModuleHandleW(std::ptr::null())} as usize;
-                    let pe=unsafe{PeView::module(base as *const u8)};let mut found=[0u32;1];
-                    let pattern=pelite::pattern!("4C 8B 49 18 4C 8B D1 8B 42 50 41 89 41 50 8B 42");
-                    if pe.scanner().finds_code(pattern,&mut found)&&found[0] as usize==game_profile::VAL_CAMERA_COPY_RVA {
-                        let result=unsafe{tm_camera_runtime_start((base+found[0] as usize) as *mut c_void)};
-                        log_game(&format!("CAMERA_COPY_HOOK={} RVA=0x681970 exact_profile=2.7.0.0 writes=OFF runtime=UNVERIFIED",result));
-                    } else {log_game("CAMERA_COPY_HOOK=UNAVAILABLE missing/ambiguous/unexpected signature; camera writes disabled");}
+                    let result=unsafe{tm_camera_runtime_start((base+game_profile::VAL_CAMERA_INTERCEPT_RVA) as *mut c_void)};
+                    log_game(&format!("CAMERA_INTERCEPT_HOOK={} RVA=0x{:X} mechanism=native_write_suppression exact_profile=2.7.0.0 writes=OFF runtime=UNVERIFIED",result,game_profile::VAL_CAMERA_INTERCEPT_RVA));
                 }
                 set_state(PROFILE_READY,"PROFILE_READY");
                 set_state(TASK_SIGNATURE_SCAN,"TASK_SIGNATURE_SCAN");

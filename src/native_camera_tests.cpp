@@ -1,13 +1,24 @@
 #include "../native_ui/CinematicCameraRuntime.h"
-#include "../native_ui/GameTimingAdapter.h"
+#include "../native_ui/EldenRingTimingAdapter.h"
 #include <stdexcept>
 #include <iostream>
+#include <cstring>
+extern "C" {void tm_camera_detour();extern void* tm_camera_original;}
+void native_copy_fixture(void*source,void*destination){std::memcpy(static_cast<char*>(destination)+16,static_cast<char*>(source)+16,80);}
 void check(bool ok){if(!ok)throw std::runtime_error("native camera check failed");}
 int main(){
  game_timing::enable(false);tm_world_timing_tick(0,1);check(!game_timing::enabled());
  game_timing::enable(true);tm_world_timing_tick(1,.5);check(game_timing::status()=="Timing binding unavailable/rejected");
  game_timing::enable(false);tm_world_timing_tick(0,1);check(game_timing::status()=="World timing OFF");
  theater_camera::Slot c;c.fov=1;c.aspect=1.777f;c.near_plane=.1f;c.far_plane=1000;
+ {
+  alignas(16) unsigned char source[96]{},destination[96]{};
+  cinematic::State pose{{4,5,6},{0,0,0,1},57.295779513};camera_runtime::encode_pose(pose,c.matrix);std::memcpy(source+16,&c,80);
+  tm_camera_original=reinterpret_cast<void*>(native_copy_fixture);
+  // Offline ABI/pass-through fixture; no game hooks or native game writes.
+  reinterpret_cast<void(*)(void*,void*)>(tm_camera_detour)(source,destination);
+  check(std::memcmp(source+16,destination+16,80)==0);tm_camera_original=nullptr;
+ }
  for(double angle:{0.,.01,1.,3.14,4.,6.27}){
   cinematic::State s{{4,5,6},{0,std::sin(angle/2),0,std::cos(angle/2)},57.295779513};
   camera_runtime::encode_pose(s,c.matrix);auto actual=camera_runtime::decode_candidate(c);check(actual.has_value());

@@ -1,4 +1,5 @@
-#include "GameTimingAdapter.h"
+// Sole native speed backend: signature-validated CSFlipperImp scalar used by CameraTools.
+#include "EldenRingTimingAdapter.h"
 #include "GameProfile.h"
 #include "TheaterTimescale.h"
 #include <atomic>

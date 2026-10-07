@@ -1,5 +1,5 @@
-// Independently implemented, version-guarded camera-copy experiment.
-// Native original always runs first. No GameRend owner flags or source cameras are patched.
+// Independent camera write suppression at the statically verified CameraTools site.
+// The native copy runs unchanged unless this callback successfully supplies an override.
 #include <windows.h>
 #include <realtimeapiset.h>
 #pragma comment(lib,"mincore.lib")
@@ -15,10 +15,13 @@
 #include <atomic>
 #include <cstring>
 #include <cstdio>
+extern "C" {
+void* tm_camera_original=nullptr;
+void* tm_camera_continue=nullptr;
+void tm_camera_detour();
+}
 namespace camera_runtime {
 namespace {
-using Copy=void(__fastcall*)(void*,void*,void*);
-Copy original=nullptr;
 std::mutex mutex;
 View state;
 cinematic::Track track;
@@ -94,36 +97,36 @@ void move(double dt){
  velocity=cinematic::mix(velocity,desired,state.smoothing_seconds>0?1-std::exp(-dt/state.smoothing_seconds):1);
  state.pose.position=cinematic::add(state.pose.position,cinematic::mul(velocity,dt));
 }
-void update(void*rend){
- std::unique_lock lock(mutex,std::try_to_lock);if(!lock.owns_lock()){++lock_skips;return;}
- const auto now=clock_now();std::uintptr_t out=0;
+bool update(void* output,void* source){
+ std::unique_lock lock(mutex,std::try_to_lock);if(!lock.owns_lock()){++lock_skips;return false;}
+ const auto now=clock_now();std::uintptr_t out=reinterpret_cast<std::uintptr_t>(output);
  theater_camera::Slot native;
- if(!read(reinterpret_cast<std::uintptr_t>(rend)+TM_OFF_RENDER_CAMERA_OUTPUT,&out,sizeof(out))||!read(out+TM_OFF_CAMERA_MATRIX,native.matrix,80)){state.observed=false;release("Camera output unavailable; native control restored");return;}
- auto pose=decode(native);if(!pose){state.observed=false;release("Invalid matrix/FOV; native control restored");return;}
+ if(!read(reinterpret_cast<std::uintptr_t>(source)+TM_OFF_CAMERA_MATRIX,native.matrix,80)){state.observed=false;release("Camera output unavailable; native control restored");return false;}
+ auto pose=decode(native);if(!pose){state.observed=false;release("Invalid matrix/FOV; native control restored");return false;}
  state.observed=true;state.timestamp_ns=now;
  auto effective_mode=state.cuts_enabled?static_cast<unsigned>(cut_track.evaluate(time_at(now))):state.mode;
- if(!state.enabled||effective_mode==0){state.pose=*pose;state.writing=false;input_owned=false;reset=true;last_tick=now;return;}
+ if(!state.enabled||effective_mode==0){state.pose=*pose;state.writing=false;input_owned=false;reset=true;last_tick=now;return false;}
  // RegisterHotKey can route F6 to the host instead of the game window. Poll the
  // shared emergency key here too, before any camera write.
- if(down(theater_hotkeys::Key(theater_hotkeys::Action::StopRecording))){release("Emergency Stop key; native camera control restored");state.mode=0;return;}
- if(!game_allowed||now-game_heartbeat.load()>1000000000ULL||!linked||now-host_heartbeat>1000000000ULL){release("Player/offline/host context lost; native control restored");return;}
+ if(down(theater_hotkeys::Key(theater_hotkeys::Action::StopRecording))){release("Emergency Stop key; native camera control restored");state.mode=0;return false;}
+ if(!game_allowed||now-game_heartbeat.load()>1000000000ULL||!linked||now-host_heartbeat>1000000000ULL){release("Player/offline/host context lost; native control restored");return false;}
  auto focused=GetForegroundWindow();auto game=game_window.load();DWORD pid=0;GetWindowThreadProcessId(focused,&pid);
- if(!game||!focused||pid!=GetCurrentProcessId()||GetAncestor(focused,GA_ROOT)!=GetAncestor(game,GA_ROOT)){release("Game focus lost; native control restored");return;}
- if(probe_until&&now>=probe_until){release("Two-second camera probe finished; native control restored");return;}
- if(reset){owner=reinterpret_cast<std::uintptr_t>(rend);destination=out;state.pose=*pose;if(probe_until)state.pose.position[0]+=.25;reset=false;last_tick=now;}
- if(owner!=reinterpret_cast<std::uintptr_t>(rend)||destination!=out){release("Camera generation changed; native control restored");return;}
+ if(!game||!focused||pid!=GetCurrentProcessId()||GetAncestor(focused,GA_ROOT)!=GetAncestor(game,GA_ROOT)){release("Game focus lost; native control restored");return false;}
+ if(probe_until&&now>=probe_until){release("Two-second camera probe finished; native control restored");return false;}
+ if(reset){owner=reinterpret_cast<std::uintptr_t>(source);destination=out;state.pose=*pose;if(probe_until)state.pose.position[0]+=.25;reset=false;last_tick=now;}
+ if(owner!=reinterpret_cast<std::uintptr_t>(source)||destination!=out){release("Camera generation changed; native control restored");return false;}
  double dt=std::min(double(now-last_tick)/1e9,.05);last_tick=now;
  if(!probe_until){
   if(effective_mode==1)move(dt);
   else if(effective_mode==3){
-   if(!bone_pose||now<bone_time||now-bone_time>250000000ULL){release("Bone camera target unavailable or stale; native camera restored");return;}
+   if(!bone_pose||now<bone_time||now-bone_time>250000000ULL){release("Bone camera target unavailable or stale; native camera restored");return false;}
    float basis[16];encode(*bone_pose,basis);state.pose.orientation=bone_pose->orientation;state.pose.position=bone_pose->position;
    for(int i=0;i<3;++i)for(int j=0;j<3;++j)state.pose.position[i]+=basis[j*4+i]*state.bone_offset[j];
   }
-  else if(!track.keys().empty()&&keys_replay_path!=replay_path){release("Dolly keys belong to another replay; clear them before creating a new path");return;}
+  else if(!track.keys().empty()&&keys_replay_path!=replay_path){release("Dolly keys belong to another replay; clear them before creating a new path");return false;}
   else if(auto value=track.evaluate(time_at(now))){
-   if(!state.writing&&cinematic::length(cinematic::sub(value->position,state.pose.position))>20){release("Dolly start exceeds 20 units; move camera near the path first");return;}state.pose=*value;
-  } else {release("Dolly cut has no path; native camera restored");return;}
+   if(!state.writing&&cinematic::length(cinematic::sub(value->position,state.pose.position))>20){release("Dolly start exceeds 20 units; move camera near the path first");return false;}state.pose=*value;
+  } else {release("Dolly cut has no path; native camera restored");return false;}
  }
  auto rendered=state.pose;
  // Pure timeline-based oscillation: seek/pause produce the same result and
@@ -131,18 +134,15 @@ void update(void*rend){
  if(!probe_until&&state.shake_frequency>0&&(state.shake_position>0||state.shake_rotation>0)){
   double t=double(time_at(now))/1e9;
   for(int i=0;i<3;++i){double phase=t*state.shake_frequency*6.283185307179586*(1+i*.173)+i*2.1;
-   if(!std::isfinite(phase)){release("Shake phase overflow; native camera restored");return;}double wave=std::sin(phase);
-   rendered.position[i]+=wave*state.shake_position;cinematic::Quat q{0,0,0,1};double angle=wave*(state.shake_rotation*(3.141592653589793/180));q[i]=std::sin(angle/2);q[3]=std::cos(angle/2);auto rotation=cinematic::normalized(product(rendered.orientation,q));if(!rotation){release("Invalid shake orientation; native camera restored");return;}rendered.orientation=*rotation;}
+   if(!std::isfinite(phase)){release("Shake phase overflow; native camera restored");return false;}double wave=std::sin(phase);
+   rendered.position[i]+=wave*state.shake_position;cinematic::Quat q{0,0,0,1};double angle=wave*(state.shake_rotation*(3.141592653589793/180));q[i]=std::sin(angle/2);q[3]=std::cos(angle/2);auto rotation=cinematic::normalized(product(rendered.orientation,q));if(!rotation){release("Invalid shake orientation; native camera restored");return false;}rendered.orientation=*rotation;}
  }
  float matrix[16];encode(rendered,matrix);float fov=static_cast<float>(rendered.fov_degrees*3.141592653589793/180);
- if(!cinematic::valid(state.pose)||!std::all_of(matrix,matrix+16,[](float v){return std::isfinite(v);})||!write(out+TM_OFF_CAMERA_MATRIX,matrix,64)||!write(out+TM_OFF_CAMERA_FOV,&fov,4)){release("Camera write failed; native control restored on next native copy");return;}
+ if(!cinematic::valid(state.pose)||!std::all_of(matrix,matrix+16,[](float v){return std::isfinite(v);})||!write(out+TM_OFF_CAMERA_MATRIX,matrix,64)||!write(out+TM_OFF_CAMERA_FOV,&fov,4)){release("Camera write failed; native control restored on next native copy");return false;}
  state.writing=true;input_owned=true;state.status=probe_until?"Two-second offset probe active":"Experimental camera override active (runtime unverified)";
+ return true;
 }
-void __fastcall hook(void*rend,void*a,void*b){
- original(rend,a,b);if(faulted)return;
- const auto start=clock_now();++hook_calls;
- try{update(rend);}catch(...){faulted=true;input_owned=false;}hook_cost_ns.fetch_add(clock_now()-start,std::memory_order_relaxed);
-}
+
 }
 View view(){std::lock_guard lock(mutex);auto copy=state;copy.keys=track.keys();copy.cuts=cut_track.cuts();if(faulted){copy.enabled=false;copy.writing=false;copy.status="Camera backend faulted; overrides disabled until process restart";}return copy;}
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot&slot){return decode(slot);}
@@ -213,13 +213,22 @@ extern "C" void tm_camera_bone_publish(const float* root,const float*qs){
  auto value=camera_runtime::bone_world(root,qs);std::unique_lock lock(camera_runtime::mutex,std::try_to_lock);if(!lock.owns_lock())return;
  camera_runtime::bone_pose=value;camera_runtime::bone_time=camera_runtime::clock_now();camera_runtime::state.bone_available=value.has_value();
 }
-extern "C" int tm_camera_runtime_start(void*address){
+extern "C" int tm_camera_intercept(void* output,void* source){
+ using namespace camera_runtime;if(faulted)return 0;
+ const auto start=clock_now();++hook_calls;bool applied=false;
+ try{applied=update(output,source);}catch(...){faulted=true;input_owned=false;}
+ hook_cost_ns.fetch_add(clock_now()-start,std::memory_order_relaxed);return applied?1:0;
+}
+extern "C" int tm_camera_runtime_start(void* address){
  using namespace camera_runtime;
- const unsigned char expected[]={0x4c,0x8b,0x49,0x18,0x4c,0x8b,0xd1,0x8b,0x42,0x50,0x41,0x89,0x41,0x50,0x8b,0x42};unsigned char bytes[16];
- if(!read(reinterpret_cast<std::uintptr_t>(address),bytes,16)||memcmp(bytes,expected,16))return 0;
- if(MH_CreateHook(address,reinterpret_cast<void*>(hook),reinterpret_cast<void**>(&original))!=MH_OK)return 0;
- if(MH_EnableHook(address)!=MH_OK){MH_RemoveHook(address);return 0;}
- std::lock_guard lock(mutex);state.hook_ready=true;state.status="Native camera-copy observer ready; writes OFF";return 1;
+ auto base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+ const unsigned char expected[]=TM_CAMERA_INTERCEPT_BYTES;unsigned char bytes[sizeof(expected)];
+ static_assert(sizeof(expected)==TM_VAL_CAMERA_CONTINUE_RVA-TM_VAL_CAMERA_INTERCEPT_RVA);
+ if(reinterpret_cast<std::uintptr_t>(address)!=base+TM_VAL_CAMERA_INTERCEPT_RVA||!read(reinterpret_cast<std::uintptr_t>(address),bytes,sizeof(bytes))||memcmp(bytes,expected,sizeof(bytes)))return 0;
+ tm_camera_continue=reinterpret_cast<void*>(base+TM_VAL_CAMERA_CONTINUE_RVA);
+ if(MH_CreateHook(address,reinterpret_cast<void*>(tm_camera_detour),&tm_camera_original)!=MH_OK)return 0;
+ if(MH_EnableHook(address)!=MH_OK){MH_RemoveHook(address);tm_camera_original=nullptr;return 0;}
+ std::lock_guard lock(mutex);state.hook_ready=true;state.status="CameraTools-equivalent native interception ready; writes OFF";return 1;
 }
 extern "C" void tm_camera_game_context(int allowed){camera_runtime::game_allowed=allowed!=0;camera_runtime::game_heartbeat=camera_runtime::clock_now();}
 extern "C" void tm_camera_runtime_stop(){camera_runtime::stop();}

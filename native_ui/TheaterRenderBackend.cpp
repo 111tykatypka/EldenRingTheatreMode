@@ -1,7 +1,7 @@
 // Independent DX12 backend. Design references: FreecamMod and dx12-imgui-overlay.
 // No game offsets or character writes are implemented in this translation unit.
 #include <windows.h>
-#include "GameTimingAdapter.h"
+#include "EldenRingTimingAdapter.h"
 #include <realtimeapiset.h>
 #pragma comment(lib,"mincore.lib")
 #define DIRECTINPUT_VERSION 0x0800
@@ -94,6 +94,7 @@ public:
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
  void command(std::uint32_t kind,std::uint64_t value=0,const char*text=nullptr){if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
   if(kind==TheaterUI::kCommandSetVisibility){set_visibility(value==0?TheaterUI::UiVisibility::Shown:TheaterUI::UiVisibility::Hidden);return;}
+  if(kind==theater_ui::play||kind==theater_ui::restart||kind==theater_ui::toggle_playback)game_timing::enable(true);
   if(kind==theater_ui::stop){game_timing::enable(false);camera_runtime::stop();if(emergency)emergency();}std::lock_guard lock(ipc);
   // A scrub produces many seeks and the pipe sends one request per round trip, so only the newest pending seek matters.
   if(kind==theater_ui::seek&&!commands.empty()&&commands.back().command==theater_ui::seek){commands.back().value=value;return;}
