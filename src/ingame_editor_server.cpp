@@ -29,7 +29,7 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  case theater_ui::replay_unload:unload_replay();break;
  case theater_ui::seek:seek_replay(r.value);break;case theater_ui::previous:step_replay(-1);break;case theater_ui::next:step_replay(1);break;
  case theater_ui::timescale:{std::lock_guard lock(app.replay_mutex);if(app.replay_player)app.replay_player->set_timescale(theater_timescale::decode(r.value));break;}
- case theater_ui::select:if(!app.game_replay->active())app.selected_replay_actor=r.value;break;
+ case theater_ui::select:app.selected_replay_actor=r.value;break;
  case theater_ui::page:offset=static_cast<std::uint32_t>(std::min<std::uint64_t>(r.value,UINT32_MAX));break;
  // Same recorder path as F5 and the host Start button; post_command refuses while a replay is active.
  case theater_ui::record_start:post_command(Command::start);break;case theater_ui::record_stop:post_command(Command::stop);break;

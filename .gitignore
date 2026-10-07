@@ -74,3 +74,6 @@ __pycache__/
 *.pyc
 
 third_party/minhook/
+
+# Third-party reference binaries (Otis_Inf CameraTools, proprietary): local study only, never committed
+reference/EldenRing_CameraTools_v1018/

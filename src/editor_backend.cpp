@@ -21,15 +21,13 @@ PlaybackView playback_view() {
   std::lock_guard lock(app.replay_mutex);
   PlaybackView v;
   v.loaded = bool(app.replay_player);
-  v.active = app.game_replay && app.game_replay->active();
+  // The player character plays bone replays inside the game (adapter bone_replay); the host only
+  // owns the timeline clock, so "active" (the retired position-only in-game replay) is always false.
   v.clock_hz = app.clock_hz;
-  if (app.game_replay) {
-    v.phase = app.game_replay->phase();
-    v.diagnostic = app.game_replay->diagnostic();
-  }
   if (v.loaded) {
     v.state = app.replay_player->state();
     v.summary = app.replay_player->summary();
+    v.phase = v.state.status == replay::Status::playing ? 2u : v.state.status == replay::Status::paused ? 3u : 0u;
   }
   return v;
 }
@@ -73,15 +71,10 @@ void playback_tick() {
   std::lock_guard lock(app.replay_mutex);
   try {
     if (app.replay_player) {
-      if (app.game_replay->active()) {
-        app.game_replay->tick();
-        ++generated;
-      } else
-        app.replay_player->advance();
+      app.replay_player->advance();
+      ++generated;
     }
   } catch (const std::exception &e) {
-    if (app.game_replay)
-      app.game_replay->stop();
     log_line(std::string("REPLAY_WORKER_ERROR=") + e.what());
   }
   const auto now = replay::Player::Clock::now();
@@ -251,44 +244,16 @@ void choose_game() {
 }
 void emergency_stop() {
   std::lock_guard playback_lock(app.replay_mutex);
-  if (app.game_replay)
-    app.game_replay->stop();
-  else
-    app.control.emergency_stop();
+  app.control.emergency_stop();
   if (app.replay_player)
     app.replay_player->stop();
   post_command(Command::stop);
   log_line("Emergency STOP requested: probe/replay OFF, ReplayPlayer stopped, "
            "recorder stop requested");
 }
-bool can_start_game_replay() {
-  Snapshot snap;
-  {
-    std::lock_guard lock(app.mutex);
-    snap = app.data;
-  }
-  {
-    std::lock_guard lock(app.commands_mutex);
-    if (!app.commands.empty()) {
-      log_line("REPLAY_START refused: recorder command pending");
-      return false;
-    }
-  }
-  if (!app.stop_hotkey || snap.state == erplay::RecordingState::recording ||
-      snap.state == erplay::RecordingState::paused ||
-      snap.state == erplay::RecordingState::saving) {
-    log_line("REPLAY_START refused: F6 unavailable or recorder active");
-    MessageBoxW(app.window, L"Stop recording first and ensure F6 is available.",
-                L"In-game replay", MB_OK | MB_ICONINFORMATION);
-    return false;
-  }
-  return true;
-}
 void pause_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
-  if (app.game_replay->active())
-    app.game_replay->pause();
-  else if (app.replay_player)
+  if (app.replay_player)
     app.replay_player->pause();
 }
 void toggle_replay() {
@@ -307,19 +272,12 @@ void seek_replay(std::uint64_t t) {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
-  if (app.game_replay->active())
-    app.game_replay->stop();
   app.replay_player->seek(t);
 }
 void step_replay(int direction) {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
-  if (app.game_replay->active()) {
-    const auto t = app.replay_player->state().timestamp_ns;
-    app.game_replay->stop();
-    app.replay_player->seek(t);
-  }
   app.replay_player->step(direction);
 }
 void save_bookmarks() {
@@ -397,7 +355,6 @@ void launch_game() {
                 L"Game launch failed", MB_ICONERROR | MB_OK);
   }
 }
-void return_replay_start(){std::lock_guard lock(app.replay_mutex);if(app.replay_player&&can_start_game_replay())app.game_replay->prepare_start(*app.replay_player);}
 // A replay recorded with bone data has "<file>.bones" beside it. The game DLL plays those bones on
 // the player itself, following this host timeline, so the old position-only in-game replay is skipped.
 bool has_bones(const fs::path& replay){if(replay.empty())return false;auto p=replay;p+=L".bones";std::error_code ec;return fs::is_regular_file(p,ec);}
@@ -405,33 +362,15 @@ void play_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
-  if (has_bones(app.opened_replay)) { app.replay_player->play(); return; }
-  if (app.game_pid.load() || app.game_replay->active()) {
-    if (can_start_game_replay()) {
-      app.game_replay->enable_animation(app.animation&&!app.xz_diagnostic);
-      app.game_replay->xz_diagnostic(app.xz_diagnostic);
-      app.game_replay->enable_characters(app.actor_playback);
-      app.game_replay->select_actor_only(app.selected_actor_only?app.selected_replay_actor:0);
-      app.game_replay->play(*app.replay_player, app.limit_ns);
-    }
-  } else
-    app.replay_player->play();
+  // Replays without bone data (recorded before bone replays) only move the timeline.
+  if (!has_bones(app.opened_replay)) log_line("REPLAY_PLAY timeline only: this replay has no bone data");
+  app.replay_player->play();
 }
 void restart_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
-  if (has_bones(app.opened_replay)) { app.replay_player->restart(); return; }
-  if (app.game_pid.load() || app.game_replay->active()) {
-    if (can_start_game_replay()) {
-      app.game_replay->enable_animation(app.animation&&!app.xz_diagnostic);
-      app.game_replay->xz_diagnostic(app.xz_diagnostic);
-      app.game_replay->enable_characters(app.actor_playback);
-      app.game_replay->select_actor_only(app.selected_actor_only?app.selected_replay_actor:0);
-      app.game_replay->restart(*app.replay_player, app.limit_ns);
-    }
-  } else
-    app.replay_player->restart();
+  app.replay_player->restart();
 }
 void pipe_worker() {
   fs::path log_path = app.logs / L"TheaterModeRecorder.log";
@@ -839,7 +778,6 @@ void unload_replay() {
   app.character_views.clear();
   app.replay_bookmarks.clear();
   app.selected_replay_actor = 0;
-  app.selected_actor_only = false;
   log_line("REPLAY_UNLOAD reader/timeline/actor previews released; files preserved");
 }
 void bookmark_add() {
@@ -868,8 +806,6 @@ void initialize(HWND window) {
                std::ios::binary | std::ios::app);
   load_loader_path();
   {const auto order=library::load_sort(app.root);app.sort_key=static_cast<std::uint32_t>(order.key);app.sort_descending=order.descending;}
-  app.game_replay =
-      std::make_unique<in_game_replay::Controller>(app.control, log_line);
   using theater_hotkeys::Action;
   register_hotkey(window, 1, theater_hotkeys::Key(Action::StartRecording), "START RECORDING");
   app.stop_hotkey = register_hotkey(window, 2, theater_hotkeys::Key(Action::StopRecording), "STOP");

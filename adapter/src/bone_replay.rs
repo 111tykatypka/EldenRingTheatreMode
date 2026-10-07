@@ -55,7 +55,7 @@ const RECORD_RECORDING:u32=1;
 const RECORD_PAUSED:u32=2;
 
 #[repr(C)]struct Link{linked:u32,recording:u32,loaded:u32,playing:u32,overlay_shown:u32,reserved:u32,timescale:f64,play_source_ns:u64,received_ns:u64,recording_path:[c_char;260],loaded_path:[c_char;260]}
-unsafe extern "C"{fn tm_render_native_status(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
+unsafe extern "C"{fn tm_render_event(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
 struct Frame{time:u64,transform:Transform,matrix:[f32;16],local:Vec<u8>,model:Vec<u8>}
@@ -73,7 +73,7 @@ static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,la
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
-pub(crate) fn status(text:&str){if let Ok(c)=CString::new(text){unsafe{tm_render_native_status(c.as_ptr())}}}
+pub(crate) fn status(text:&str){if let Ok(c)=CString::new(text){unsafe{tm_render_event(c.as_ptr())}}}
 fn text(c:&[c_char;260])->String{unsafe{CStr::from_ptr(c.as_ptr())}.to_string_lossy().into_owned()}
 fn link()->Link{let mut l:Link=unsafe{std::mem::zeroed()};unsafe{tm_overlay_bone_link(&mut l)};l}
 fn read_ptr(address:usize)->usize{if address<0x10000{return 0;}unsafe{std::ptr::read_volatile(address as *const usize)}}
@@ -184,7 +184,7 @@ pub fn tick(group:usize,now:u64){
   use std::sync::atomic::Ordering::Relaxed;
   let start=START.load(Relaxed);let frames=COUNT.fetch_add(1,Relaxed)+1;
   if start==0{START.store(now,Relaxed);}else if now.saturating_sub(start)>=5_000_000_000{
-   crate::log_game(&format!("DRAW_CALLBACK_CADENCE hz={:.2} elapsed_ms={} pose_interpolation={} world_timing=QUARANTINED (task cadence, not GPU FPS)",frames as f64*1e9/(now-start)as f64,(now-start)/1_000_000,interpolated_pose_enabled()));
+   crate::log_game(&format!("DRAW_CALLBACK_CADENCE hz={:.2} elapsed_ms={} pose_interpolation={} (task cadence, not GPU FPS)",frames as f64*1e9/(now-start)as f64,(now-start)/1_000_000,interpolated_pose_enabled()));
    COUNT.store(0,Relaxed);START.store(now,Relaxed);
   }
  }
@@ -234,8 +234,6 @@ pub fn tick(group:usize,now:u64){
     if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}
     else if let Some(chr)=chr{release(s,chr,"invalid root interpolation");}
    }}
-  let fresh=l.linked!=0&&l.received_ns!=0&&now.saturating_sub(l.received_ns)<500_000_000;
-  crate::timescale::update(fresh&&l.playing!=0&&s.owning&&chr.is_some()&&s.loaded.is_some()&&s.recording.is_none(),l.timescale,now);
   return;}
  let Some(chr)=chr else {return;};
  if group==DRAW_GROUP&&!s.record_paused&&s.last_second!=u64::MAX{

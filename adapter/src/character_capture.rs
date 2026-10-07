@@ -15,7 +15,6 @@ impl Capture {
  pub fn new()->Self{
   let (mut radius,mut hz,mut budget)=(200f32,60f32,1024usize);
   if let Some(base)=std::env::var_os("LOCALAPPDATA") {if let Ok(text)=std::fs::read_to_string(std::path::PathBuf::from(base).join("EldenRingTheaterMode/Modern.capture.ini")){for line in text.lines(){if let Some((k,v))=line.split_once('='){match k.trim(){"radius"=>{if let Ok(n)=v.trim().parse::<f32>(){if n.is_finite()&&n>0.0{radius=n;}}},"hz"=>{if let Ok(n)=v.trim().parse::<f32>(){if n.is_finite()&&(1.0..=120.0).contains(&n){hz=n;}}},"budget"=>{if let Ok(n)=v.trim().parse::<usize>(){if (1..=16384).contains(&n){budget=n;}}},_=>{}}}}}}
-  crate::actor_replay::configure_budget(budget);
   let _=FRAME.set(Mutex::new(Frame{seq:0,time:0,flags:0,rows:Vec::with_capacity(budget),visuals:Vec::with_capacity(budget+1)}));
   crate::log_game(&format!("CHARACTER_CAPTURE configured radius={radius} requested_hz={hz} resource_budget={budget}; read-only EXPERIMENTAL"));
   Self{radius,interval:(1e9/hz as f64)as u64,budget,next:0,sequence:0,next_id:1,identities:Vec::with_capacity(budget)}

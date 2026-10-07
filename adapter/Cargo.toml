@@ -7,11 +7,6 @@ edition = "2024"
 name = "TheaterMode"
 crate-type = ["cdylib"]
 
-[features]
-native-bloodstain-readonly = []
-native-payload-capture = ["native-bloodstain-readonly"]
-native-replay-ghost-create-remove = ["native-bloodstain-readonly"]
-
 [dependencies]
 pelite = "0.10"
 eldenring = { git = "https://github.com/KamiyamaShiki0704/fromsoftware-rs", rev = "3c8c1d7633a99309fb004c9f894ea10b7967d0e0" }

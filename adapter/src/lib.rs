@@ -1,4 +1,3 @@
-mod replay_return;
 use std::{
     ffi::{c_void, CStr},
     fs::OpenOptions,
@@ -15,27 +14,11 @@ use pelite::pe64::{Pe, PeView};
 
 mod game_profile { include!(concat!(env!("OUT_DIR"), "/game_profile.rs")); }
 mod control_protocol;
-mod transform_probe;
-mod start_guard;
-mod native_debug_flags;
-mod probe_runtime;
-mod transform_replay;
-mod replay_runtime;
-mod local_input;
+mod control_link;
 mod player_action;
-mod locomotion_trace;
 mod character_capture;
-mod grounding;
-mod ownership_probe;
-mod world_observation;
-mod research_readonly;
-mod native_bloodstain;
-mod native_ghost_prototype;
-mod ghost_appearance;
 mod bone_replay;
-mod timescale;
 mod replay_interpolation;
-mod actor_replay;
 mod visual_capture;
 mod fidelity_capture;
 const STATE_WAITING:u32=0;const DLL_LOADED:u32=1;const PROFILE_VALIDATING:u32=2;const PROFILE_READY:u32=3;const TASK_SIGNATURE_SCAN:u32=10;const TASK_SIGNATURE_READY:u32=11;const TASK_RUNTIME_SEARCH:u32=12;const TASK_RUNTIME_READY:u32=13;const WORLDCHR_SEARCH:u32=20;const WORLDCHR_READY:u32=21;const PLAYER_SEARCH:u32=22;const PLAYER_FOUND:u32=23;const STATE_READY:u32=24;
@@ -47,7 +30,7 @@ const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_C
 const _:()=assert!(std::mem::size_of::<WireMessage>()==104);
 #[repr(C)]struct TmValidationReport{size:u32,status:u32,checked:u32,passed:u32,file_version:[u16;4],product_version:[u16;4],machine:u16,reserved:u16,image_base:usize,runtime_path:[u16;32768],sha256:[i8;65]}
 unsafe extern "C"{fn tm_render_start(emergency:extern "C" fn())->i32;}
-extern "C" fn render_emergency_stop(){replay_runtime::stop(0);probe_runtime::stop(0);}
+extern "C" fn render_emergency_stop(){log_game("EMERGENCY_STOP from the overlay (no game writes are active outside bone replay)");}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
 #[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
 #[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
@@ -73,8 +56,8 @@ static ACTION:[AtomicU32;8]=[const{AtomicU32::new(0)};8];
 fn publish(s:PlayerSample,action:player_action::State){SEQ.fetch_add(1,Ordering::AcqRel);TIME.store(s.timestamp_ns,Ordering::Relaxed);PRESENT.store(s.player_present,Ordering::Relaxed);let values=[s.position[0],s.position[1],s.position[2],s.quaternion_xyzw[0],s.quaternion_xyzw[1],s.quaternion_xyzw[2],s.quaternion_xyzw[3],s.euler_raw[0],s.euler_raw[1],s.euler_raw[2]];for(dst,value)in VALUES.iter().zip(values){dst.store(value.to_bits(),Ordering::Relaxed);}for(i,b)in action.encode().chunks_exact(4).enumerate(){ACTION[i].store(u32::from_le_bytes(b.try_into().unwrap()),Ordering::Relaxed);}SEQ.fetch_add(1,Ordering::Release);}
 fn latest()->Option<PlayerSample>{loop{let before=SEQ.load(Ordering::Acquire);if before&1!=0{std::hint::spin_loop();continue;}let mut v=[0.0;10];for(dst,src)in v.iter_mut().zip(VALUES.iter()){*dst=f32::from_bits(src.load(Ordering::Relaxed));}let t=TIME.load(Ordering::Relaxed);let present=PRESENT.load(Ordering::Relaxed);std::sync::atomic::fence(Ordering::Acquire);let after=SEQ.load(Ordering::Acquire);if before==after{return if after==0{None}else{Some(PlayerSample{sequence:after/2,timestamp_ns:t,position:[v[0],v[1],v[2]],quaternion_xyzw:[v[3],v[4],v[5],v[6]],euler_raw:[v[7],v[8],v[9]],player_present:present})};}}}
 #[unsafe(no_mangle)]pub unsafe extern "C" fn theater_get_latest_sample(out:*mut PlayerSample)->bool{if out.is_null(){return false;}if let Some(sample)=latest(){unsafe{out.write(sample);}true}else{false}}
-fn latest_action()->player_action::State {let mut b=[0u8;32];for(i,a)in ACTION.iter().enumerate(){b[i*4..i*4+4].copy_from_slice(&a.load(Ordering::Relaxed).to_le_bytes());}player_action::State::decode(&b)}
-fn latest_pair()->Option<(PlayerSample,player_action::State)>{loop{let before=SEQ.load(Ordering::Acquire);if before&1!=0{continue;}let sample=latest();let action=latest_action();std::sync::atomic::fence(Ordering::Acquire);if before==SEQ.load(Ordering::Acquire){return sample.map(|s|(s,action));}}}
+#[cfg(test)]fn latest_action()->player_action::State {let mut b=[0u8;32];for(i,a)in ACTION.iter().enumerate(){b[i*4..i*4+4].copy_from_slice(&a.load(Ordering::Relaxed).to_le_bytes());}player_action::State::decode(&b)}
+#[cfg(test)]fn latest_pair()->Option<(PlayerSample,player_action::State)>{loop{let before=SEQ.load(Ordering::Acquire);if before&1!=0{continue;}let sample=latest();let action=latest_action();std::sync::atomic::fence(Ordering::Acquire);if before==SEQ.load(Ordering::Acquire){return sample.map(|s|(s,action));}}}
 fn version(v:[u16;4])->String{format!("{}.{}.{}.{}",v[0],v[1],v[2],v[3])}
 fn check_text(report:&TmValidationReport,flag:u32)->&'static str{if report.checked&flag==0{"UNAVAILABLE"}else if report.passed&flag!=0{"PASS"}else{"FAIL"}}
 #[cfg(windows)]fn validate_runtime_profile()->u32{
@@ -137,7 +120,6 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     return;
                 }
                 log_game("Runtime profile accepted: EldenRing_1_17 / WW 2.7.0.0");
-                native_ghost_prototype::initialize();
                 // Early, after exact executable guard; never under the loader lock.
                 let graphics=unsafe{tm_render_start(render_emergency_stop)};
                 log_game(&format!("IN_GAME_UI_HOOKS={graphics}; visuals UNVERIFIED"));
@@ -164,40 +146,16 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 set_state(TASK_RUNTIME_READY,"TASK_RUNTIME_READY");
                 set_state(WORLDCHR_SEARCH,"WORLDCHR_SEARCH");
                 let world_ready=std::sync::atomic::AtomicBool::new(false);let player_found=std::sync::atomic::AtomicBool::new(false);
-                let mut probe=probe_runtime::GameProbe::default();
-                let mut replay=replay_runtime::GameReplay::default();
-                let mut trace=locomotion_trace::Capture::default();
                 fidelity_capture::initialize();
                 let mut characters=character_capture::Capture::new();
-                grounding::initialize();
 
-                let mut ownership=ownership_probe::Probe::default();
-                let mut world_observation=world_observation::Capture::default();
                 // Warm reflected singleton resolution outside game callbacks; instance may not yet exist.
                 let _=unsafe{eldenring::cs::CSLuaEventManImp::instance()};
-                let mut research=research_readonly::Capture::new();
-                let mut native_replay=native_bloodstain::Capture::new();
-                let mut actors=actor_replay::Actors::new();
-                let early=Box::leak(Box::new(RecurringTask::new(move |_:&FD4TaskData|{let now=monotonic_ns();grounding::player(now,"player_pre_behavior");if !cfg!(feature="native-bloodstain-readonly"){local_input::early_tick(now);actor_replay::early_tick(now);}} )));
-                unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PreBehaviorSafe,early);}
-                log_game("EXPERIMENTAL normalized input callback registered at ChrIns_PreBehaviorSafe; inactive unless replay owns local player");
                 let mut last_animation_id=-1i32;
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
                     characters.tick(now);
-                    grounding::player(now,"player_post_physics_before");
-                    world_observation.tick(now);
-                    research.tick(now);
-                    native_replay.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}
-                    {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(ghost_appearance::tick).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("GHOST_APPEARANCE_ERROR: tick panicked; ghosts may keep the default look");}}
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
-                    if !cfg!(feature="native-bloodstain-readonly") {
-                      if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||probe.tick(now))).is_err(){probe.fail();}
-                      if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||replay.tick(now))).is_err(){replay.fail();}
-                    }
-                    grounding::player(now,"player_post_physics_after");
-                    if !cfg!(feature="native-bloodstain-readonly") {ownership.tick(now);actors.tick(now);}
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {
                         if !world_ready.swap(true,Ordering::AcqRel){log_game(&format!("WorldChrMan READY; instance={:p}",world));set_state(WORLDCHR_READY,"WORLDCHR_READY");set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}
                         if let Some(player)=world.main_player.as_ref() {
@@ -239,15 +197,14 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
             log_game("Sampler worker thread creation failed");
             PROFILE.store(ERR_SAMPLER_THREAD,Ordering::Release);
         }
-        if std::thread::Builder::new().name("TheaterMode.LocomotionTrace".into()).spawn(locomotion_trace::worker).is_err(){log_game("Locomotion trace worker unavailable");}
         let _=std::thread::Builder::new().name("TheaterMode.Characters".into()).spawn(character_capture::worker);
         let ipc=std::thread::Builder::new().name("TheaterMode.IPC".into()).spawn(pipe_worker);
         if ipc.is_err() {
             log_game("IPC worker thread creation failed");
             PROFILE.store(ERR_IPC_THREAD,Ordering::Release);
         }
-        if std::thread::Builder::new().name("TheaterMode.Control".into()).spawn(probe_runtime::pipe_worker).is_err(){
-            log_game("Control worker creation failed; probe remains OFF");
+        if std::thread::Builder::new().name("TheaterMode.Control".into()).spawn(control_link::pipe_worker).is_err(){
+            log_game("Control worker creation failed; the host will show the game as not connected");
         }
     }
     1

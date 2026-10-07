@@ -21,7 +21,7 @@ namespace TheaterUI
         // panels
         Connection, Game, Player, Connected, Waiting, Found, LivePosition, Actors, Previous, NextPage,
         ActorRow, SelectedActor, EventLog, EventLogEmpty, NotYetAvailable, CameraNotes, LookNotes,
-        ReplaysNotes, ExportNotes, Diagnostic, NativeGhost, NativeGhostNone, Language, UiScale,
+        ReplaysNotes, ExportNotes, Diagnostic, Language, UiScale,
         Recording, RecordingSaving, RecordingPaused, HotkeysTitle, HotkeysBody, ReplayTime, Duration,
         // event log
         LogHostLinked, LogHostLost, LogGameConnected, LogGameWaiting, LogPlayerFound, LogPlayerLost,
@@ -69,7 +69,7 @@ namespace TheaterUI
         { "Record with the button below or F5, stop with F6. Click a replay to open it.",
           "Запись: кнопка ниже или F5, стоп: F6. Нажмите на запись, чтобы открыть её." },
         { "Video export is planned after the camera tools.", "Экспорт видео запланирован после инструментов камеры." },
-        { "Host diagnostic", "Диагностика" }, { "Native ghost", "Нативный призрак" }, { "No native ghost status yet", "Статуса нативного призрака пока нет" },
+        { "Host diagnostic", "Диагностика" },
         { "Language", "Язык" }, { "UI scale", "Масштаб интерфейса" },
         { "REC", "REC" }, { "SAVING", "СОХРАНЕНИЕ" }, { "REC PAUSED", "ЗАПИСЬ НА ПАУЗЕ" },
         { "Keys", "Клавиши" },

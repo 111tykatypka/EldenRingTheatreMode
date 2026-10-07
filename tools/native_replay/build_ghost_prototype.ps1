@@ -14,7 +14,7 @@ Invoke-Checked $cmake @('--build',(Join-Path $buildRoot 'probe'),'--config','Rel
 $priorLib=$env:THEATER_NATIVE_LIBRARY_ROOT;$priorTarget=$env:CARGO_TARGET_DIR
 try {
  $env:THEATER_NATIVE_LIBRARY_ROOT=$buildRoot;$env:CARGO_TARGET_DIR=$cargoRoot
- Invoke-Checked $cargo @('build','--manifest-path',(Join-Path $repoRoot 'adapter/Cargo.toml'),'--release','--locked','--offline','--target','x86_64-pc-windows-msvc','--features','native-replay-ghost-create-remove')
+ Invoke-Checked $cargo @('build','--manifest-path',(Join-Path $repoRoot 'adapter/Cargo.toml'),'--release','--locked','--offline','--target','x86_64-pc-windows-msvc')
 }finally{$env:THEATER_NATIVE_LIBRARY_ROOT=$priorLib;$env:CARGO_TARGET_DIR=$priorTarget}
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $buildRoot 'Release/EldenRingTheaterMode.exe') -Destination $OutputDirectory
@@ -28,7 +28,7 @@ $sources=@('adapter/Cargo.toml','adapter/Cargo.lock','adapter/build.rs','CMakeLi
 $hashRows=@($sources|Sort-Object -Unique|ForEach-Object{$h=Get-FileHash -LiteralPath (Join-Path $repoRoot $_) -Algorithm SHA256;"$($h.Hash)  $_"})
 $hashRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt') -Encoding utf8
 $binaryRows=@(Get-ChildItem -LiteralPath $OutputDirectory -File|Where-Object Extension -in '.exe','.dll'|ForEach-Object{"$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)  $($_.Name)"})
-@("branch=$branch","source_commit=$commit","build_timestamp_utc=$([DateTime]::UtcNow.ToString('o'))",'feature=native-replay-ghost-create-remove','configuration=Release x64','runtime=UNVERIFIED','game_sha256=D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134',"source_manifest_sha256=$((Get-FileHash -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt')).Hash)",'worktree_status_at_build:')+$status+$binaryRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'BUILD_MANIFEST.txt') -Encoding utf8
+@("branch=$branch","source_commit=$commit","build_timestamp_utc=$([DateTime]::UtcNow.ToString('o'))",'feature=bone-replay','configuration=Release x64','runtime=UNVERIFIED','game_sha256=D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134',"source_manifest_sha256=$((Get-FileHash -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt')).Hash)",'worktree_status_at_build:')+$status+$binaryRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'BUILD_MANIFEST.txt') -Encoding utf8
 $implementationNotes = Join-Path $repoRoot 'notes/REPLAY_STATUS.md'
 $runtimeNotes = Join-Path $repoRoot 'notes/RECOVERY_STARTUP_SLOWDOWN.md'
 if (!(Test-Path -LiteralPath $implementationNotes)) { $implementationNotes = Join-Path $repoRoot 'notes/NATIVE_GHOST_PROTOTYPE_IMPLEMENTATION_STATUS.md' }

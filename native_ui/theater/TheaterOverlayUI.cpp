@@ -192,11 +192,11 @@ void Overlay::Observe(const OverlayFrame& f)
         add(s.recording_state == theater_ui::record_recording ? Tone::Live : Tone::Info, names[std::min<std::uint32_t>(s.recording_state, 3)]);
         lastRecording_ = s.recording_state;
     }
-    if (f.nativeStatus != lastNative_)
+    for (const auto& e : f.events)
     {
-        if (!f.nativeStatus.empty())
-            add(f.nativeStatus.find("ERROR") != std::string::npos ? Tone::Error : Tone::Accent, Str::Count, f.nativeStatus);
-        lastNative_ = f.nativeStatus;
+        const bool error = e.find("ERROR") != std::string::npos || e.find("could not") != std::string::npos;
+        eventError_ |= error;
+        add(error ? Tone::Error : Tone::Accent, Str::Count, e);
     }
 }
 
@@ -378,7 +378,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     float y = o.y + Px(52, s);
     for (const auto& it : top) { railButton(it, y, false); y += btn + Px(4, s); }
 
-    const bool nativeWarning = f.nativeStatus.find("ERROR") != std::string::npos;
+    const bool nativeWarning = eventError_;
     float yb = std::max(y + Px(8, s), railBottom - Px(12, s) - (btn + Px(4, s)) * 3);
     for (const auto& it : bottom) { railButton(it, yb, it.tool == Tool::Debug && nativeWarning); yb += btn + Px(4, s); }
 
@@ -504,16 +504,6 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         break;
     case Tool::Debug:
     {
-        section(T(Str::NativeGhost));
-        const std::string& n = f.nativeStatus;
-        const Rgba nc = n.find("ERROR") != std::string::npos ? Color::AccentRed : n.find("waiting") != std::string::npos ? Color::AccentAmber : Color::AccentBlue;
-        PushFont(Font::Mono);
-        ImGui::PushStyleColor(ImGuiCol_Text, (n.empty() ? Color::TextMuted : nc).Vec4());
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextUnformatted(n.empty() ? T(Str::NativeGhostNone) : n.c_str());
-        ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
-        ImGui::PopFont();
         section(T(Str::Diagnostic));
         PushFont(Font::Mono);
         ImGui::PushTextWrapPos(0.0f);

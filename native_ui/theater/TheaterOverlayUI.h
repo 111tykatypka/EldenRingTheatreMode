@@ -24,7 +24,7 @@ namespace TheaterUI
     {
         theater_ui::Snapshot snapshot;   // copy taken under the IPC lock
         bool        hostLinked = false;  // pipe round trip succeeded at least once since the last drop
-        std::string nativeStatus;        // latest native ghost HUD line ("" when none)
+        std::vector<std::string> events; // new game-side event log lines since the last frame
         double      now = 0.0;           // seconds, monotonic
         UiVisibility visibility = UiVisibility::Hidden;
         double      hiddenAt = -100.0;   // when F4 last hid the UI, for the fading hint
@@ -76,7 +76,8 @@ namespace TheaterUI
 
         // Event log, newest at the back.
         std::deque<LogLine> log_;
-        std::string lastDiagnostic_, lastNative_;
+        std::string lastDiagnostic_;
+        bool  eventError_ = false;            // an event since start mentioned an error (Debug badge)
         std::uint32_t lastRecording_ = theater_ui::record_idle;
         int  lastLinked_ = -1, lastConnected_ = -1, lastPlayer_ = -1, lastLoaded_ = -1;
 

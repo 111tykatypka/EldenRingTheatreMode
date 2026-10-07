@@ -13,7 +13,6 @@
 #include "GameProfile.h"
 #include "clock_helpers.hpp"
 #include "game_launcher.hpp"
-#include "in_game_replay.hpp"
 #include "playback_worker.hpp"
 #include <shlobj.h>
 
@@ -75,7 +74,6 @@ struct App {
   std::uint32_t library_message_id{}, library_message_error{};
   std::atomic_bool sample_pipe_ready{};
   game_control::Client control;
-  std::unique_ptr<in_game_replay::Controller> game_replay;
   std::recursive_mutex replay_mutex;
   std::jthread playback_thread;
   double clock_hz{};
@@ -100,16 +98,14 @@ struct App {
   std::vector<erplay::Vec3> preview_path;
   fs::path opened_replay;
   std::uint64_t limit_ns{};
-  bool animation{};bool xz_diagnostic{};
-  bool actor_playback{};
-  bool selected_actor_only{};std::uint64_t selected_replay_actor{};
+  std::uint64_t selected_replay_actor{};
 };
 extern App app;
 struct PlaybackView {
   bool loaded{}, active{};
   replay::State state;
   erplay::Summary summary;
-  in_game_replay::Phase phase{};
+  std::uint32_t phase{}; // theater_ui snapshot phase: 0 idle, 2 playing, 3 paused
   std::wstring diagnostic;
   double clock_hz{};
 };
@@ -122,7 +118,6 @@ void post_command(Command);
 bool handle_global_hotkey(UINT);
 void emergency_stop();
 void play_replay();
-void return_replay_start();
 void pause_replay();
 void toggle_replay();
 void restart_replay();

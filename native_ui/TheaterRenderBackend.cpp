@@ -37,7 +37,8 @@ struct Input{HWND hwnd;UINT msg;WPARAM w;LPARAM l;};
 class TheaterRenderBackend {
 public:
  std::recursive_mutex graphics;std::mutex ipc,input_mutex;
- std::mutex native_status_mutex;char native_status[2048]{};ULONGLONG native_status_tick{};std::atomic_bool native_status_visible{};
+ // Messages from the game side (bone replay) for the overlay event log; drained by draw().
+ std::mutex events_mutex;std::deque<std::string> events;
  BOOL (WINAPI* set_cursor_pos)(int,int){};BOOL (WINAPI* clip_cursor)(const RECT*){};Present present{};Resize resize{};Create create{};CreateHwnd create_hwnd{};
  std::vector<void*> targets;ComPtr<IDXGISwapChain3> chain;ComPtr<ID3D12CommandQueue> queue;ComPtr<ID3D12Device> device;
  ComPtr<ID3D12DescriptorHeap> rtvs,srvs;ComPtr<ID3D12GraphicsCommandList> list;ComPtr<ID3D12Fence> fence;
@@ -146,38 +147,23 @@ public:
   dx12_ready=ImGui_ImplDX12_Init(&info);if(!dx12_ready)return false;
   ui_ready=true;log("DX12_IMGUI_INITIALIZED; v3 UI; F4 shows/hides, Shift+F4 clean; runtime visuals require user verification");return true;
  }
- // anchor_right/top: top-right corner to place the HUD at (the game area while the UI is shown).
- void draw_native_status(float anchor_right,float anchor_top){
-  char text[2048];ULONGLONG tick;{std::lock_guard lock(native_status_mutex);memcpy(text,native_status,sizeof(text));tick=native_status_tick;}
-  auto*v=ImGui::GetMainViewport();const float dpi=GetDpiForWindow(hwnd)/96.f;
-  ImGui::SetNextWindowPos(ImVec2(anchor_right-16*dpi,anchor_top+16*dpi),ImGuiCond_Always,ImVec2(1,0));
-  ImGui::SetNextWindowBgAlpha(.90f);
-  ImGui::Begin("Native Ghost Status",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoDocking);
-  ImGui::TextUnformatted("NATIVE REPLAY GHOST — EXPERIMENTAL");ImGui::TextUnformatted("F10: Create once | F11: Remove / Cancel");
-  bool waiting=strstr(text,"REQUESTED; waiting")||strstr(text,"queued for native");
-  ImVec4 color=strstr(text,"ERROR")?ImVec4(1,.35f,.3f,1):waiting?ImVec4(1,.8f,.25f,1):ImVec4(.45f,.9f,1,1);
-  ImGui::PushTextWrapPos(std::min(460*dpi,v->WorkSize.x*.65f));ImGui::PushStyleColor(ImGuiCol_Text,color);ImGui::TextUnformatted(text);ImGui::PopStyleColor();ImGui::PopTextWrapPos();
-  if(waiting){double remaining=std::max(0.0,60.0-double(GetTickCount64()-tick)/1000.0);ImGui::Text("Waiting for native context: %.1f seconds remaining",remaining);ImGui::TextUnformatted("Do not press F11 yet — it cancels pending Create.");}
-  ImGui::End();
- }
  bool recording_now(){std::lock_guard lock(ipc);return TheaterUI::Overlay::IsRecording(snapshot);}
- // Builds the v3 UI frame from a snapshot copy. Returns the rects, for placing the native ghost HUD.
+ // Builds the v3 UI frame from a snapshot copy.
  TheaterUI::LayoutRects draw(){
   TheaterUI::OverlayFrame frame;{std::lock_guard lock(ipc);frame.snapshot=snapshot;}
   frame.hostLinked=host_linked.load();frame.visibility=TheaterUI::UiVisibility(visibility.load());
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
-  if(native_status_visible.load()){std::lock_guard lock(native_status_mutex);frame.nativeStatus=native_status;}
+  {std::lock_guard lock(events_mutex);frame.events.assign(events.begin(),events.end());events.clear();}
   auto&io=ImGui::GetIO();const bool shown=frame.visibility==TheaterUI::UiVisibility::Shown;io.MouseDrawCursor=false; // the overlay draws its own cursor (TheaterOverlayUI)
   const auto rects=overlay.Draw(frame,[](void*user,std::uint32_t kind,std::uint64_t value,const char*text){static_cast<TheaterRenderBackend*>(user)->command(kind,value,text);},this);
   text_input=shown&&ImGui::GetIO().WantTextInput;
   capture_mouse=shown&&io.WantCaptureMouse;capture_keyboard=shown&&io.WantCaptureKeyboard;return rects;
  }
  void render(IDXGISwapChain*sc,UINT flags){if(flags&DXGI_PRESENT_TEST)return;std::lock_guard lock(graphics);if(failed||!chain||sc!=static_cast<IDXGISwapChain*>(chain.Get()))return;
-  // Draw only when something is visible: the UI, the REC pill (not in Shift+F4 clean mode),
-  // the F4 hint, or the noninteractive native ghost HUD, which is independent of F4.
+  // Draw only when something is visible: the UI, the REC pill (not in Shift+F4 clean mode), or the F4 hint.
   const auto vis=TheaterUI::UiVisibility(visibility.load());
-  const bool hint=vis==TheaterUI::UiVisibility::Hidden; // permanent "F4 Show UI" hint (same startup rendering as the native HUD)
-  const bool needed=vis==TheaterUI::UiVisibility::Shown||native_status_visible.load()||hint||(vis!=TheaterUI::UiVisibility::HiddenClean&&recording_now());
+  const bool hint=vis==TheaterUI::UiVisibility::Hidden; // permanent "F4 Show UI" hint
+  const bool needed=vis==TheaterUI::UiVisibility::Shown||hint||(vis!=TheaterUI::UiVisibility::HiddenClean&&recording_now());
   if(!needed&&!context)return;
   const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
   if(!context&&!initialize_resources()){log("DX12_RESOURCE_INIT_FAILED; overlay disabled; replay integration unchanged");release_resources();failed=true;return;}
@@ -200,8 +186,7 @@ public:
    else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
-  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();feed_virtual_mouse();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");const auto rects=draw();
-  if(native_status_visible.load()){const bool shown=vis==TheaterUI::UiVisibility::Shown;draw_native_status(shown?rects.areaMax.x:ImGui::GetIO().DisplaySize.x,0.f);}
+  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();feed_virtual_mouse();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");draw();
   ImGui::Render();if(!needed)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
   D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={f.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET};list->ResourceBarrier(1,&barrier);
@@ -321,7 +306,8 @@ HRESULT STDMETHODCALLTYPE on_resize(IDXGISwapChain*s,UINT n,UINT w,UINT h,DXGI_F
 HRESULT STDMETHODCALLTYPE on_create(IDXGIFactory*f,IUnknown*q,DXGI_SWAP_CHAIN_DESC*d,IDXGISwapChain**out){auto hr=backend().create(f,q,d,out);if(SUCCEEDED(hr))backend().adopt(*out,q);return hr;}
 HRESULT STDMETHODCALLTYPE on_create_hwnd(IDXGIFactory2*f,IUnknown*q,HWND w,const DXGI_SWAP_CHAIN_DESC1*d,const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*full,IDXGIOutput*o,IDXGISwapChain1**out){auto hr=backend().create_hwnd(f,q,w,d,full,o,out);if(SUCCEEDED(hr))backend().adopt(*out,q);return hr;}
 }
-extern "C" void tm_render_native_status(const char* text){auto&b=backend();{std::lock_guard lock(b.native_status_mutex);strncpy_s(b.native_status,text,_TRUNCATE);b.native_status_tick=GetTickCount64();}b.native_status_visible=true;}
+// A line for the overlay event log (Debug panel), e.g. bone replay status. Bounded; the oldest lines drop.
+extern "C" void tm_render_event(const char* text){auto&b=backend();std::lock_guard lock(b.events_mutex);b.events.emplace_back(text?text:"");while(b.events.size()>256)b.events.pop_front();}
 extern "C" int tm_render_start(void(*emergency)()){
  auto&b=backend();b.emergency=emergency;b.exception_observer=AddVectoredExceptionHandler(0,observe_exception);b.log("DIAGNOSTIC_BUILD CLEAN startup; UI opt-in; exception observer does not handle faults");ComPtr<ID3D12Device>d;ComPtr<ID3D12CommandQueue>q;ComPtr<IDXGIFactory4>factory;ComPtr<IDXGISwapChain>swap;
  HWND dummy=CreateWindowExW(0,L"STATIC",L"Theater DX12 discovery",WS_POPUP,0,0,1,1,nullptr,nullptr,nullptr,nullptr);if(!dummy)return 0;
