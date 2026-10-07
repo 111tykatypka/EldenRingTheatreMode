@@ -20,6 +20,8 @@ pub struct Observation{
  pub reason:u32,
 }
 impl Observation{
+ /// HP known, a real maximum, and none left.
+ pub fn hp_depleted(&self)->bool{self.known&KNOWN_HP!=0&&self.max_hp>0&&self.hp<=0}
  pub fn same_state(&self,other:&Self)->bool{let mut a=*self;let mut b=*other;a.time=0;b.time=0;a==b}
  pub fn unobserved(time:u64,id:u32)->Self{Self{time,id,availability:1,reason:1,..Default::default()}}
  pub fn valid(&self)->bool{self.id!=0&&self.known&!15==0&&self.flags&!3==0&&self.availability<=1&&self.reason<=3
@@ -93,7 +95,10 @@ impl Timeline{
  /// "not observed" record, if the recording ends with one) of an actor.
  pub fn derive(&self,id:u32)->Option<Derived>{
   let v=self.tracks.get(&id)?;let first=v.iter().find(|o|o.availability==0)?;
-  let death=v.iter().find(|o|o.availability==0&&state(o)==State::DeathFlagged).map(|o|o.time);
+  // Death is the earlier of the SDK death flag and HP running out. Field evidence (2026-10-07 recording):
+  // an enemy reached HP 0 while the death flag stayed false, so the flag alone misses real deaths.
+  // HP 0 only counts when the actor has a maximum HP, so invincible or HP-less NPCs are never "dead".
+  let death=v.iter().find(|o|o.availability==0&&(state(o)==State::DeathFlagged||o.hp_depleted())).map(|o|o.time);
   let last_observed=v.iter().rev().find(|o|o.availability==0)?.time;
   let vanished=v.iter().rev().find(|o|o.availability!=0&&o.time>last_observed).map(|o|o.time);
   Some(Derived{first_seen:first.time,death,vanished,last_observed})}
@@ -102,12 +107,17 @@ impl Timeline{
   let Some(d)=self.derive(id) else {return Existence::Unknown};
   if t<d.first_seen{return Existence::NotYet;}
   if let Some(v)=d.vanished{if t>=v{return if d.death.is_some_and(|x|x<=v){Existence::Gone}else{Existence::Left};}}
-  match self.at(id,t).map(state){Some(State::DeathFlagged)=>Existence::Dead,Some(State::ObservedAlive)=>Existence::Alive,_=>{
-   // Between observations (one-second refresh) the earlier state holds; death is monotonic in a recording.
-   if d.death.is_some_and(|x|t>=x){Existence::Dead}else{Existence::Alive}}}}
+  // Death is monotonic in a recording: from its first signal on, the actor is dead until it is gone.
+  if d.death.is_some_and(|x|t>=x){Existence::Dead}else{Existence::Alive}}
 }
 #[cfg(test)]mod lifecycle_tests{
  use super::*;
+ fn hp(t:u64,hp:i32)->Observation{Observation{time:t*1_000_000_000,id:1,known:KNOWN_BODY|KNOWN_FLAGS|KNOWN_HP|KNOWN_POSE,flags:RENDER_ENABLED,hp,max_hp:100,..Default::default()}}
+ #[test]fn hp_running_out_is_death_even_when_the_flag_never_sets(){
+  // Real recording: hp reached 0 with death_flag=false. Seek back must still resurrect.
+  let t=Timeline::from_records(vec![hp(0,100),hp(5,60),hp(10,0),hp(14,0)]).unwrap();
+  assert_eq!(t.existence(1,7*1_000_000_000),Existence::Alive);assert_eq!(t.existence(1,12*1_000_000_000),Existence::Dead);assert_eq!(t.existence(1,3*1_000_000_000),Existence::Alive);}
+ #[test]fn actors_without_max_hp_are_never_dead(){let mut o=hp(0,0);o.max_hp=0;let t=Timeline::from_records(vec![o]).unwrap();assert_eq!(t.existence(1,0),Existence::Alive);}
  const S:u64=1_000_000_000;
  fn o(t:u64,flags:u32)->Observation{Observation{time:t*S,id:1,known:KNOWN_BODY|KNOWN_FLAGS|KNOWN_HP|KNOWN_POSE,flags:flags|RENDER_ENABLED,hp:if flags&DEAD!=0{0}else{100},max_hp:100,..Default::default()}}
  /// The owner's scenario: alive at 0, hit at 9, dies at 12, corpse, gone at 30.

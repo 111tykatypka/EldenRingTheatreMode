@@ -78,7 +78,11 @@ fn read_byte(a:usize)->u8{let mut b=[0u8];crate::companions::copy(a,&mut b);b[0]
 fn write_bits(chr:usize,which:u8,set:u8,clear:u8){if let Some(a)=flag_byte(chr,which){unsafe{let v=std::ptr::read_volatile(a as *const u8);std::ptr::write_volatile(a as *mut u8,(v|set)&!clear);}}}
 const RENDER:u8=1<<3;const INVINCIBLE:u8=1<<4;const DROPPED_ITEM:u8=1;const DROPPED_RUNES:u8=2;
 /// Live death/render state of a body, from the documented flag bytes.
-fn live_state(chr:usize)->Option<(bool,bool)>{let a=flag_byte(chr,5)?;let v=read_byte(a);Some((v&(1<<7)!=0,v&RENDER!=0))}
+/// Dead = SDK death flag OR HP spent: a recorded kill left the death flag false while HP was 0.
+fn live_state(chr:usize)->Option<(bool,bool)>{let a=flag_byte(chr,5)?;let v=read_byte(a);
+ let data=unsafe{&*(chr as *const ChrIns)}.modules.data.as_ptr();
+ let spent=!data.is_null()&&match(crate::companions::dword(unsafe{&raw const (*data).hp as usize}),crate::companions::dword(unsafe{&raw const (*data).max_hp as usize})){(Some(h),Some(m))=>(m as i32)>0&&(h as i32)<=0,_=>false};
+ Some((v&(1<<7)!=0||spent,v&RENDER!=0))}
 fn set_render(chr:usize,on:bool){if on{write_bits(chr,5,RENDER,0)}else{write_bits(chr,5,0,RENDER)}}
 /// What represents a recorded actor at replay time T.
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
