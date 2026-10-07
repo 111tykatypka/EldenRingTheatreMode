@@ -77,3 +77,7 @@ third_party/minhook/
 
 # Third-party reference binaries (Otis_Inf CameraTools, proprietary): local study only, never committed
 reference/EldenRing_CameraTools_v1018/
+
+# Local reference indexes and preserved build packages
+.research/
+outputs/
