@@ -110,3 +110,14 @@ because their own chunk fields are unrelated per-character values), interpolates
 samples is not a 32 m jump, and verifies arrival by comparing live physics with the converted target. Only a different
 origin id still blocks (no known conversion). Grace travel is now chosen by map area only; anchors are not distances.
 RUNTIME: UNKNOWN until you play a replay from a different tile.
+
+## STEP A: update-LOD (omission) override
+Mechanism (COMPILE_VERIFIED, SDK structs + unit test that GameProfile offsets equal the SDK layout):
+while recording, or while a replay with recorded actors owns the body, `WorldChrManDbg.omission_update_num_type_override` is set to
+Normal and the near/far "full update" budgets to 4096 (originals saved and restored; in-memory only, nothing persisted); every
+tracked body also gets `ChrInsFlags1c4.force_update` each frame. Nothing is written unless the values read back are plausible
+(omission mode in {-2,0,1,5,20,30}, override in -1..2). Logs: `OMISSION:` (engage/restore), `ACTOR_OMISSION:` every 5 s while
+recording (every-frame / slower / not-updated / unreadable counts), `ACTOR_DIAG ... omission=` for held bodies.
+"Before" measurement (`tools/actor_duplicate_poses.py`, recording `Replay 2026-10-07 23-49`, no override): share of frames whose
+local pose is bit-identical to the previous frame: <20 m 100% (1 actor, 416 frames), 20-60 m 82.7% (13 actors), >60 m 84.8% (26 actors).
+Run the same tool on a new recording to get the "after" numbers. RUNTIME: UNKNOWN.

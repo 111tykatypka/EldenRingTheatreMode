@@ -42,6 +42,7 @@ impl Timeline{
    let track=out.tracks.entry(r.id).or_default();if track.last().is_some_and(|p|p.time>=r.time){return Err("actor observation times must increase".into());}track.push(r);}
   Ok(out)
  }
+ #[allow(dead_code)]
  pub fn at(&self,id:u32,t:u64)->Option<&Observation>{let v=self.tracks.get(&id)?;
   let i=v.partition_point(|o|o.time<=t);if i==0{None}else{v.get(i-1)}}
 }

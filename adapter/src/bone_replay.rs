@@ -31,6 +31,7 @@ use std::sync::{Arc,Mutex};
 use std::sync::mpsc::SyncSender;
 use crate::world_file::{self,Message};
 use crate::world_state;
+use crate::omission;
 use eldenring::cs::{WorldChrMan,ChrIns,CSChrPhysicsModule};
 use fromsoftware_shared::FromStatic;
 
@@ -408,6 +409,10 @@ pub fn tick(group:usize,now:u64){
     s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
   }
   s.host=(l.playing!=0,l.timescale,l.play_source_ns,l.received_ns);
+  // Update-LOD override (STEP A): on while recording, or while a replay with recorded actors owns the body.
+  let want_omission=s.recording.is_some()||(s.owning&&s.loaded.as_ref().is_some_and(|l|l.actors.is_some()));
+  if want_omission&&!omission::engaged(){if let Err(e)=omission::engage(){static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||{crate::log_game(&format!("OMISSION_UNAVAILABLE: {e}"));status("OMISSION: update-level override unavailable (see log); distant actors may be recorded at a reduced rate");});}}
+  else if !want_omission&&omission::engaged(){omission::release();}
   // After physics: put the root back where this frame's replay time says (physics may have moved it).
   if s.owning&&!matches!(s.arrival,Arrival::Warping{..}){if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}}
   if s.owning{if let Some(chr)=chr{advance_arrival(s,chr,now);}}

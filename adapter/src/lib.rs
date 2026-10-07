@@ -24,6 +24,7 @@ mod codec;
 mod world_file;
 mod world_state;
 mod actors;
+mod omission;
 mod actor_lifetime;
 mod companions;
 mod skeleton;

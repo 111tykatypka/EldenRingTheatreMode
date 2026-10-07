@@ -81,3 +81,11 @@ extern "C" __declspec(dllexport) int __cdecl tm_anti_cheat_state();
 #define TM_VAL_ACTOR_NEAR 30
 // Corruption guard for the SDK's companion ChrSet capacity, not a recording actor limit.
 #define TM_VAL_COMPANION_SCAN_GUARD 4096
+// Update-LOD ("omission") override (STEP A). These come from the pinned SDK structs and are asserted
+// against them by a unit test (omission.rs game_profile_offsets_match_the_sdk_layout). Values are
+// plausibility-checked at runtime before any write: omission mode in {-2,0,1,5,20,30}, override in -1..2.
+#define TM_OFF_CHRINS_OMISSION_MODE 0xB4
+#define TM_OFF_CHRINS_FLAGS_1C4 0x1C4
+#define TM_OFF_WCMDBG_OMISSION_OVERRIDE 0x20
+#define TM_OFF_WCMDBG_OMISSION_NEAR 0x24
+#define TM_OFF_WCMDBG_OMISSION_FAR 0x30

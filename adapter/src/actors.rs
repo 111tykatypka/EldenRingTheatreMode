@@ -117,9 +117,9 @@ fn live()->Vec<usize>{live_snapshot(false).0}
 // ------------------------------------------------------------------------------------------ record
 /// Per-recording identities and rate control; lives while the host records.
 struct Identity{info:ActorInfo,announced:bool,category:u32,seen:u64,skeleton:Option<crate::skeleton::Definition>}
-pub struct Recorder{ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64,observations:HashMap<u32,Observation>}
+pub struct Recorder{omission_at:u64,hist:crate::omission::Histogram,ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64,observations:HashMap<u32,Observation>}
 impl Recorder{
- pub fn new()->Self{Self{ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0,observations:HashMap::new()}}
+ pub fn new()->Self{Self{omission_at:0,hist:Default::default(),ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0,observations:HashMap::new()}}
  /// Samples nearby characters; `player` is the main player's ChrIns, `tx` the world file writer.
  pub fn sample(&mut self,now:u64,player:usize,tx:&SyncSender<Message>){
   self.frame+=1;
@@ -141,6 +141,9 @@ impl Recorder{
    }
    let p=c.modules.physics.position;let d=((p.0-origin.0).powi(2)+(p.1-origin.1).powi(2)+(p.2-origin.2).powi(2)).sqrt();
    if !d.is_finite()||(radius>0.0&&d>radius){continue;}
+   // Update level of every tracked body; with the override engaged each one is also told to update this
+   // frame (ChrInsFlags1c4.force_update), so far or off-screen actors are not recorded at a reduced rate.
+   self.hist.add(if crate::omission::engaged(){crate::omission::force_update(chr)}else{crate::omission::mode_of(chr)});
    let key=(handle_of(c),c.event_entity_id,c.npc_param_id);
    // Reappearance after an observation gap gets a new recording identity, even if a handle was reused.
    if self.ids.get(&key).is_some_and(|i|now.saturating_sub(i.seen)>500_000_000){self.ids.remove(&key);}
@@ -177,6 +180,8 @@ impl Recorder{
   let mut observations:Vec<_>=catalog.into_iter().map(|id|observed.remove(&id).unwrap_or_else(||Observation::unobserved(now,id))).filter(|o|self.observations.get(&o.id).is_none_or(|old|!o.same_state(old)||now.saturating_sub(old.time)>=1_000_000_000)).collect();
   // Retired generations still get a missing observation; they are never reused as new actors.
   for (&id,old) in &self.observations{if !current_ids.contains(&id)&&old.availability==0{observations.push(Observation::unobserved(now,id));}}
+  if now>=self.omission_at{self.omission_at=now.saturating_add(5_000_000_000);let h=self.hist;self.hist=Default::default();
+   crate::log_game(&format!("ACTOR_OMISSION: override_engaged={} tracked bodies this second: every-frame={} slower={} not-updated={} unreadable={}",crate::omission::engaged(),h.every_frame,h.slow,h.not_updated,h.unreadable));}
   observations.sort_by_key(|o|o.id);let committed=observations.clone();
   let count=batch.len() as u64;
   let companion_context:Vec<_>=context.iter().filter(|c|c.id!=0&&c.category!=0).copied().collect();
@@ -298,7 +303,7 @@ impl Player{
      Plan::Absent=>{}}}
    if newly>0||!self.logged{self.logged=true;crate::log_game(&format!("ACTORS: {} of {} recorded characters held by the replay ({} puppets)",self.controlled.len(),self.tracks.len(),self.controlled.values().filter(|c|c.puppet).count()));}}
   if now>=self.next_log&&!self.controlled.is_empty(){self.next_log=now+5_000_000_000;
-   for (id,c) in &self.controlled{crate::log_game(&format!("ACTOR_DIAG: id={id} representation={:?} existence={:?} body=0x{:X} ai_isolation=no-move+no-attack+invincible",if c.puppet{Representation::Puppet}else{Representation::Live},existence.get(id),c.chr));}}
+   for (id,c) in &self.controlled{crate::log_game(&format!("ACTOR_DIAG: id={id} representation={:?} existence={:?} body=0x{:X} omission={} ai_isolation=no-move+no-attack+invincible",if c.puppet{Representation::Puppet}else{Representation::Live},existence.get(id),c.chr,crate::omission::describe(crate::omission::mode_of(c.chr))));}}
   for (info,track,parents) in &mut self.tracks{
    let Some(ctl)=self.controlled.get(&info.id) else {continue};let chr=ctl.chr;let is_puppet=ctl.puppet;
    // The character must still be the same one (a reload can reuse the address).
@@ -346,6 +351,7 @@ impl Player{
       unsafe{std::ptr::copy_nonoverlapping(self.local.as_ptr(),local as *mut u8,bones*QS);std::ptr::copy_nonoverlapping(self.model.as_ptr(),model as *mut u8,bones*QS);}pose_written=true;}}}
    if !pose_written{if let Some(c)=self.controlled.remove(&info.id){restore(&c);}if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} pose mismatch; released instead of root-only sliding",info.id));}continue;}
    write_transform(chr,&root);set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);
+   if crate::omission::engaged(){crate::omission::force_update(chr);} // held and puppet bodies update every frame
    if let (Some(a),Some(_))=(debug_flags(chr),ctl.flags){unsafe{let v=std::ptr::read_volatile(a as *const u32);std::ptr::write_volatile(a as *mut u32,v|(profile::VAL_DEBUG_FLAG_NO_MOVE|profile::VAL_DEBUG_FLAG_NO_ATTACK) as u32);}}
   }}
  /// Gives every held live body its flags, gravity and position back, and asks the game to unload puppets.
