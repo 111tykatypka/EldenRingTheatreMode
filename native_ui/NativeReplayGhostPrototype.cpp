@@ -412,6 +412,46 @@ void animRequestTest(U player) {
  log("%s",line);
  tm_render_native_status("ANIM TEST (F9): done. Did your character kneel and pray?");
 }
+// Probe 6 (spike 3 confirmed the override plays event animations such as 60100): request 60100,
+// then compare the active event clip with the roll clip (a000_022100) and two more clips, to find
+// which field selects the animation asset (binding index). Read-only apart from the same 60100
+// request already tested.
+std::vector<U> collectClips(U graph){
+ std::vector<U> queue{graph},seen{graph},clips;
+ for(size_t qi=0;qi<queue.size()&&queue.size()<6000;++qi){
+  const U object=queue[qi];unsigned char b[0x300];if(!read(object,b,sizeof(b)))continue;
+  for(size_t o=8;o+8<=sizeof(b);o+=8){U v;memcpy(&v,b+o,8);if(!pointerish(v))continue;
+   auto consider=[&](U q){if(std::find(seen.begin(),seen.end(),q)!=seen.end())return;const auto n=rttiName(q);if(n.rfind("hk",0)!=0&&n.find("Custom")==std::string::npos)return;
+    seen.push_back(q);if(n=="hkbClipGenerator")clips.push_back(q);if(n.rfind("hkb",0)==0||n.find("Custom")!=std::string::npos||n.find("@hkbStateMachine")!=std::string::npos)queue.push_back(q);};
+   if(!rttiName(v).empty()){consider(v);continue;}
+   U items[16];if(!read(v,items,sizeof(items)))continue;for(U it:items)if(pointerish(it))consider(it);}}
+ return clips;}
+std::string clipTitle(U clip){U p=get<U>(clip+0x48);return pointerish(p)?asciiAt(p):std::string();}
+void dumpClip(const char* label,U clip){
+ unsigned char b[0x200]{};read(clip,b,sizeof(b));char line[1900];
+ int n=snprintf(line,sizeof(line),"ANIM_PROBE6: %s @0x%llX name=%s ints:",label,clip,clipTitle(clip).c_str());
+ for(size_t o=0x30;o<sizeof(b)&&n<int(sizeof(line))-24;o+=4){uint32_t u;memcpy(&u,b+o,4);n+=snprintf(line+n,sizeof(line)-n," %zX=%X",o,u);}
+ log("%s",line);}
+void animProbe6(U player){
+ tm_render_native_status("ANIM PROBE 6 (F9): praying, then comparing clips...");
+ U modules=get<U>(player+layout[1]),behavior=get<U>(modules+layout[8]),event=get<U>(modules+layout[10]);
+ U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0,graph=character?get<U>(character+0x98):0;
+ if(!graph||!event){log("ANIM_PROBE6: graph/event missing");return;}
+ auto clips=collectClips(graph);
+ std::vector<float> t0(clips.size());for(size_t i=0;i<clips.size();++i)t0[i]=get<float>(clips[i]+0x140);
+ const int32_t id=60100;SIZE_T w{};WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(event+layout[11]),&id,4,&w);
+ Sleep(400);
+ // clips whose time moved during the prayer and are named like the prayer
+ unsigned shown=0;
+ for(size_t i=0;i<clips.size()&&shown<6;++i){const auto name=clipTitle(clips[i]);const float t=get<float>(clips[i]+0x140);
+  if(name.find("060100")!=std::string::npos||(t!=t0[i]&&name.find("0601")!=std::string::npos)){dumpClip(t!=t0[i]?"PRAYER(active)":"PRAYER(idle)",clips[i]);++shown;}}
+ shown=0;for(U c:clips){const auto name=clipTitle(c);if(name.find("022100")!=std::string::npos&&shown<3){dumpClip("ROLL",c);++shown;}}
+ shown=0;for(U c:clips){const auto name=clipTitle(c);if(name.find("060000")!=std::string::npos&&shown<2){dumpClip("DOOR",c);++shown;}}
+ // the binding set: hkbCharacter+0x90 setup -> +0x40 hkbAnimationBindingSet -> +0x18 bindings array
+ U setup=get<U>(character+0x90),bindingSet=setup?get<U>(setup+0x40):0;
+ log("ANIM_PROBE6: %zu clips; setup=0x%llX bindingSet=0x%llX(%s) arr=0x%llX size=%d",clips.size(),setup,bindingSet,rttiName(bindingSet).c_str(),get<U>(bindingSet+0x18),get<int32_t>(bindingSet+0x20));
+ tm_render_native_status("ANIM PROBE 6 (F9): done.");
+}
 std::atomic<bool> probeRunning{};
 void keys() {
  bool lastCreate=false,lastRemove=false;
@@ -435,7 +475,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))animRequestTest(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
+     if(ready(w,player,recorder))animProbe6(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
