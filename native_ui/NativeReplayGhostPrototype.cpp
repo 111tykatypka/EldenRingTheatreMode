@@ -531,6 +531,66 @@ void animSpike5(U player){
  log("%s",line);
  tm_render_native_status(result==0xFFFFFFFFu?"ANIM TEST 5 (F9): the game rejected W_BackStep":"ANIM TEST 5 (F9): done. Did your character back step by itself?");
 }
+// Skeleton probe (READ-ONLY): find the arrays where the game keeps the player's bone pose, so a
+// replay can record every bone each frame and later write it onto the puppet. Bone poses are
+// stored either as hkQsTransform (translation, unit quaternion, scale; 48 bytes per bone) or as
+// 4x4 matrices (64 bytes). The probe walks objects reachable from the player (ChrIns, its pose
+// importer/skeleton modifier, model instance, behavior module and hkbCharacter), reports every run
+// of 20+ valid bone transforms, and samples each twice 300 ms apart to see which follow movement.
+bool qsValid(const float* f){
+ for(int i=0;i<12;++i)if(!std::isfinite(f[i]))return false;
+ const float n=f[4]*f[4]+f[5]*f[5]+f[6]*f[6]+f[7]*f[7];if(n<0.98f||n>1.02f)return false;
+ for(int i=8;i<11;++i)if(f[i]<0.3f||f[i]>3.f)return false;
+ for(int i=0;i<3;++i)if(std::fabs(f[i])>50.f)return false;
+ return true;}
+bool matValid(const float* f){
+ for(int i=0;i<16;++i)if(!std::isfinite(f[i]))return false;
+ for(int r=0;r<3;++r){const float*v=f+r*4;const float l=v[0]*v[0]+v[1]*v[1]+v[2]*v[2];if(l<0.8f||l>1.25f||std::fabs(v[3])>0.001f)return false;}
+ if(std::fabs(f[15]-1.f)>0.001f)return false;
+ for(int i=12;i<15;++i)if(std::fabs(f[i])>100000.f)return false;
+ return true;}
+int boneRun(U address,size_t stride,int limit){
+ int count=0;float b[16*32];
+ while(count<limit){const int chunk=32;if(!read(address+size_t(count)*stride,b,stride*chunk/4*4)){break;}
+  for(int i=0;i<chunk;++i){const float*f=reinterpret_cast<const float*>(reinterpret_cast<const unsigned char*>(b)+i*stride);
+   if(!(stride==48?qsValid(f):matValid(f)))return count;++count;}}
+ return count;}
+uint64_t hashBytes(U address,size_t bytes){uint64_t h=1469598103934665603ull;unsigned char b[4096];
+ for(size_t o=0;o<bytes;o+=sizeof(b)){const size_t n=std::min(sizeof(b),bytes-o);if(!read(address+o,b,n))return 0;for(size_t i=0;i<n;++i){h^=b[i];h*=1099511628211ull;}}return h;}
+void skeletonProbe(U player){
+ tm_render_native_status("SKELETON PROBE (F9): looking for your bones (read-only). Keep running for 2 seconds...");
+ U modules=get<U>(player+layout[1]),behavior=get<U>(modules+layout[8]);
+ U holder=behavior?get<U>(behavior+0x10):0,character=holder?get<U>(holder+0x30):0;
+ struct Node{U address;int parent;U offset;int depth;};
+ std::vector<Node> nodes;std::vector<U> seen;
+ auto add=[&](U a,int parent,U offset,int depth){if(!pointerish(a)||std::find(seen.begin(),seen.end(),a)!=seen.end())return;seen.push_back(a);nodes.push_back({a,parent,offset,depth});};
+ add(player,-1,0,0);add(get<U>(player+0x398),-1,0x398,0);add(get<U>(player+0x3A8),-1,0x3A8,0);
+ add(get<U>(player+layout[7]),-1,layout[7],0);add(behavior,-1,layout[8],0);add(character,-1,0xC0FFEE,0);
+ const char* rootNames[]={"ChrIns","ChrIns+398(poseImporter)","ChrIns+3A8(skelToModel)","ChrModelIns","BehaviorModule","hkbCharacter"};
+ struct Hit{U address;int node;U offset;int count;size_t stride;};std::vector<Hit> hits;std::vector<U> hitSeen;
+ auto test=[&](U a,int node,U offset){for(size_t stride:{size_t(48),size_t(64)}){if(std::find(hitSeen.begin(),hitSeen.end(),a*2+(stride==64))!=hitSeen.end())continue;
+  const int n=boneRun(a,stride,1024);if(n>=20){hitSeen.push_back(a*2+(stride==64));hits.push_back({a,node,offset,n,stride});}}};
+ for(size_t qi=0;qi<nodes.size()&&nodes.size()<5000;++qi){
+  const Node node=nodes[qi];const size_t span=node.depth==0?0x2000:0x400;std::vector<unsigned char> b(span);
+  if(!read(node.address,b.data(),span)){if(!read(node.address,b.data(),0x100))continue;b.resize(0x100);}
+  for(size_t o=0;o+64<=b.size();o+=16)test(node.address+o,int(qi),o); // inline arrays
+  if(node.depth>=3)continue;
+  for(size_t o=0;o+8<=b.size();o+=8){U v;memcpy(&v,b.data()+o,8);if(!pointerish(v))continue;test(v,int(qi),o);add(v,int(qi),o,node.depth+1);}}
+ auto path=[&](int node){std::string t;while(node>=0){char x[64];const Node&n=nodes[size_t(node)];
+   if(n.parent<0){const char*r=n.offset==0?rootNames[0]:n.offset==0x398?rootNames[1]:n.offset==0x3A8?rootNames[2]:n.offset==layout[7]?rootNames[3]:n.offset==layout[8]?rootNames[4]:rootNames[5];t=r+t;break;}
+   snprintf(x,sizeof(x),"->+%llX",n.offset);t=x+t;node=n.parent;}return t;};
+ std::sort(hits.begin(),hits.end(),[](const Hit&a,const Hit&b){return a.count>b.count;});
+ if(hits.size()>40)hits.resize(40);
+ std::vector<uint64_t> h0;for(auto&h:hits)h0.push_back(hashBytes(h.address,size_t(h.count)*h.stride));
+ Sleep(300);
+ log("SKELETON: walked %zu objects, %zu bone-array candidates",nodes.size(),hits.size());
+ for(size_t i=0;i<hits.size();++i){const auto&h=hits[i];const bool moved=hashBytes(h.address,size_t(h.count)*h.stride)!=h0[i];
+  const float*f=nullptr;float first[16]{};read(h.address,first,h.stride==48?48:64);f=first;
+  log("SKELETON: %s bones=%d kind=%s at 0x%llX path=%s%s+%llX owner=%s first=[%.3f %.3f %.3f | %.3f %.3f %.3f %.3f]",
+   moved?"MOVING":"static",h.count,h.stride==48?"qs":"mat4",h.address,path(h.node).c_str(),"",h.offset,rttiName(nodes[size_t(h.node)].address).c_str(),
+   f[0],f[1],f[2],f[4],f[5],f[6],f[7]);}
+ char hud[200];snprintf(hud,sizeof(hud),"SKELETON PROBE (F9): done, %zu candidates logged. Thanks!",hits.size());tm_render_native_status(hud);
+}
 std::atomic<bool> probeRunning{};
 void keys() {
  bool lastCreate=false,lastRemove=false;
@@ -554,7 +614,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     (void)w;(void)player;(void)recorder;log("ANIM_PROBE: F9 test retired (spike 5b crashed the game)");tm_render_native_status("F9 test is switched off");
+     if(ready(w,player,recorder))skeletonProbe(player);else {log("SKELETON: player not ready");tm_render_native_status("SKELETON PROBE (F9): player not ready, load in first");}
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
