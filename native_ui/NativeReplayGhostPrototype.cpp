@@ -311,78 +311,54 @@ std::string rttiName(U object) {
 }
 bool pointerish(U v){return v>=0x10000000000ull&&v<0x800000000000ull&&(v&7)==0;}
 struct ProbeNode{U address;std::string name;std::string path;};
+// Probe 4: collect every hkbClipGenerator reachable from the character's behavior graph
+// (breadth first through Havok objects and hkArray storage), sample them for 1.5 s, and report
+// the ones whose values change (the active clips) with their animation name and changing fields.
+std::string asciiAt(U address){char t[48]{};if(!read(address,t,sizeof(t)-1))return {};for(char&c:t){if(!c)break;if(c<32||c>126)return {};}return t;}
+std::string clipName(U clip){for(U o=0x30;o<0x100;o+=8){U p=get<U>(clip+o);if(!pointerish(p))continue;auto t=asciiAt(p);if(t.size()>=4&&t[0]=='a'&&isdigit((unsigned char)t[1])){char b[80];snprintf(b,sizeof(b),"+%llX:%s",o,t.c_str());return b;}}return {};}
 void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
+ tm_render_native_status("ANIM PROBE (F9): running, keep doing what you're doing for 2 seconds..."); // temporary, removed after the spike
  U modules=get<U>(player+modulesOffset);
  U behavior=get<U>(modules+behaviorOffset),timeAct=get<U>(modules+timeActOffset);
- tm_render_native_status("ANIM PROBE (F9): running, keep doing what you're doing for 2 seconds..."); // temporary, removed after the spike
- log("ANIM_PROBE: start player=0x%llX behavior=0x%llX(%s) time_act=0x%llX(%s)",player,behavior,rttiName(behavior).c_str(),timeAct,rttiName(timeAct).c_str());
- std::vector<ProbeNode> found;std::vector<U> seen;
- auto interesting=[](const std::string&n){return n.find("hk")!=std::string::npos||n.find("Anim")!=std::string::npos||n.find("Behavior")!=std::string::npos||n.find("Clip")!=std::string::npos||n.find("TimeAct")!=std::string::npos;};
- bool allowArrays=false;
- std::function<void(U,const std::string&,size_t,int)> walk=[&](U object,const std::string& path,size_t bytes,int depth){
-  if(found.size()>=400)return;
-  std::vector<unsigned char> buffer(bytes);if(!read(object,buffer.data(),bytes))return;
-  for(size_t o=8;o+8<=bytes&&found.size()<400;o+=8){
-   U p;memcpy(&p,buffer.data()+o,8);if(!pointerish(p)||std::find(seen.begin(),seen.end(),p)!=seen.end())continue;
-   auto name=rttiName(p);
-   if(name.empty()&&depth>0&&allowArrays){ // hkArray / plain storage: look for named objects inside
-    std::vector<unsigned char> inner(0x100);if(read(p,inner.data(),inner.size()))for(size_t k=0;k+8<=inner.size();k+=8){U q;memcpy(&q,inner.data()+k,8);
-     if(!pointerish(q)||std::find(seen.begin(),seen.end(),q)!=seen.end())continue;const auto qn=rttiName(q);if(qn.empty())continue;
-     seen.push_back(q);char st[64];snprintf(st,sizeof(st),"+%zX[]+%zX",o,k);found.push_back({q,qn,path+st});if(found.size()<400)walk(q,path+st+">",0x400,depth-1);}
-    continue;}
-   if(name.empty()||(!allowArrays&&!interesting(name)))continue;
-   seen.push_back(p);char step[48];snprintf(step,sizeof(step),"+%zX",o);
-   found.push_back({p,name,path+step});
-   if(depth>0)walk(p,path+step+">",allowArrays?0x400:0x300,depth-1);
-  }};
- seen.push_back(behavior);seen.push_back(timeAct);
- walk(behavior,"behavior",0x1A00,3);
- // Path used by community tools: CSChrBehaviorModule+0x10 -> +0x30 = hkbCharacter. Walk it fully.
- {U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0;
-  log("ANIM_PROBE: behavior+10 = %s @0x%llX; +30 = %s @0x%llX",rttiName(holder).c_str(),holder,rttiName(character).c_str(),character);
-  // One line per named pointer; recurse only into Havok ("hk") objects, breadth first, bounded.
-  std::vector<std::pair<U,std::string>> queue{{character,"hkbCharacter"}};
-  if(U hvk=get<U>(behavior+0x15A8))queue.push_back({hvk,"HvkAnim"});
-  for(size_t qi=0;qi<queue.size()&&qi<48;++qi){
-   const U object=queue[qi].first;const std::string path=queue[qi].second;if(!object)continue;
-   const size_t bytes=path=="HvkAnim"?0x1000:0x300;std::vector<unsigned char> b(bytes);if(!read(object,b.data(),bytes))continue;
-   std::string line="ANIM_PROBE: DUMP "+path+" ("+rttiName(object)+"):";
-   for(size_t o=8;o+8<=bytes;o+=8){U v;memcpy(&v,b.data()+o,8);if(!pointerish(v))continue;std::string n=rttiName(v);
-    if(n.empty()){ // array storage: name the first element if it is an object
-     U first=get<U>(v);const auto fn=pointerish(first)?rttiName(first):std::string();if(fn.rfind("hk",0)!=0)continue;
-     char item[96];snprintf(item,sizeof(item)," +%zX:[%s]",o,fn.c_str());line+=item;
-     if(std::find(seen.begin(),seen.end(),first)==seen.end()){seen.push_back(first);queue.push_back({first,path+">"+std::to_string(o)+"[0]"});found.push_back({first,fn,path+">"+std::to_string(o)+"[0]"});}
-     continue;}
-    char item[96];snprintf(item,sizeof(item)," +%zX:%s",o,n.c_str());line+=item;
-    if(n.rfind("hk",0)==0&&std::find(seen.begin(),seen.end(),v)==seen.end()){seen.push_back(v);queue.push_back({v,path+">"+std::to_string(o)});found.push_back({v,n,path+">"+std::to_string(o)});}
-    if(line.size()>1700){log("%s",line.c_str());line="ANIM_PROBE: DUMP "+path+" (cont):";}}
-   log("%s",line.c_str());}}
- walk(timeAct,"time_act",0xD8,3);
- for(const auto& n:found)log("ANIM_PROBE: %s = %s @0x%llX",n.path.c_str(),n.name.c_str(),n.address);
- // Sample candidate objects: first 0x100 bytes as floats, 30 samples x 50 ms; report changing fields.
- std::vector<const ProbeNode*> targets;
- for(const auto& n:found)if(n.name.find("AnimationControl")!=std::string::npos||n.name.find("ClipGenerator")!=std::string::npos||n.name.find("AnimatedSkeleton")!=std::string::npos||n.name.find("hkbCharacter")!=std::string::npos||n.name.find("HvkAnim")!=std::string::npos||n.name.find("BehaviorGraph")!=std::string::npos)if(targets.size()<20)targets.push_back(&n);
- constexpr int samples=30;constexpr size_t words=0x100/4;
- std::vector<std::vector<float>> series(targets.size(),std::vector<float>(samples*words));
+ U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0,graph=character?get<U>(character+0x98):0;
+ log("ANIM_PROBE: start player=0x%llX hkbCharacter=0x%llX graph=0x%llX(%s)",player,character,graph,rttiName(graph).c_str());
+ std::vector<U> queue{graph},seen{graph},clips;
+ for(size_t qi=0;qi<queue.size()&&queue.size()<6000;++qi){
+  const U object=queue[qi];unsigned char b[0x300];if(!read(object,b,sizeof(b)))continue;
+  for(size_t o=8;o+8<=sizeof(b);o+=8){U v;memcpy(&v,b+o,8);if(!pointerish(v))continue;
+   auto consider=[&](U q){if(std::find(seen.begin(),seen.end(),q)!=seen.end())return;const auto n=rttiName(q);if(n.rfind("hk",0)!=0&&n.find("Custom")==std::string::npos)return;
+    seen.push_back(q);if(n=="hkbClipGenerator")clips.push_back(q);if(n.rfind("hkb",0)==0||n.find("Custom")!=std::string::npos||n.find("@hkbStateMachine")!=std::string::npos)queue.push_back(q);};
+   const auto n=rttiName(v);
+   if(!n.empty()){consider(v);continue;}
+   // hkArray storage of object pointers
+   U items[16];if(!read(v,items,sizeof(items)))continue;for(U it:items)if(pointerish(it))consider(it);
+  }}
+ log("ANIM_PROBE: %zu Havok objects visited, %zu hkbClipGenerator found",seen.size(),clips.size());
+ constexpr int samples=30;constexpr size_t words=0x140/4;
+ std::vector<std::vector<float>> series(clips.size(),std::vector<float>(samples*words));
  std::vector<std::array<float,4>> tae(samples);
  for(int i=0;i<samples;++i){
-  for(size_t t=0;t<targets.size();++t)read(targets[t]->address,series[t].data()+i*words,words*4);
-  const uint32_t idx=get<uint32_t>(timeAct+0x20+10*16+4); // read_idx after anim_queue[10]
-  const U slot=timeAct+0x20+(idx%10)*16;tae[i]={float(get<int32_t>(slot)),get<float>(slot+4),get<float>(slot+8),get<float>(slot+12)};
-  Sleep(50);}
+  for(size_t c=0;c<clips.size();++c)read(clips[c],series[c].data()+i*words,words*4);
+  const uint32_t idx=get<uint32_t>(timeAct+0x20+10*16+4);const U slot=timeAct+0x20+(idx%10)*16;
+  tae[i]={float(get<int32_t>(slot)),get<float>(slot+4),get<float>(slot+8),get<float>(slot+12)};Sleep(50);}
  char line[1900];
- {int n=snprintf(line,sizeof(line),"ANIM_PROBE: time_act[read] id/play/play2/len:");
-  for(int i=0;i<samples&&n<int(sizeof(line))-48;++i)n+=snprintf(line+n,sizeof(line)-n," %.0f/%.3f/%.3f/%.3f",tae[i][0],tae[i][1],tae[i][2],tae[i][3]);
-  log("%s",line);}
- for(size_t t=0;t<targets.size();++t)for(size_t w=0;w<words;++w){
-  float first=series[t][w];bool changes=false,finite=true;
-  for(int i=0;i<samples;++i){const float v=series[t][i*words+w];if(!std::isfinite(v)||std::fabs(v)>1e7f){finite=false;break;}if(v!=first)changes=true;}
-  if(!finite||!changes)continue;
-  int n=snprintf(line,sizeof(line),"ANIM_PROBE: %s %s +%zX floats:",targets[t]->name.c_str(),targets[t]->path.c_str(),w*4);
-  for(int i=0;i<samples&&n<int(sizeof(line))-16;++i)n+=snprintf(line+n,sizeof(line)-n," %.3f",series[t][i*words+w]);
-  log("%s",line);}
- log("ANIM_PROBE: done; %zu objects, %zu sampled",found.size(),targets.size());
- {char hud[160];snprintf(hud,sizeof(hud),"ANIM PROBE (F9): done, %zu objects mapped. You can press F9 again.",found.size());tm_render_native_status(hud);}
+ {int n=snprintf(line,sizeof(line),"ANIM_PROBE: time_act[read] id/play/len:");
+  for(int i=0;i<samples&&n<int(sizeof(line))-40;++i)n+=snprintf(line+n,sizeof(line)-n," %.0f/%.3f/%.3f",tae[i][0],tae[i][1],tae[i][3]);log("%s",line);}
+ unsigned active=0;
+ for(size_t c=0;c<clips.size()&&active<16;++c){
+  bool any=false;for(size_t w=0;w<words&&!any;++w)for(int i=1;i<samples;++i){float a=series[c][w],v=series[c][i*words+w];if(std::isfinite(a)&&std::isfinite(v)&&v!=a&&std::fabs(v)<1e6f){any=true;break;}}
+  if(!any)continue;++active;
+  log("ANIM_PROBE: ACTIVE clip @0x%llX name %s",clips[c],clipName(clips[c]).c_str());
+  for(size_t w=0;w<words;++w){float first=series[c][w];bool changes=false,ok=true;
+   for(int i=0;i<samples;++i){float v=series[c][i*words+w];if(!std::isfinite(v)||std::fabs(v)>1e6f){ok=false;break;}if(v!=first)changes=true;}
+   if(!ok||!changes)continue;int n=snprintf(line,sizeof(line),"ANIM_PROBE:   +%zX:",w*4);
+   for(int i=0;i<samples&&n<int(sizeof(line))-16;++i)n+=snprintf(line+n,sizeof(line)-n," %.3f",series[c][i*words+w]);log("%s",line);}
+  // Static words (first sample) for field identification: hex, 0x30..0x140
+  int n=snprintf(line,sizeof(line),"ANIM_PROBE:   static:");for(size_t w=0x30/4;w<words&&n<int(sizeof(line))-24;++w){uint32_t u;memcpy(&u,&series[c][w],4);n+=snprintf(line+n,sizeof(line)-n," %zX=%08X",w*4,u);}log("%s",line);
+ }
+ log("ANIM_PROBE: done; %u active clips",active);
+ {char hud[160];snprintf(hud,sizeof(hud),"ANIM PROBE (F9): done, %zu clips found, %u active. You can press F9 again.",clips.size(),active);tm_render_native_status(hud);}
+ (void)behaviorOffset;
 }
 std::atomic<bool> probeRunning{};
 void keys() {
