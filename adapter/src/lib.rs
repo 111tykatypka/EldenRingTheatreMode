@@ -42,8 +42,8 @@ const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_C
 #[repr(C)]#[derive(Clone,Copy,Default)]struct WireMessage{magic:u32,version:u16,kind:u16,sequence:u64,timestamp_ns:u64,position:[f32;3],quaternion_xyzw:[f32;4],euler_raw:[f32;3],player_present:u32,reserved:u32,action:player_action::State}
 const _:()=assert!(std::mem::size_of::<WireMessage>()==104);
 #[repr(C)]struct TmValidationReport{size:u32,status:u32,checked:u32,passed:u32,file_version:[u16;4],product_version:[u16;4],machine:u16,reserved:u16,image_base:usize,runtime_path:[u16;32768],sha256:[i8;65]}
-unsafe extern "C"{fn tm_render_start(emergency:extern "C" fn())->i32;}
-extern "C" fn render_emergency_stop(){log_game("EMERGENCY_STOP from the overlay (no game writes are active outside bone replay)");}
+unsafe extern "C"{fn tm_render_start(emergency:extern "C" fn())->i32;fn tm_camera_runtime_start(address:*mut c_void)->i32;fn tm_camera_runtime_stop();fn tm_camera_game_context(allowed:i32);}
+extern "C" fn render_emergency_stop(){unsafe{tm_camera_runtime_stop();}log_game("EMERGENCY_STOP from overlay; experimental camera overrides disabled");}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
 #[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
 #[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
@@ -137,6 +137,15 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 // Early, after exact executable guard; never under the loader lock.
                 let graphics=unsafe{tm_render_start(render_emergency_stop)};
                 log_game(&format!("IN_GAME_UI_HOOKS={graphics}; visuals UNVERIFIED"));
+                if graphics!=0 {
+                    let base=unsafe{GetModuleHandleW(std::ptr::null())} as usize;
+                    let pe=unsafe{PeView::module(base as *const u8)};let mut found=[0u32;1];
+                    let pattern=pelite::pattern!("4C 8B 49 18 4C 8B D1 8B 42 50 41 89 41 50 8B 42");
+                    if pe.scanner().finds_code(pattern,&mut found)&&found[0]==0x681970 {
+                        let result=unsafe{tm_camera_runtime_start((base+found[0] as usize) as *mut c_void)};
+                        log_game(&format!("CAMERA_COPY_HOOK={} RVA=0x681970 exact_profile=2.7.0.0 writes=OFF runtime=UNVERIFIED",result));
+                    } else {log_game("CAMERA_COPY_HOOK=UNAVAILABLE missing/ambiguous/unexpected signature; camera writes disabled");}
+                }
                 set_state(PROFILE_READY,"PROFILE_READY");
                 set_state(TASK_SIGNATURE_SCAN,"TASK_SIGNATURE_SCAN");
                 log_game("Task signature scan start: ERSoundBankLoader register_task pattern; profile=EldenRing_1_17 / WW_2.7.0.0");
@@ -169,6 +178,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let mut last_animation_id=-1i32;
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
+                    unsafe{tm_camera_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
                     camera_probe::tick(now);
                     characters.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}

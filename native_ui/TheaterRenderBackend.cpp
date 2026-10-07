@@ -15,6 +15,7 @@
 #include "TheaterUiProtocol.h"
 #include "theater/TheaterOverlayUI.h"
 #include "TheaterHotkeys.h"
+#include "CinematicCameraRuntime.h"
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
@@ -92,7 +93,7 @@ public:
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
  void command(std::uint32_t kind,std::uint64_t value=0,const char*text=nullptr){if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
   if(kind==TheaterUI::kCommandSetVisibility){set_visibility(value==0?TheaterUI::UiVisibility::Shown:TheaterUI::UiVisibility::Hidden);return;}
-  if(kind==theater_ui::stop&&emergency)emergency();std::lock_guard lock(ipc);
+  if(kind==theater_ui::stop){camera_runtime::stop();if(emergency)emergency();}std::lock_guard lock(ipc);
   // A scrub produces many seeks and the pipe sends one request per round trip, so only the newest pending seek matters.
   if(kind==theater_ui::seek&&!commands.empty()&&commands.back().command==theater_ui::seek){commands.back().value=value;return;}
   if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;if(text)strncpy_s(r.text,text,_TRUNCATE);commands.push_back(r);}}
@@ -111,14 +112,16 @@ public:
   if(h==INVALID_HANDLE_VALUE){h=CreateFileW(theater_ui::pipe,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE){Sleep(100);continue;}}
   theater_ui::Request r;{std::lock_guard lock(ipc);if(!commands.empty()){r=commands.front();commands.pop_front();}}r.sequence=++sequence;theater_ui::Snapshot s;
   if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=theater_ui::version||s.sequence!=r.sequence||s.count>16||!theater_timescale::valid(s.timescale)){
-   CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;replay_loaded=false;replay_playing=false;{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
-  {std::lock_guard lock(ipc);snapshot=s;}{ULONGLONG t=0;QueryInterruptTimePrecise(&t);snapshot_ns=std::uint64_t(t)*100;}host_linked=true;replay_loaded=s.loaded!=0;replay_playing=s.host_playing!=0;Sleep(50);
+   CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;replay_loaded=false;replay_playing=false;camera_runtime::timeline(0,0,0,false,1,false);{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
+  {std::lock_guard lock(ipc);snapshot=s;}{ULONGLONG t=0;QueryInterruptTimePrecise(&t);snapshot_ns=std::uint64_t(t)*100;}host_linked=true;replay_loaded=s.loaded!=0;replay_playing=s.host_playing!=0;
+  camera_runtime::timeline(s.time_ns,s.duration_ns,s.master_clock_ns,s.host_playing!=0,s.timescale,true,s.loaded_path);Sleep(50);
  }if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
  void adopt(IDXGISwapChain*sc,IUnknown*unknown){ComPtr<ID3D12CommandQueue> q;ComPtr<IDXGISwapChain3> c;
   if(FAILED(unknown->QueryInterface(IID_PPV_ARGS(&q)))||q->GetDesc().Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||FAILED(sc->QueryInterface(IID_PPV_ARGS(&c))))return;
   std::lock_guard lock(graphics);if(chain)return;chain=c;queue=q;
   DXGI_SWAP_CHAIN_DESC desc{};if(FAILED(chain->GetDesc(&desc))||!IsWindow(desc.OutputWindow)){failed=true;log("DX12_INVALID_WINDOW");return;}
   hwnd=desc.OutputWindow;
+  camera_runtime::window(hwnd);
   // Publish the forwarding target BEFORE another thread can enter our WndProc.
   // The former SetWindowLongPtr assignment published it only after installation.
   auto old=reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hwnd,GWLP_WNDPROC));
@@ -161,6 +164,7 @@ public:
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
   {std::lock_guard lock(events_mutex);frame.events.assign(events.begin(),events.end());events.clear();}
   auto&io=ImGui::GetIO();const bool shown=frame.visibility==TheaterUI::UiVisibility::Shown;io.MouseDrawCursor=false; // the overlay draws its own cursor (TheaterOverlayUI)
+  camera_runtime::overlay_visible(shown);
   const auto rects=overlay.Draw(frame,[](void*user,std::uint32_t kind,std::uint64_t value,const char*text){static_cast<TheaterRenderBackend*>(user)->command(kind,value,text);},this);
   text_input=shown&&ImGui::GetIO().WantTextInput;
   capture_mouse=shown&&io.WantCaptureMouse;capture_keyboard=shown&&io.WantCaptureKeyboard;return rects;
@@ -241,7 +245,7 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  // While the UI is shown the game gets no mouse or keyboard at all; ImGui already has its copy above.
  // WM_SYS* keys still pass, so Alt+F4 and Alt+Tab keep working.
  if(b.blocking()&&((m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR))return 0;
- if(b.game_input_locked.load()&&(m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR||(m>=WM_LBUTTONDOWN&&m<=WM_MBUTTONDBLCLK)))return 0;
+ if((b.game_input_locked.load()||camera_runtime::owns_input())&&(m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR||(m>=WM_LBUTTONDOWN&&m<=WM_MBUTTONDBLCLK)))return 0;
  auto previous=b.forward_proc.load(std::memory_order_acquire);return previous?CallWindowProcW(previous,h,m,w,l):DefWindowProcW(h,m,w,l);
 }
 // Elden Ring reads keyboard and mouse through DirectInput8 (DINPUT8.dll import), not window
@@ -266,14 +270,18 @@ void capture_mouse_data(IDirectInputDevice8W*d,DWORD object_size,const DIDEVICEO
   else if(e.dwOfs>=DIMOFS_BUTTON0&&e.dwOfs<=DIMOFS_BUTTON2){const unsigned bit=1u<<(e.dwOfs-DIMOFS_BUTTON0);if(e.dwData&0x80)b.mouse_buttons|=bit;else b.mouse_buttons&=~bit;}}}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_state(IDirectInputDevice8W*d,DWORD size,LPVOID data){
  const HRESULT hr=original_state[N](d,size,data);if(FAILED(hr)||!data)return hr;auto&b=backend();
+ if(camera_runtime::owns_input()&&!b.blocking()&&(size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))){auto*m=static_cast<DIMOUSESTATE*>(data);camera_runtime::mouse_delta(m->lX,m->lY);}
  if(b.blocking()){capture_mouse_state(data,size);memset(data,0,size);}
- else if(b.game_input_locked.load()){if(size==256)memset(data,0,size);else if(size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))memset(static_cast<DIMOUSESTATE*>(data)->rgbButtons,0,size-12);}
+ else if(b.game_input_locked.load()||camera_runtime::owns_input()){if(size==256)memset(data,0,size);else if(size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))memset(static_cast<DIMOUSESTATE*>(data)->rgbButtons,0,size-12);}
  else if(size==256&&b.owns_playback_key()){const DWORD code=playback_scan_code();if(code&&code<256)static_cast<BYTE*>(data)[code]=0;}
  return hr;}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_data(IDirectInputDevice8W*d,DWORD object_size,LPDIDEVICEOBJECTDATA data,LPDWORD count,DWORD flags){
  const HRESULT hr=original_data[N](d,object_size,data,count,flags);if(FAILED(hr)||!count)return hr;auto&b=backend();
+ if(camera_runtime::owns_input()&&!b.blocking()&&data&&!(flags&DIGDD_PEEK)&&object_size>=sizeof(DIDEVICEOBJECTDATA)&&is_mouse(d)){
+  auto*bytes=reinterpret_cast<const unsigned char*>(data);for(DWORD i=0;i<*count;++i){auto&e=*reinterpret_cast<const DIDEVICEOBJECTDATA*>(bytes+size_t(i)*object_size);if(e.dwOfs==DIMOFS_X)camera_runtime::mouse_delta(LONG(e.dwData),0);else if(e.dwOfs==DIMOFS_Y)camera_runtime::mouse_delta(0,LONG(e.dwData));}
+ }
  if(b.blocking()){if(!(flags&DIGDD_PEEK))capture_mouse_data(d,object_size,data,*count);*count=0;}
- else if(b.game_input_locked.load()&&data&&object_size>=sizeof(DIDEVICEOBJECTDATA)){
+ else if((b.game_input_locked.load()||camera_runtime::owns_input())&&data&&object_size>=sizeof(DIDEVICEOBJECTDATA)){
   // Keep only mouse movement (camera); drop keys and mouse buttons.
   const bool mouse=is_mouse(d);auto*bytes=reinterpret_cast<unsigned char*>(data);DWORD kept=0;
   for(DWORD i=0;i<*count;++i){auto*e=reinterpret_cast<DIDEVICEOBJECTDATA*>(bytes+size_t(i)*object_size);
@@ -335,7 +343,7 @@ extern "C" int tm_render_start(void(*emergency)()){
  }DestroyWindow(dummy);
  if(ok){install_dinput_hooks();b.client=std::thread([&b]{b.ipc_worker();});b.log("DX12_HOOKS_INSTALLED; waiting for native swapchain creation (restart required for late injection)");}else b.log("DX12_HOOK_INSTALL_FAILED; native replay remains independent");return ok?1:0;
 }
-extern "C" void tm_render_shutdown(){auto&b=backend();b.running=false;if(b.client.joinable()){CancelSynchronousIo(b.client.native_handle());b.client.join();}
+extern "C" void tm_render_shutdown(){camera_runtime::stop();auto&b=backend();b.running=false;if(b.client.joinable()){CancelSynchronousIo(b.client.native_handle());b.client.join();}
  for(auto*t:b.targets)MH_DisableHook(t);std::lock_guard lock(b.graphics);if(b.previous_proc&&IsWindow(b.hwnd)&&reinterpret_cast<WNDPROC>(GetWindowLongPtrW(b.hwnd,GWLP_WNDPROC))==TheaterRenderBackend::wndproc)SetWindowLongPtrW(b.hwnd,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(b.previous_proc));
  if(b.wait_gpu())b.release_resources();for(auto*t:b.targets)MH_RemoveHook(t);b.targets.clear();b.chain.Reset();b.queue.Reset();
  if(b.exception_observer){RemoveVectoredExceptionHandler(b.exception_observer);b.exception_observer=nullptr;}

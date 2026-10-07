@@ -3,6 +3,7 @@ project(EldenRingTheaterMode LANGUAGES C CXX)
 add_subdirectory(shared)
 add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
+ native_ui/CinematicCameraRuntime.cpp
 
  native_ui/theater/TheaterOverlayUI.cpp
  native_ui/theater/TheaterSounds.cpp
@@ -31,6 +32,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(native-camera-tests src/native_camera_tests.cpp)
+  target_include_directories(native-camera-tests PRIVATE shared native_ui)
+  target_compile_features(native-camera-tests PRIVATE cxx_std_20)
+  target_compile_definitions(native-camera-tests PRIVATE NOMINMAX)
+  target_link_libraries(native-camera-tests PRIVATE TheaterRenderBackend User32)
+  add_test(NAME native-camera-tests COMMAND native-camera-tests)
   add_executable(cinematic-camera-tests src/cinematic_camera_tests.cpp)
   target_compile_features(cinematic-camera-tests PRIVATE cxx_std_20)
   add_test(NAME cinematic-camera-tests COMMAND cinematic-camera-tests)

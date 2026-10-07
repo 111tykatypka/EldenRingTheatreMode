@@ -1,6 +1,7 @@
 #include "TheaterOverlayUI.h"
 #include "TheaterSounds.h"
 #include "imgui_internal.h"
+#include "../CinematicCameraRuntime.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -19,10 +20,9 @@ void Overlay::CameraHotkey(theater_hotkeys::Action action)
 {
     ui_.activeTool=Tool::Camera;ui_.layout.panelOpen=true;
     if(action==theater_hotkeys::Action::CycleCamera){
-        cameraSelection_=(cameraSelection_+1)%3;
-        cameraMessage_=cameraSelection_?"Selected mode unavailable: native camera backend is not verified. Default camera remains active.":"Default camera remains active.";
+        cameraSelection_=(camera_runtime::view().mode+1)%3;camera_runtime::mode(cameraSelection_);
     } else if(action==theater_hotkeys::Action::AddDollyKey){
-        cameraMessage_="Cannot add keyframe: a verified active camera transform and FOV are required. No key was added.";
+        camera_runtime::add_key();
     } else if(action==theater_hotkeys::Action::ClearDollyKeys) clearDollyDialog_=true;
 }
 namespace
@@ -546,19 +546,30 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     case Tool::Camera:
     {
         section("CAMERA SHORTCUTS");
-        const char* modes[]={"Default","Free (unavailable)","Dolly (unavailable)"};
-        ImGui::Text("Selection: %s | F3: cycle",modes[cameraSelection_]);
-        ImGui::TextWrapped("Active game camera: Default. K: add dolly key. L: delete all dolly keys with confirmation.");
-        ImGui::Text("Dolly keys: %zu",dollyTrack_.keys().size());
-        if(!cameraMessage_.empty())ImGui::TextWrapped("%s",cameraMessage_.c_str());
+        auto runtime=camera_runtime::view();
+        const char* modes[]={"Default","Free","Dolly"};
+        ImGui::Text("Selection: %s | F3: cycle",modes[runtime.mode]);
+        ImGui::Text("Copy hook: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
+        ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
+        ImGui::TextWrapped("Runtime validation required. Test the two-second probe first; F6 immediately disables camera overrides.");
+        if(ImGui::Button("2-second +0.25 X camera probe"))camera_runtime::probe();
+        bool armed=runtime.enabled;
+        if(ImGui::Checkbox("Enable experimental Free / Dolly writes",&armed))camera_runtime::enable(armed);
+        ImGui::TextWrapped("Hide overlay with F4 to move: WASD, Q/E up/down, mouse/arrows rotate, Z/X roll, Shift fast, Ctrl slow. Gamepad input is not blocked.");
+        float fov=static_cast<float>(runtime.pose.fov_degrees);ImGui::BeginDisabled(!runtime.enabled);
+        if(ImGui::InputFloat("Camera FOV (degrees)",&fov,.1f,1.f,"%.3f"))camera_runtime::fov(fov);
+        ImGui::EndDisabled();
+        ImGui::TextWrapped("K captures a key at ReplayTime. L deletes all keys after confirmation. Keys are session-only in this checkpoint.");
+        ImGui::Text("Dolly keys: %zu",runtime.keys.size());
+        ImGui::TextWrapped("%s",runtime.status.c_str());
+        for(const auto&key:runtime.keys)ImGui::Text("Key %llu at %.3fs | %.2f %.2f %.2f | FOV %.2f",static_cast<unsigned long long>(key.id),double(key.time_ns)/1e9,key.state.position[0],key.state.position[1],key.state.position[2],key.state.fov_degrees);
         section("NATIVE CAMERA DIAGNOSTICS");
-        ImGui::TextWrapped("Read-only SDK candidates. Active camera ownership is not yet verified; Free and Dolly game control are unavailable.");
+        ImGui::TextWrapped("Read-only SDK candidates, separate from the experimental render-camera copy hook.");
         bool probe=theater_camera::probe_enabled.load();
         if(ImGui::Checkbox("Enable experimental camera reads",&probe))theater_camera::probe_enabled=probe;
-        if(!probe){ImGui::TextDisabled("Camera probe is OFF. No camera values are read.");break;}
+        if(!probe){ImGui::TextDisabled("SDK slot probe is OFF. Native copy observer remains active.");break;}
         const auto& c=f.camera;
         ImGui::Text("CSCamera: %s | mask: 0x%X",c.available?"FOUND":"UNAVAILABLE",c.mask);
-        ImGui::Text("Player camera: native control (no overrides)");
         if(c.timestamp_ns){
             // Same QueryInterruptTimePrecise clock as the adapter; GetTickCount64 is a different epoch.
             ULONGLONG ticks=0;QueryInterruptTimePrecise(&ticks);
@@ -879,11 +890,11 @@ void Overlay::DrawDialogs(const OverlayFrame& f)
 {
     if(clearDollyDialog_){ImGui::OpenPopup("Delete all dolly keyframes?");clearDollyDialog_=false;}
     if(ImGui::BeginPopupModal("Delete all dolly keyframes?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        ImGui::TextWrapped("Delete all %zu dolly keyframes? This cannot be undone.",dollyTrack_.keys().size());
+        ImGui::TextWrapped("Delete all %zu dolly keyframes? This cannot be undone.",camera_runtime::view().keys.size());
         ImGui::TextWrapped("The original gameplay recording will not be changed.");
         if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape,false))ImGui::CloseCurrentPopup();
         ImGui::SameLine();
-        if(ImGui::Button("Delete all")){dollyTrack_.replace({});cameraMessage_="All dolly keyframes deleted.";ImGui::CloseCurrentPopup();}
+        if(ImGui::Button("Delete all")){camera_runtime::clear_keys();ImGui::CloseCurrentPopup();}
         ImGui::EndPopup();
     }
     const float s = ui_.rects.uiScale;
@@ -1227,6 +1238,7 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
         rows.push_back({ name, Color::AccentAmber, 1, false, snap.actors[i].id, false });
     }
     rows.push_back({ T(Str::TrackBookmarks), Color::EventNeutral, 0, false, 0, false });
+    const auto cameraKeys=camera_runtime::view().keys;
 
     const float rowsH = laneMax.y - laneMin.y;
     const float maxScroll = std::max(0.0f, rows.size() * rowH - rowsH);
@@ -1286,6 +1298,12 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
             dl->PopClipRect();
         }
         // Selecting an actor row uses the existing select command.
+        if(i==1&&!cameraKeys.empty()){
+            dl->PushClipRect(ImVec2(laneMin.x,y0),ImVec2(laneMax.x,y1),true);
+            for(const auto&key:cameraKeys){float x=static_cast<float>(tv.TimeToX(double(key.time_ns)/1e9,laneMin.x));float y=(y0+y1)*.5f,r=Px(5,s);
+                dl->AddQuadFilled(ImVec2(x,y-r),ImVec2(x+r,y),ImVec2(x,y+r),ImVec2(x-r,y),Color::AccentBlue.U32());}
+            dl->PopClipRect();
+        }
         if (r.actor && ImGui::IsWindowHovered() && io.MouseClicked[0] && io.MousePos.x < min.x + tree && io.MousePos.y >= y0 && io.MousePos.y < y1)
             Emit(theater_ui::select, r.actor);
     }

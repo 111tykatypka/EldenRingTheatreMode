@@ -1,8 +1,8 @@
-param()
+param([string]$Checkpoint='Cinematic-C3-native-camera-prototype')
 $ErrorActionPreference='Stop'
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $native=Join-Path $repo 'build-cinematic'
-$out=Join-Path $repo 'outputs\Cinematic-C1-camera-probe'
+$out=Join-Path (Join-Path $repo 'outputs') $Checkpoint
 if(Test-Path -LiteralPath $out){throw "Preserved package already exists: $out"}
 $cmake='C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 $ctest=Join-Path (Split-Path $cmake) 'ctest.exe'
@@ -24,10 +24,11 @@ try {
  Copy-Item -LiteralPath (Join-Path $baseline 'EldenRingCompatibilityProbe.exe') -Destination $out
  Copy-Item -LiteralPath (Join-Path $baseline 'sounds') -Destination $out -Recurse
  Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_EDITOR_CHECKPOINT_1.md') -Destination $out
+ Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_C3_NATIVE_CAMERA.md') -Destination $out
  $safe="safe.directory=$($repo.Replace('\','/'))"
  $commit=& git -c $safe rev-parse HEAD
  $dirty=& git -c $safe status --porcelain
- $manifest=@("source_commit=$commit","source_dirty=$([bool]$dirty)",'branch=codex/cinematic-editor-pass','configuration=Release AMD64','checkpoint=C1 opt-in read-only camera probe; NOT full cinematic editor','runtime=UNVERIFIED','probe_default=OFF','tests=13 CTest, 49 Rust passed; 1 optional Rust test ignored')
+ $manifest=@("source_commit=$commit","source_dirty=$([bool]$dirty)",'branch=codex/cinematic-editor-pass','configuration=Release AMD64',"checkpoint=$Checkpoint",'runtime=UNVERIFIED','camera_writes_default=OFF','tests=14 CTest, 49 Rust passed; 1 optional Rust test ignored')
  foreach($name in @('EldenRingTheaterMode.exe','TheaterMode.dll','EldenRingCompatibilityProbe.exe')){$hash=Get-FileHash -LiteralPath (Join-Path $out $name) -Algorithm SHA256;$manifest+="$name SHA256=$($hash.Hash)"}
  $manifest | Set-Content -LiteralPath (Join-Path $out 'BUILD_MANIFEST.txt') -Encoding utf8
  Write-Output "Experimental camera checkpoint staged: $out"

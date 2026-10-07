@@ -82,9 +82,7 @@ namespace TheaterUI
 
         UIState ui_;
         unsigned cameraSelection_ = 0; // selection, not native ownership
-        cinematic::Track dollyTrack_;
         bool clearDollyDialog_ = false;
-        std::string cameraMessage_;
         ImFont* iconFont_ = nullptr;
         float   appliedScale_ = 0.0f;
         EmitFn  emit_ = nullptr;
