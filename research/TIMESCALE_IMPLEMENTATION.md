@@ -1,3 +1,5 @@
+> Correction 2026-10-07: the prior 0x358DB58 calculation was wrong. Direct PE instruction decoding resolves BOTH sites to RVA 0x458DB58. New SmoothPose-WorldTimescale build enables guarded writes by default; THEATER_WORLD_TIMESCALE=0 disables them. Earlier default/read-only and raw-pose descriptions below describe the previous checkpoint.
+
 # Continuous Theater timescale — implementation checkpoint
 
 2026-10-07. Active source: independent checkout, `codex/independent-development`. Original Claude/Step2a/Phase5 builds are unchanged. Earlier independent Task1–4 outputs are also preserved.
@@ -17,7 +19,7 @@
 
 The separate Rust `timescale` controller continues observation-first. Default launches log timing values and never write the scalar. Explicit `THEATER_WORLD_TIMESCALE=1` opts into the controlled experiment. No experiment was run unattended.
 
-Same mechanism as traced IGCS: exact-profile/opcode checks at game RVAs 0xDEB30F/0xDEBE2F, agreeing on pointer slot RVA 0x358DB58; scalar at manager+0x2CC. See CAMERATOOLS_REFERENCE_FINDINGS.md for the complete static chain and limits.
+Same mechanism as traced IGCS: exact-profile/opcode checks at game RVAs 0xDEB30F/0xDEBE2F, agreeing on pointer slot RVA 0x458DB58; scalar at manager+0x2CC. See CAMERATOOLS_REFERENCE_FINDINGS.md for the complete static chain and limits.
 
 Callback conditions: loaded skeletal replay, present/owned player, Playing, fresh host snapshot, no active recording. Save prior scalar; apply requested float; restore on inactive/pause/stop/unload/stale IPC/player loss. Manager replacement/external scalar changes release ownership without touching an old object. Existing opcode, executable SHA/version and writable-memory guards remain. Native scalar is float32; the exact host value is double and can differ by normal float rounding.
 

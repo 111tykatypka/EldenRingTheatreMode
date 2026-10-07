@@ -1,3 +1,5 @@
+> Correction 2026-10-07: the prior 0x358DB58 calculation was wrong. Direct PE instruction decoding resolves BOTH sites to RVA 0x458DB58. New SmoothPose-WorldTimescale build enables guarded writes by default; THEATER_WORLD_TIMESCALE=0 disables them. Earlier default/read-only and raw-pose descriptions below describe the previous checkpoint.
+
 # CameraTools reference — static findings and reuse boundaries
 
 Canonical full export: `../../research/igcs-camera-v1018/README.md`, REFERENCE_MEMORY.md and research.sqlite. Read-only original camera folder and SHA provenance are there. No source/PDB was supplied; C#/C exports are inferred code. Important native conclusions were cross-checked against the earlier disassembly trace in `../notes/REFERENCE_CAMERA_TIMING.md`. No reference binary or copied proprietary implementation is linked into our application.
@@ -9,7 +11,7 @@ Canonical full export: `../../research/igcs-camera-v1018/README.md`, REFERENCE_M
 3. Native DLL RVA **0x21E260** handles IDs 12/13 at message+1 and data+2. ID12 sets feature+0x1EC. ID13 calls decoder RVA **0x225520**, clamps through **0xF4E0** with float constants 0x3A83126F (.001) and 0x40400000 (3.0), then sets feature+0x1E8.
 4. Writer **0x21E350** calls getter **0x218A00**, which returns dereferenced resolved manager+0x2CC. Enabled writes feature+0x1E8; disabled writes 1.0 (0x3F800000). RVA **0x21ED40** turns off the feature and restores 1.0 during its reset path.
 5. Path override action ID21 at **0x21E570** saves old enable/value, installs temporary path speed and writes it; **0x21E680** restores saved state. Its path override path is distinct from the standard clamped setting path.
-6. Scanner registration **0x21EE30**, resolution **0x21EDB0**, DLL slot **0x2A19C8**. Exact target 2.7.0.0 consumers both agree on game global RVA 0x358DB58 and multiply +0x2CC by +0x268. +0x268 is a delta candidate, not a proven complete clock-domain contract.
+6. Scanner registration **0x21EE30**, resolution **0x21EDB0**, DLL slot **0x2A19C8**. Exact target 2.7.0.0 consumers both agree on game global RVA 0x458DB58 and multiply +0x2CC by +0x268. +0x268 is a delta candidate, not a proven complete clock-domain contract.
 
 RVA labels are not recovered original source function names. Signature-wide uniqueness is false: the old broad pattern has two matching consumers. We check both concrete sites under the unchanged exact game identity guard. Ghidra game export did not index a pseudocode consumer under the searched global identifier; that absence is not evidence the disassembly consumers do not exist.
 

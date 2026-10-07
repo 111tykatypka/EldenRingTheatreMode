@@ -1,3 +1,5 @@
+> Correction 2026-10-07: the prior 0x358DB58 calculation was wrong. Direct PE instruction decoding resolves BOTH sites to RVA 0x458DB58. New SmoothPose-WorldTimescale build enables guarded writes by default; THEATER_WORLD_TIMESCALE=0 disables them. Earlier default/read-only and raw-pose descriptions below describe the previous checkpoint.
+
 # Camera reference: targeted native timing trace
 
 ## Reference identity
@@ -34,7 +36,7 @@ The broad time-dilation pattern matches **two** sites, so claiming uniqueness wo
 | 0xDEB30F | MOV RAX, [RIP + 0x37A2842] | MOVSS XMM1,[RAX+0x2CC]; MULSS XMM1,[RAX+0x268] |
 | 0xDEBE2F | MOV RAX, [RIP + 0x37A1D22] | Same offsets and product |
 
-Both resolve the global pointer slot at game **RVA 0x358DB58** (preferred VA 0x14358DB58). They compute the product of fields +0x2CC and +0x268. Combined with the reference's getter/write, +0x2CC is the supported speed-scalar candidate; +0x268 is a likely frame-delta field. The exact type name and units of +0x268 are not proven by these two instructions alone.
+Both resolve the global pointer slot at game **RVA 0x458DB58** (preferred VA 0x14458DB58). They compute the product of fields +0x2CC and +0x268. Combined with the reference's getter/write, +0x2CC is the supported speed-scalar candidate; +0x268 is a likely frame-delta field. The exact type name and units of +0x268 are not proven by these two instructions alone.
 
 The independent controller checks the concrete opcodes/field offsets at both sites and their common target, under the existing exact executable identity guard. It does not select the first arbitrary broad signature match.
 

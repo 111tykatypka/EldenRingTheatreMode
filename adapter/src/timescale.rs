@@ -1,9 +1,9 @@
 //! IGCS timing mechanism, independently implemented for the exact guarded 2.7.0.0 image.
-//! Default is observation only. THEATER_WORLD_TIMESCALE=1 explicitly enables the experiment.
+//! Enabled for active playback. THEATER_WORLD_TIMESCALE=0 selects observation only.
 //! Called on the existing game task, never from IPC or the renderer. No clock API hooks.
 use std::{ffi::c_void, sync::{Mutex, OnceLock}};
 
-const ROOT_RVA:usize=0x358db58;
+const ROOT_RVA:usize=0x458db58;
 const SITES:[usize;2]=[0xdeb30f,0xdebe2f];
 const SCALE:usize=0x2cc;
 const DELTA:usize=0x268;
@@ -40,7 +40,8 @@ fn resolve()->Option<usize> {
         if bytes[..3]!=[0x48,0x8b,0x05] || bytes[7..23]!=
             [0xf3,0x0f,0x10,0x88,0xcc,0x02,0,0,0xf3,0x0f,0x59,0x88,0x68,0x02,0,0] {return None;}
         let displacement=i32::from_le_bytes(bytes[3..7].try_into().ok()?);
-        if (base+site+7).checked_add_signed(displacement as isize)?!=base+ROOT_RVA {return None;}
+        let target=(base+site+7).checked_add_signed(displacement as isize)?;
+        if target!=base+ROOT_RVA {crate::log_game(&format!("TIMESCALE_BINDING_ERROR site_rva=0x{site:X} actual_target_rva=0x{:X} expected_rva=0x{ROOT_RVA:X}",target-base));return None;}
     }
     accessible(base+ROOT_RVA,8,false).then_some(base+ROOT_RVA)
 }
@@ -54,7 +55,7 @@ static STATE:Mutex<Controller>=Mutex::new(Controller{
 });
 fn enabled()->bool {
     static ENABLED:OnceLock<bool>=OnceLock::new();
-    *ENABLED.get_or_init(||std::env::var("THEATER_WORLD_TIMESCALE").as_deref()==Ok("1"))
+    *ENABLED.get_or_init(||std::env::var("THEATER_WORLD_TIMESCALE").as_deref()!=Ok("0"))
 }
 fn restore(s:&mut Controller,current_root:usize,reason:&str) {
     if let Some(saved)=s.saved.take() {
@@ -64,6 +65,7 @@ fn restore(s:&mut Controller,current_root:usize,reason:&str) {
         if s.root==current_root && current==s.last_written && accessible(address,4,true) {
             unsafe{std::ptr::write_volatile(address as *mut f32,saved)};
             crate::log_game(&format!("TIMESCALE_RESET value={saved:.4} reason={reason}"));
+            crate::bone_replay::status(&format!("WORLD TIMESCALE restored {saved:.4}x"));
         } else {
             crate::log_game(&format!("TIMESCALE_RELEASE reason={reason} root_changed_or_external_write; old object not touched"));
         }
@@ -76,7 +78,7 @@ pub fn update(active:bool,speed:f64,now:u64) {
     if !s.resolved {
         s.resolved=true;s.root_slot=resolve();
         crate::log_game(&format!("TIMESCALE_BINDING={} mode={} profile=EldenRing_1_17 root_slot_rva=0x{ROOT_RVA:X} scale_offset=0x{SCALE:X}",
-            if s.root_slot.is_some(){"STATIC_VALIDATED"}else{"REJECTED"},if enabled(){"EXPERIMENTAL_WRITE"}else{"READ_ONLY"}));
+            if s.root_slot.is_some(){"STATIC_VALIDATED"}else{"REJECTED"},if enabled(){"GUARDED_PLAYBACK_WRITE"}else{"READ_ONLY"}));
     }
     let Some(slot)=s.root_slot else{return;};
     let Some(root)=read::<usize>(slot).filter(|p|*p>=0x10000&&*p%8==0) else {
@@ -104,7 +106,7 @@ pub fn update(active:bool,speed:f64,now:u64) {
     if s.saved.is_none() {
         // Do not take over another speed mod or an engine transition with an unusual scalar.
         if (scale-1.0).abs()>0.0001 || !delta.is_some_and(|d|d.is_finite()&&d>=0.0&&d<=1.0) {
-            s.inhibited=true;crate::log_game("TIMESCALE_REJECTED: expected normal scalar and plausible delta; no write");return;
+            s.inhibited=true;crate::log_game(&format!("TIMESCALE_REJECTED scale={scale:?} delta={delta:?}: expected normal scalar and plausible delta; no write"));crate::bone_replay::status("WORLD TIMESCALE rejected: timing ownership/value (see game log)");return;
         }
         s.root=root;s.saved=Some(scale);
     }
@@ -115,5 +117,6 @@ pub fn update(active:bool,speed:f64,now:u64) {
         unsafe{std::ptr::write_volatile(address as *mut f32,requested)};
         s.last_written=Some(requested);
         crate::log_game(&format!("TIMESCALE_APPLY value={requested:.6} phase=ChrIns_PostPhysics"));
+        crate::bone_replay::status(&format!("WORLD TIMESCALE {requested:.6}x | interpolated player pose"));
     }
 }

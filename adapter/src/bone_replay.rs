@@ -58,13 +58,13 @@ struct Loaded{path:String,frames:Arc<Vec<Frame>>}
 struct State{
  recording:Option<(String,Vec<Frame>)>,record_paused:bool,last_second:u64,
  loaded:Option<Loaded>,loading:Loading,
- owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,evaluated_root:Option<Transform>,accuracy:Accuracy,
+ owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,evaluated_root:Option<Transform>,pose_alpha:f64,local_out:[u8;POSE_BYTES],model_out:[u8;POSE_BYTES],accuracy:Accuracy,
 }
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0}});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0}});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
-fn status(text:&str){if let Ok(c)=CString::new(text){unsafe{tm_render_native_status(c.as_ptr())}}}
+pub(crate) fn status(text:&str){if let Ok(c)=CString::new(text){unsafe{tm_render_native_status(c.as_ptr())}}}
 fn text(c:&[c_char;260])->String{unsafe{CStr::from_ptr(c.as_ptr())}.to_string_lossy().into_owned()}
 fn link()->Link{let mut l:Link=unsafe{std::mem::zeroed()};unsafe{tm_overlay_bone_link(&mut l)};l}
 fn read_ptr(address:usize)->usize{if address<0x10000{return 0;}unsafe{std::ptr::read_volatile(address as *const usize)}}
@@ -158,7 +158,7 @@ fn timeline(l:&Link,now:u64)->u64{
 fn release(s:&mut State,chr:usize,reason:&str){
  if !s.owning{return;}s.owning=false;s.restore_left=RESTORE_FRAMES;
  let a=&s.accuracy;
- crate::log_game(&format!("BONE_REPLAY: released the body ({reason}); accuracy over {} frames: bones exact {:.1}%, drawn position error max {:.2} cm mean {:.3} cm",
+ crate::log_game(&format!("BONE_REPLAY: released the body ({reason}); accuracy over {} frames: evaluated bones retained {:.1}%, drawn position error max {:.2} cm mean {:.3} cm",
   a.frames,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64)));
  if let Some(t)=s.saved{write_transform(chr,&t);}}
 
@@ -180,7 +180,8 @@ pub fn tick(group:usize,now:u64){
   if let Some((_,frames))=&s.recording{if let (Some(f),Some(last))=(frames.first(),frames.last()){if last.time-f.time>MAX_SECONDS*1_000_000_000&&s.last_second!=u64::MAX{s.last_second=u64::MAX;crate::log_game("BONE_REPLAY: 10 minute bone limit reached; later frames are not recorded");status("BONE REPLAY: 10 minute limit reached, stop the recording (F6)");}}}
   // Playback follows the loaded replay and the timeline.
   adopt_loaded(s);follow_loaded(s,&l);
-  let want=s.loaded.is_some()&&s.recording.is_none()&&(l.playing!=0||l.overlay_shown!=0);
+  let fresh=l.linked!=0&&l.received_ns!=0&&now.saturating_sub(l.received_ns)<500_000_000;
+  let want=fresh&&s.loaded.is_some()&&s.recording.is_none()&&(l.playing!=0||l.overlay_shown!=0);
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){
@@ -198,8 +199,8 @@ pub fn tick(group:usize,now:u64){
    if let Some(loaded)=&s.loaded{
     let frames=&loaded.frames;let i=frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1);
     let a=&frames[i];let b=&frames[(i+1).min(frames.len()-1)];let span=b.time.saturating_sub(a.time);
-    let alpha=if span==0{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
-    s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,alpha);
+    let alpha=if span==0||span>250_000_000{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
+    s.pose_alpha=alpha.clamp(0.0,1.0);s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,alpha);
     if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}
     else if let Some(chr)=chr{release(s,chr,"invalid root interpolation");}
    }}
@@ -216,11 +217,15 @@ pub fn tick(group:usize,now:u64){
  match group{
   WRITE_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};
-   unsafe{std::ptr::copy_nonoverlapping(f.local.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(f.model.as_ptr(),model as *mut u8,POSE_BYTES);}
+   let next=&loaded.frames[(i+1).min(loaded.frames.len()-1)];
+   let valid=crate::replay_interpolation::pose_into(&f.local,&next.local,s.pose_alpha,&mut s.local_out).is_some() &&
+       crate::replay_interpolation::pose_into(&f.model,&next.model,s.pose_alpha,&mut s.model_out).is_some();
+   if !valid{release(s,chr,"invalid bone interpolation");return;}
+   unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,POSE_BYTES);}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);}
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
-   let a=&mut s.accuracy;a.frames+=1;if pose(local)==&f.local[..]&&pose(model)==&f.model[..]{a.exact_bones+=1;}
+   let a=&mut s.accuracy;a.frames+=1;if pose(local)==&s.local_out[..]&&pose(model)==&s.model_out[..]{a.exact_bones+=1;}
    let d=(12..15).map(|k|(drawn[k]-f.matrix[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(d);a.sum_drawn_cm+=d as f64;}
   _=>{}}
 }
