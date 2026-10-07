@@ -30,6 +30,10 @@ use std::sync::{Arc,Mutex};
 use eldenring::cs::{WorldChrMan,ChrIns,CSChrPhysicsModule};
 use fromsoftware_shared::FromStatic;
 
+fn interpolated_pose_enabled()->bool {
+ static ENABLED:std::sync::OnceLock<bool>=std::sync::OnceLock::new();
+ *ENABLED.get_or_init(||std::env::var("THEATER_POSE_INTERPOLATION").as_deref()==Ok("1"))
+}
 const POSE_IMPORTER:usize=0x398;
 const LOCAL_POSE:usize=0x50;
 const MODEL_POSE:usize=0x60;
@@ -163,6 +167,16 @@ fn release(s:&mut State,chr:usize,reason:&str){
  if let Some(t)=s.saved{write_transform(chr,&t);}}
 
 pub fn tick(group:usize,now:u64){
+ if group==DRAW_GROUP {
+  static START:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+  static COUNT:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+  use std::sync::atomic::Ordering::Relaxed;
+  let start=START.load(Relaxed);let frames=COUNT.fetch_add(1,Relaxed)+1;
+  if start==0{START.store(now,Relaxed);}else if now.saturating_sub(start)>=5_000_000_000{
+   crate::log_game(&format!("DRAW_CALLBACK_CADENCE hz={:.2} elapsed_ms={} pose_interpolation={} world_timing=QUARANTINED (task cadence, not GPU FPS)",frames as f64*1e9/(now-start)as f64,(now-start)/1_000_000,interpolated_pose_enabled()));
+   COUNT.store(0,Relaxed);START.store(now,Relaxed);
+  }
+ }
  let mut guard=STATE.lock().unwrap();let s=&mut *guard;
  let chr=player_chr();
  if group==KEYS_GROUP{
@@ -218,8 +232,9 @@ pub fn tick(group:usize,now:u64){
   WRITE_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};
    let next=&loaded.frames[(i+1).min(loaded.frames.len()-1)];
-   let valid=crate::replay_interpolation::pose_into(&f.local,&next.local,s.pose_alpha,&mut s.local_out).is_some() &&
-       crate::replay_interpolation::pose_into(&f.model,&next.model,s.pose_alpha,&mut s.model_out).is_some();
+   let alpha=if interpolated_pose_enabled(){s.pose_alpha}else{0.0};
+   let valid=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out).is_some() &&
+       crate::replay_interpolation::pose_into(&f.model,&next.model,alpha,&mut s.model_out).is_some();
    if !valid{release(s,chr,"invalid bone interpolation");return;}
    unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,POSE_BYTES);}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);}

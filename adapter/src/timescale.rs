@@ -1,5 +1,5 @@
 //! IGCS timing mechanism, independently implemented for the exact guarded 2.7.0.0 image.
-//! Enabled for active playback. THEATER_WORLD_TIMESCALE=0 selects observation only.
+//! Recovery quarantine: all native timing access disabled, including observation.
 //! Called on the existing game task, never from IPC or the renderer. No clock API hooks.
 use std::{ffi::c_void, sync::{Mutex, OnceLock}};
 
@@ -74,6 +74,13 @@ fn restore(s:&mut Controller,current_root:usize,reason:&str) {
 }
 /// `active` means the skeleton replay currently owns a present player and is playing.
 pub fn update(active:bool,speed:f64,now:u64) {
+    // Quarantine startup regression: no timing reads/writes, regardless of environment.
+    const QUARANTINED:bool=true;
+    if QUARANTINED {
+        static NOTICE:OnceLock<()>=OnceLock::new();
+        NOTICE.get_or_init(||crate::log_game("TIMESCALE_QUARANTINED: native timing reads/writes disabled in recovery build"));
+        return;
+    }
     let mut s=STATE.lock().unwrap();
     if !s.resolved {
         s.resolved=true;s.root_slot=resolve();
