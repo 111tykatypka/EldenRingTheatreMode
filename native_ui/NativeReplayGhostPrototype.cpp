@@ -314,6 +314,7 @@ struct ProbeNode{U address;std::string name;std::string path;};
 void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
  U modules=get<U>(player+modulesOffset);
  U behavior=get<U>(modules+behaviorOffset),timeAct=get<U>(modules+timeActOffset);
+ tm_render_native_status("ANIM PROBE (F9): running, keep doing what you're doing for 2 seconds..."); // temporary, removed after the spike
  log("ANIM_PROBE: start player=0x%llX behavior=0x%llX(%s) time_act=0x%llX(%s)",player,behavior,rttiName(behavior).c_str(),timeAct,rttiName(timeAct).c_str());
  std::vector<ProbeNode> found;std::vector<U> seen;
  auto interesting=[](const std::string&n){return n.find("hk")!=std::string::npos||n.find("Anim")!=std::string::npos||n.find("Behavior")!=std::string::npos||n.find("Clip")!=std::string::npos||n.find("TimeAct")!=std::string::npos;};
@@ -381,6 +382,7 @@ void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
   for(int i=0;i<samples&&n<int(sizeof(line))-16;++i)n+=snprintf(line+n,sizeof(line)-n," %.3f",series[t][i*words+w]);
   log("%s",line);}
  log("ANIM_PROBE: done; %zu objects, %zu sampled",found.size(),targets.size());
+ {char hud[160];snprintf(hud,sizeof(hud),"ANIM PROBE (F9): done, %zu objects mapped. You can press F9 again.",found.size());tm_render_native_status(hud);}
 }
 std::atomic<bool> probeRunning{};
 void keys() {
@@ -405,7 +407,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))animProbe(player,layout[1],layout[8],layout[9]);else log("ANIM_PROBE: player not ready");
+     if(ready(w,player,recorder))animProbe(player,layout[1],layout[8],layout[9]);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
