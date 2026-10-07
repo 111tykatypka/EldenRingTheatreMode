@@ -363,6 +363,37 @@ void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
  {char hud[160];snprintf(hud,sizeof(hud),"ANIM PROBE (F9): done, %zu clips found, %u active. You can press F9 again.",clips.size(),active);tm_render_native_status(hud);}
  (void)behaviorOffset;
 }
+// Spike 2 (first WRITE test): freeze the player's active animation clips for 2 s by writing
+// each active hkbClipGenerator's local time (+0x140, identified by probe 5) back to the value it
+// had when F9 was pressed. If the pose freezes while the game keeps running, writing the clip
+// time controls the pose, which is what the replay puppet driver needs. Only float times are
+// written, only to clips that were active, and writing stops after 2 s.
+void animFreezeTest(U player,U modulesOffset,U behaviorOffset) {
+ tm_render_native_status("ANIM TEST (F9): freezing your pose for 2 seconds (keep moving to see it)...");
+ U modules=get<U>(player+modulesOffset),behavior=get<U>(modules+behaviorOffset);
+ U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0,graph=character?get<U>(character+0x98):0;
+ if(!graph||rttiName(graph)!="hkbBehaviorGraph"){log("ANIM_TEST: behavior graph not found");tm_render_native_status("ANIM TEST (F9): behavior graph not found");return;}
+ std::vector<U> queue{graph},seen{graph},clips;
+ for(size_t qi=0;qi<queue.size()&&queue.size()<6000;++qi){
+  const U object=queue[qi];unsigned char b[0x300];if(!read(object,b,sizeof(b)))continue;
+  for(size_t o=8;o+8<=sizeof(b);o+=8){U v;memcpy(&v,b+o,8);if(!pointerish(v))continue;
+   auto consider=[&](U q){if(std::find(seen.begin(),seen.end(),q)!=seen.end())return;const auto n=rttiName(q);if(n.rfind("hk",0)!=0&&n.find("Custom")==std::string::npos)return;
+    seen.push_back(q);if(n=="hkbClipGenerator")clips.push_back(q);if(n.rfind("hkb",0)==0||n.find("Custom")!=std::string::npos||n.find("@hkbStateMachine")!=std::string::npos)queue.push_back(q);};
+   if(!rttiName(v).empty()){consider(v);continue;}
+   U items[16];if(!read(v,items,sizeof(items)))continue;for(U it:items)if(pointerish(it))consider(it);}}
+ // Active = local time advances over 100 ms.
+ std::vector<float> before(clips.size());for(size_t i=0;i<clips.size();++i)before[i]=get<float>(clips[i]+0x140);
+ Sleep(100);
+ std::vector<std::pair<U,float>> active;
+ for(size_t i=0;i<clips.size();++i){const float now=get<float>(clips[i]+0x140);if(std::isfinite(now)&&now!=before[i]&&now>=0&&now<100)active.push_back({clips[i],now});}
+ log("ANIM_TEST: %zu clips, %zu active; freezing their local time for 2 s",clips.size(),active.size());
+ const ULONGLONG until=GetTickCount64()+2000;unsigned long long writes=0,drift=0;
+ while(GetTickCount64()<until){
+  for(const auto& [clip,t]:active){float cur=get<float>(clip+0x140);if(cur!=t){++drift;SIZE_T n{};WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(clip+0x140),&t,4,&n);++writes;}}
+  Sleep(0);}
+ log("ANIM_TEST: done; %llu corrections written (the game advanced the time %llu times)",writes,drift);
+ char hud[200];snprintf(hud,sizeof(hud),"ANIM TEST (F9): done. %zu active clips held for 2 s. Did your pose freeze?",active.size());tm_render_native_status(hud);
+}
 std::atomic<bool> probeRunning{};
 void keys() {
  bool lastCreate=false,lastRemove=false;
@@ -386,7 +417,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))animProbe(player,layout[1],layout[8],layout[9]);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
+     if(ready(w,player,recorder))animFreezeTest(player,layout[1],layout[8]);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
