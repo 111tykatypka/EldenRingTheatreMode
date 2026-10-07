@@ -1,0 +1,127 @@
+{
+  ".?AVGXPointLight@GXSR@@": [
+    {
+      "type_descriptor": "0x143d2d9a0",
+      "name": ".?AVGXPointLight@GXSR@@",
+      "locators": [
+        {
+          "col": "0x1433b5588",
+          "subobject_offset": 0,
+          "construction_displacement": 0,
+          "hierarchy_rva": "0x33b55b0",
+          "tables": [
+            {
+              "vtable": "0x142f15630",
+              "first_executable_slots": [
+                "0x141a45220",
+                "0x141a44e90",
+                "0x141a45490",
+                "0x141a453d0",
+                "0x141a453b0",
+                "0x141a45380",
+                "0x141a45260",
+                "0x141a45400",
+                "0x141a44ee0",
+                "0x141a453a0"
+              ]
+            }
+          ]
+        }
+      ],
+      "confidence": "BINARY_LAYOUT_VERIFIED; ABI_AND_LIFECYCLE_UNKNOWN"
+    }
+  ],
+  ".?AVGXSpotLight@GXSR@@": [
+    {
+      "type_descriptor": "0x143d2d9f0",
+      "name": ".?AVGXSpotLight@GXSR@@",
+      "locators": [
+        {
+          "col": "0x1433b5668",
+          "subobject_offset": 0,
+          "construction_displacement": 0,
+          "hierarchy_rva": "0x33b5690",
+          "tables": [
+            {
+              "vtable": "0x142f15790",
+              "first_executable_slots": [
+                "0x141a45220",
+                "0x141a45960",
+                "0x141a46320",
+                "0x141a45f60",
+                "0x141a45f40",
+                "0x141a45e20",
+                "0x141a45d20",
+                "0x141a462d0",
+                "0x141a45cf0",
+                "0x141a45e30"
+              ]
+            }
+          ]
+        }
+      ],
+      "confidence": "BINARY_LAYOUT_VERIFIED; ABI_AND_LIFECYCLE_UNKNOWN"
+    }
+  ],
+  ".?AVGXLightManager@GXSR@@": [
+    {
+      "type_descriptor": "0x143d2d508",
+      "name": ".?AVGXLightManager@GXSR@@",
+      "locators": [
+        {
+          "col": "0x1433b4cd8",
+          "subobject_offset": 0,
+          "construction_displacement": 0,
+          "hierarchy_rva": "0x33b4d00",
+          "tables": [
+            {
+              "vtable": "0x142f116c8",
+              "first_executable_slots": [
+                "0x141a27cc0"
+              ]
+            }
+          ]
+        }
+      ],
+      "confidence": "BINARY_LAYOUT_VERIFIED; ABI_AND_LIFECYCLE_UNKNOWN"
+    }
+  ],
+  ".?AVGXFfxSceneCtrl@GXFFX@@": [
+    {
+      "type_descriptor": "0x143d37f28",
+      "name": ".?AVGXFfxSceneCtrl@GXFFX@@",
+      "locators": [
+        {
+          "col": "0x1433c7310",
+          "subobject_offset": 0,
+          "construction_displacement": 0,
+          "hierarchy_rva": "0x33c7338",
+          "tables": [
+            {
+              "vtable": "0x14305d5e8",
+              "first_executable_slots": [
+                "0x141c9fff0",
+                "0x140b55740",
+                "0x141ca4c20",
+                "0x140b55750",
+                "0x140b55760",
+                "0x140b55720",
+                "0x140b55710",
+                "0x140b55730",
+                "0x141ca4210",
+                "0x141ca4910",
+                "0x141ca5e00",
+                "0x141ca0890",
+                "0x141ca30a0",
+                "0x141ca0d50",
+                "0x141ca3b20",
+                "0x141ca0210"
+              ]
+            }
+          ]
+        }
+      ],
+      "confidence": "BINARY_LAYOUT_VERIFIED; ABI_AND_LIFECYCLE_UNKNOWN"
+    }
+  ]
+}

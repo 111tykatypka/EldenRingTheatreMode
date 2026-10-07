@@ -1,5 +1,7 @@
 #include "../shared/CinematicCamera.h"
 #include "../shared/CameraTelemetry.h"
+#include "../shared/CameraProject.h"
+#include "../shared/CubeLut.h"
 #include <iostream>
 #include <stdexcept>
 #include <limits>
@@ -22,5 +24,10 @@ int main(){using namespace cinematic;
  for(int n=1;n<=20;++n){auto p=track.evaluate(n*50000000ULL)->position;auto d=length(sub(p,previous));shortest=std::min(shortest,d);longest=std::max(longest,d);previous=p;}
  check(longest/shortest<1.05);
  theater_camera::Slot slot;check(!theater_camera::valid(slot));for(int i=0;i<4;++i)slot.matrix[i*4+i]=1;slot.fov=1;slot.aspect=1.77f;slot.near_plane=.1f;slot.far_plane=1000;check(theater_camera::valid(slot));slot.matrix[0]=std::numeric_limits<float>::infinity();check(!theater_camera::valid(slot));
- std::cout<<"Camera path, SLERP, boundary, invalid-data, frame-time and telemetry checks passed\n";
+ std::vector<Key> imported;const std::string replay="C:/replays/Unicode \xD0\x91 fight.erplay";
+ auto saved=save_project(replay,track.keys());check(load_project(saved,replay,imported));check(imported.size()==3);check(imported[1].state.position==track.keys()[1].state.position);
+ check(!load_project(saved,"wrong replay",imported));check(!load_project(saved+"junk",replay,imported));check(!load_project("ERTCAM 2\n",replay,imported));check(!load_project("ERTCAM 1\n\"x\"\n999999999999999999\n","x",imported));
+ auto lut=CubeLut::parse("TITLE \"identity\"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");check(bool(lut));auto rgb=lut->sample({.2,.4,.8});check(rgb&&length(sub(*rgb,{.2,.4,.8}))<1e-12);check(lut->sample({2,-1,.5})==std::optional<Vec>({1,0,.5}));
+ check(!CubeLut::parse("LUT_3D_SIZE 2\n0 0 0\n"));check(!CubeLut::parse("LUT_3D_SIZE 999\n"));check(!lut->sample({NAN,0,0}));
+ std::cout<<"Camera path, serialization, Unicode identity, LUT, SLERP, boundary, invalid-data, frame-time and telemetry checks passed\n";
 }

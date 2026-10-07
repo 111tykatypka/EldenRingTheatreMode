@@ -17,5 +17,8 @@ int main(){
  }
  camera_runtime::mode(1);camera_runtime::enable(true);check(!camera_runtime::view().enabled);camera_runtime::add_key();check(camera_runtime::view().keys.empty());
  camera_runtime::stop();check(camera_runtime::view().mode==0&&!camera_runtime::owns_input());
+ cinematic::State root{{10,20,30},{0,0,0,1},60};float matrix[16];camera_runtime::encode_pose(root,matrix);float qs[12]={1,2,3,0,0,0,0,1,1,1,1,0};
+ auto attached=camera_runtime::bone_world(matrix,qs);check(attached&&attached->position==cinematic::Vec({11,22,33}));check(!camera_runtime::bone_world(nullptr,qs));qs[4]=NAN;check(!camera_runtime::bone_world(matrix,qs));
+ qs[4]=0;root.orientation={0,std::sqrt(.5),0,std::sqrt(.5)};camera_runtime::encode_pose(root,matrix);attached=camera_runtime::bone_world(matrix,qs);check(attached&&cinematic::length(cinematic::sub(attached->position,{13,22,29}))<1e-5);
  std::cout<<"Native camera conversion and fail-closed control checks passed\n";
 }

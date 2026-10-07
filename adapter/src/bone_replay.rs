@@ -137,6 +137,16 @@ fn pose_arrays(chr:usize)->Option<(usize,usize)>{
  let (local,model)=(read_ptr(importer+LOCAL_POSE),read_ptr(importer+MODEL_POSE));
  (array(local)&&array(model)).then_some((local,model))}
 fn pose(p:usize,bytes:usize)->&'static [u8]{unsafe{std::slice::from_raw_parts(p as *const u8,bytes)}}
+// Read-only publication on Draw_Pre; no retained game pointers cross the FFI.
+pub fn camera_bone_sample(){
+ unsafe extern "C"{fn tm_camera_bone_index()->i32;fn tm_camera_bone_publish(root:*const f32,qs:*const f32);}
+ let index=unsafe{tm_camera_bone_index()};if index<0{return;}
+ let sample=(||{let chr=player_chr()?;let count=crate::actors::bone_count(chr)?;if index as usize>=count{return None;}
+  let (_,model)=pose_arrays(chr)?;let mut root=[0u8;64];let mut qs=[0u8;48];
+  if !crate::companions::copy(matrix_address(chr),&mut root)||!crate::companions::copy(model.checked_add((index as usize).checked_mul(48)?)?,&mut qs){return None;}
+  Some((std::array::from_fn::<f32,16,_>(|i|f32::from_le_bytes(root[i*4..i*4+4].try_into().unwrap())),std::array::from_fn::<f32,12,_>(|i|f32::from_le_bytes(qs[i*4..i*4+4].try_into().unwrap()))))})();
+ match sample{Some((root,qs))=>unsafe{tm_camera_bone_publish(root.as_ptr(),qs.as_ptr())},None=>unsafe{tm_camera_bone_publish(std::ptr::null(),std::ptr::null())}}
+}
 fn bones_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.bones"))}
 fn world_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.world"))}
 

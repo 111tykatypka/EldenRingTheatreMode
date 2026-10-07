@@ -210,7 +210,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_BehaviorSafe,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(1,monotonic_ns()));}))));}
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PrePhysicsSafe,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(2,monotonic_ns()));}))));}
                 unsafe{register_task(task,CSTaskGroupIndex::LocationUpdate_PrePhysics,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(3,monotonic_ns()));}))));}
-                unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(4,monotonic_ns()));}))));}
+                unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||{bone_replay::tick(4,monotonic_ns());if offline_allowed(){bone_replay::camera_bone_sample();}});} ))));}
                 log_game(&format!("Recurring task registered using resolved function eldenring.exe+0x{register_rva:X}; group=ChrIns_PostPhysics; waiting for WORLDCHR_READY and PLAYER_FOUND"));
                 loop {
                     let allowed=unsafe{tm_anti_cheat_state()}==0;

@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iterator>
 #include <vector>
+#include <map>
 
 namespace TheaterUI
 {
@@ -20,7 +21,8 @@ void Overlay::CameraHotkey(theater_hotkeys::Action action)
 {
     ui_.activeTool=Tool::Camera;ui_.layout.panelOpen=true;
     if(action==theater_hotkeys::Action::CycleCamera){
-        cameraSelection_=(camera_runtime::view().mode+1)%3;camera_runtime::mode(cameraSelection_);
+        cameraSelection_=(camera_runtime::view().mode+1)%4;camera_runtime::mode(cameraSelection_);
+        camera_runtime::enable(cameraSelection_!=0);
     } else if(action==theater_hotkeys::Action::AddDollyKey){
         camera_runtime::add_key();
     } else if(action==theater_hotkeys::Action::ClearDollyKeys) clearDollyDialog_=true;
@@ -547,8 +549,9 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     {
         section("CAMERA SHORTCUTS");
         auto runtime=camera_runtime::view();
-        const char* modes[]={"Default","Free","Dolly"};
+        const char* modes[]={"Default","Free","Dolly","Bone"};
         ImGui::Text("Selection: %s | F3: cycle",modes[runtime.mode]);
+        int selectedMode=static_cast<int>(runtime.mode);if(ImGui::Combo("Camera mode",&selectedMode,modes,4)){camera_runtime::mode(selectedMode);camera_runtime::enable(selectedMode!=0);}
         ImGui::Text("Copy hook: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
         ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
         ImGui::TextWrapped("Runtime validation required. Test the two-second probe first; F6 immediately disables camera overrides.");
@@ -559,10 +562,46 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         float fov=static_cast<float>(runtime.pose.fov_degrees);ImGui::BeginDisabled(!runtime.enabled);
         if(ImGui::InputFloat("Camera FOV (degrees)",&fov,.1f,1.f,"%.3f"))camera_runtime::fov(fov);
         ImGui::EndDisabled();
-        ImGui::TextWrapped("K captures a key at ReplayTime. L deletes all keys after confirmation. Keys are session-only in this checkpoint.");
+        float movement=static_cast<float>(runtime.movement_speed),sensitivity=static_cast<float>(runtime.mouse_sensitivity),smooth=static_cast<float>(runtime.smoothing_seconds);
+        bool changed=ImGui::InputFloat("Move speed (units/sec)",&movement,.1f,1.f);
+        changed|=ImGui::InputFloat("Mouse sensitivity (rad/count)",&sensitivity,.0001f,.001f,"%.4f");
+        changed|=ImGui::InputFloat("Movement smoothing (seconds, 0 = direct)",&smooth,.01f,.1f);
+        if(changed)camera_runtime::movement(movement,sensitivity,smooth);
+        double shakePosition=runtime.shake_position,shakeRotation=runtime.shake_rotation,shakeFrequency=runtime.shake_frequency;
+        bool shakeChanged=ImGui::InputDouble("Shake position amplitude (units)",&shakePosition,.01,.1);
+        shakeChanged|=ImGui::InputDouble("Shake rotation amplitude (degrees)",&shakeRotation,.1,1);
+        shakeChanged|=ImGui::InputDouble("Shake frequency (Hz)",&shakeFrequency,.1,1);
+        if(shakeChanged)camera_runtime::shake(shakePosition,shakeRotation,shakeFrequency);
+        ImGui::TextDisabled("Shake is deterministic at ReplayTime and does not modify saved nodes.");
+        int boneIndex=runtime.bone_index;double offset[3]={runtime.bone_offset[0],runtime.bone_offset[1],runtime.bone_offset[2]};
+        bool boneChanged=ImGui::InputInt("Player bone index (-1 disabled)",&boneIndex);
+        for(int i=0;i<3;++i){const char*labels[]={"Bone offset right","Bone offset up","Bone offset forward"};boneChanged|=ImGui::InputDouble(labels[i],&offset[i],.01,.1,"%.3f");}
+        if(boneChanged)camera_runtime::bone(boneIndex,{offset[0],offset[1],offset[2]});
+        ImGui::Text("Bone source: %s (current player model-space pose + model root)",runtime.bone_available?"AVAILABLE":"UNAVAILABLE");
+        ImGui::TextWrapped("Bone indices depend on the current skeleton. No guessed head index. Bone camera uses evaluated live/replayed pose; visual coordinate alignment is not yet verified.");
+        ImGui::TextWrapped("K captures a key at ReplayTime. L deletes all keys after confirmation. Save/Load uses a .ercam sidecar beside the replay.");
+        if(ImGui::Button("Save camera path"))camera_runtime::save_path();ImGui::SameLine();if(ImGui::Button("Load camera path"))camera_runtime::load_path();
         ImGui::Text("Dolly keys: %zu",runtime.keys.size());
         ImGui::TextWrapped("%s",runtime.status.c_str());
-        for(const auto&key:runtime.keys)ImGui::Text("Key %llu at %.3fs | %.2f %.2f %.2f | FOV %.2f",static_cast<unsigned long long>(key.id),double(key.time_ns)/1e9,key.state.position[0],key.state.position[1],key.state.position[2],key.state.fov_degrees);
+        for(auto key:runtime.keys){ImGui::PushID(static_cast<int>(key.id));
+            if(ImGui::TreeNode("edit","Key %llu at %.3fs",static_cast<unsigned long long>(key.id),double(key.time_ns)/1e9)){
+                // Edits apply explicitly; live camera continues until Apply is clicked.
+                static std::map<std::uint64_t,cinematic::Key> drafts;
+                static std::uint64_t draftGeneration=UINT64_MAX;
+                if(draftGeneration!=runtime.project_generation){drafts.clear();draftGeneration=runtime.project_generation;}
+                auto& draft=drafts.try_emplace(key.id,key).first->second;
+                if(ImGui::Button("Revert draft to saved key"))draft=key;
+                double seconds=double(draft.time_ns)/1e9;ImGui::InputDouble("Timestamp (s)",&seconds,.01,1,"%.6f");
+                if(std::isfinite(seconds)&&seconds>=0&&seconds<double(UINT64_MAX)/1e9)draft.time_ns=static_cast<std::uint64_t>(seconds*1e9);
+                for(int i=0;i<3;++i){const char* names[]={"Position X","Position Y","Position Z"};ImGui::InputDouble(names[i],&draft.state.position[i],.01,1,"%.5f");}
+                for(int i=0;i<4;++i){const char* names[]={"Quaternion X","Quaternion Y","Quaternion Z","Quaternion W"};ImGui::InputDouble(names[i],&draft.state.orientation[i],.001,.01,"%.6f");}
+                ImGui::InputDouble("FOV degrees",&draft.state.fov_degrees,.1,1,"%.3f");
+                int interpolation=static_cast<int>(draft.outgoing);if(ImGui::Combo("Outgoing interpolation",&interpolation,"Linear\0Smooth\0Bezier\0Ease curve\0Catmull-Rom spline\0Step\0"))draft.outgoing=cinematic::Interpolation(interpolation);
+                ImGui::Checkbox("Constant position speed",&draft.constant_speed);
+                ImGui::InputDouble("Ease in",&draft.ease_in,.05,.1);ImGui::InputDouble("Ease out",&draft.ease_out,.05,.1);
+                for(int i=0;i<3;++i){ImGui::PushID(i);ImGui::InputDouble("Bezier handle in",&draft.tangent_in[i],.1,1);ImGui::InputDouble("Bezier handle out",&draft.tangent_out[i],.1,1);ImGui::PopID();}
+                if(ImGui::Button("Apply key edit"))camera_runtime::edit_key(draft);ImGui::SameLine();if(ImGui::Button("Delete this key")){camera_runtime::delete_key(key.id);drafts.erase(key.id);}
+                ImGui::TreePop();}ImGui::PopID();}
         section("NATIVE CAMERA DIAGNOSTICS");
         ImGui::TextWrapped("Read-only SDK candidates, separate from the experimental render-camera copy hook.");
         bool probe=theater_camera::probe_enabled.load();

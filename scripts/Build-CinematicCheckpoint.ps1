@@ -25,6 +25,8 @@ try {
  Copy-Item -LiteralPath (Join-Path $baseline 'sounds') -Destination $out -Recurse
  Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_EDITOR_CHECKPOINT_1.md') -Destination $out
  Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_C3_NATIVE_CAMERA.md') -Destination $out
+ Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_C4_CAMERA_EDITOR.md') -Destination $out
+ Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_RENDERING_RESEARCH_C4.md') -Destination $out
  $safe="safe.directory=$($repo.Replace('\','/'))"
  $commit=& git -c $safe rev-parse HEAD
  $dirty=& git -c $safe status --porcelain
