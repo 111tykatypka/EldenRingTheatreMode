@@ -659,3 +659,6 @@ extern "C" int tm_native_ghost_start(void(*logCallback)(const char*),const size_
  log("NATIVE_GHOST: experimental hooks installed; default OFF; exact SHA guard passed; one ghost at a time");
  std::thread(keys).detach();return 1;
 }
+
+// The live Theater-owned ghost ChrIns, or 0. Used by the Rust bone replay spike as its puppet.
+extern "C" uintptr_t tm_native_ghost_actor() {auto s=snapshot();return s.active?s.actor:0;}
