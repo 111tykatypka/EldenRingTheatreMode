@@ -152,3 +152,11 @@ need in-game verification. Sample endpoints retain recorded local/model poses;
 between samples, local TRS interpolates and model-space poses are reconstructed from
 the recorded hierarchy. Intermediate rendered frames are therefore an approximation,
 not a captured exact native frame.
+
+## Track 8, kind 10: actor construction metadata (NPC lifecycle pass; additive, skippable)
+
+One record per recorded actor, written when the actor is first announced. Each record is seven varints:
+`id, character_id, npc_id, npc_param, think_param, chr_type, category` (signed values are stored as their u32 bit
+pattern). `think_param` is -1 when unreadable (only EnemyIns carries one). Pointer-free. Readers that do not know the
+track skip it; this build rejects metadata for an id with no catalog entry. Older files simply have no metadata, and
+replay puppets are then unavailable for them (`ACTOR_RECONSTRUCTION_UNAVAILABLE`).

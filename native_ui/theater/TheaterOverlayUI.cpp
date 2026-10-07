@@ -579,6 +579,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             bool flags = false; // unsupported overrides must not appear enabled from old settings
             ImGui::BeginDisabled();ImGui::Checkbox(T(Str::ReplayWorldFlags), &flags);ImGui::EndDisabled();
             ImGui::TextWrapped("World flags and time-of-day are captured read-only. Replay overrides are disabled until autosave isolation is verified.");
+            // Experimental: stand-in enemies made by the game's own debug character creator, bit 1.
+            bool puppets = (gReplayOptions.load() & 2) != 0;
+            if (ImGui::Checkbox(T(Str::ReplayPuppets), &puppets)) { gReplayOptions = puppets ? (gReplayOptions | 2u) : (gReplayOptions & ~2u); SaveSettings(); }
+            PushFont(Font::Meta);
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(T(Str::ReplayPuppetsNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);

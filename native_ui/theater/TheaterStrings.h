@@ -37,7 +37,7 @@ namespace TheaterUI
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
         UiSounds, UiSoundsOn,
-        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote,
+        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote,
         Count
     };
 
@@ -105,6 +105,9 @@ namespace TheaterUI
         { "Replay world", "Мир при воспроизведении" }, { "Restore doors, fog walls and bosses as recorded", "Восстанавливать двери, туманные стены и боссов как в записи" },
         { "Changes event flags (save state) while a replay plays; your own flags are put back when it ends. Time of day is always replayed.",
           "Меняет флаги событий (состояние сохранения) во время воспроизведения; ваши флаги возвращаются после. Время суток воспроизводится всегда." },
+        { "Replay puppets (experimental)", "Заменяющие персонажи (эксперимент)" },
+        { "When the recording says an enemy is alive but it is dead or gone in your game, ask the game to create a stand-in for the replay (invincible, no rewards, removed afterwards).",
+          "Если в записи враг жив, а в вашей игре мертв или исчез, игра создаст замену для повтора (неуязвима, без наград, удаляется после)." },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

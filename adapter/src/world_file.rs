@@ -39,6 +39,8 @@ pub const TRACK_COMPANIONS:u32=5;
 pub const KIND_COMPANION:u32=7;
 pub const TRACK_SKELETON:u32=6;
 pub const KIND_SKELETON:u32=8;
+pub const TRACK_ACTOR_META:u32=8;
+pub const KIND_ACTOR_META:u32=10; // construction metadata of each recorded actor (ReplayActorRegistry)
 pub const TRACK_ACTOR_LIFETIME:u32=7;
 pub const KIND_ACTOR_OBSERVATION:u32=9; // schema 1, fixed pointer-free observations
 fn encode_skeleton(d:&crate::skeleton::Definition)->Vec<u8>{
@@ -76,6 +78,15 @@ pub struct EntityContext{pub time:u64,pub id:u32,pub category:u32,pub ride_flags
 #[derive(Clone)]
 pub struct PlayerFrame{pub time:u64,pub transform:[[f32;4];3],pub matrix:[f32;16],pub local:Vec<u8>,pub model:Vec<u8>,pub place:crate::arrival::Place,pub equip:crate::equipment::Equip}
 
+/// Construction metadata of a recorded actor, enough to ask the game for a stand-in later. Pointer-free.
+/// `think_param` is -1 when it could not be read (only EnemyIns carries one).
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
+pub struct ActorMeta{pub id:u32,pub character_id:u32,pub npc_id:i32,pub npc_param:i32,pub think_param:i32,pub chr_type:u32,pub category:u32}
+fn encode_meta(v:&[ActorMeta])->Vec<u8>{let mut o=Vec::new();for m in v{for x in [m.id as u64,m.character_id as u64,m.npc_id as u32 as u64,m.npc_param as u32 as u64,m.think_param as u32 as u64,m.chr_type as u64,m.category as u64]{codec::put_varint(&mut o,x);}}o}
+fn decode_meta(r:&[u8],count:usize)->Option<Vec<ActorMeta>>{if count>r.len()/7{return None;}let mut at=0;let mut out=Vec::with_capacity(count);
+ for _ in 0..count{let mut g=||codec::get_varint(r,&mut at);let (id,ch,npc_id,npc,think,kind,cat)=(g()?,g()?,g()?,g()?,g()?,g()?,g()?);
+  out.push(ActorMeta{id:u32::try_from(id).ok()?,character_id:u32::try_from(ch).ok()?,npc_id:u32::try_from(npc_id).ok()? as i32,npc_param:u32::try_from(npc).ok()? as i32,think_param:u32::try_from(think).ok()? as i32,chr_type:u32::try_from(kind).ok()?,category:u32::try_from(cat).ok()?});}
+ (at==r.len()).then_some(out)}
 /// A recorded enemy/NPC/boss: who it is (no pointers; matched to live characters on playback).
 #[derive(Clone,Copy,Debug,Default,PartialEq)]
 pub struct ActorInfo{pub id:u32,pub handle:u64,pub entity:u32,pub npc_param:i32,pub chr_type:u32,pub first_seen:u64}
@@ -168,7 +179,7 @@ fn write_chunk(w:&mut impl Write,track:u32,kind:u32,count:u32,first:u64,last:u64
  w.write_all(&h)?;w.write_all(&packed)?;Ok((h.len()+packed.len()) as u64)}
 
 // ------------------------------------------------------------------------------------------ writer
-pub enum Message{Player(PlayerFrame),PlayerPose(PlayerFrame,Option<crate::skeleton::Definition>),World(WorldSample),Flags(u64,FlagGroups),FlagEvents(Vec<FlagEvent>),Actors(Vec<(u32,ActorFrame)>),
+pub enum Message{ActorMeta(Vec<ActorMeta>),Player(PlayerFrame),PlayerPose(PlayerFrame,Option<crate::skeleton::Definition>),World(WorldSample),Flags(u64,FlagGroups),FlagEvents(Vec<FlagEvent>),Actors(Vec<(u32,ActorFrame)>),
  ActorBatch{infos:Vec<ActorInfo>,frames:Vec<(u32,ActorFrame)>,context:Vec<EntityContext>,skeletons:Vec<crate::skeleton::Definition>,observations:Vec<crate::actor_lifetime::Observation>},
  // Explicit termination is used by data tests; runtime closes the sender to drain without blocking.
  #[allow(dead_code)]Finish}
@@ -227,6 +238,7 @@ fn writer(rx:Receiver<Message>,mut file:std::io::BufWriter<std::fs::File>,tmp:Pa
    Message::FlagEvents(e)=>{flag_changes+=e.len() as u64;events.extend(e);if events.len()>=4096{flush_small(&mut world,&mut events,&mut file)}else{Ok(0)}}
    Message::Actors(list)=>{let mut total=Ok(0);for (id,f) in list{actor_frames+=1;let buf=actors.entry(id).or_default();
      if buf.first().is_some_and(|p|f.body.time.saturating_sub(p.body.time)>=CHUNK_NS){match flush_actor(id,buf,&mut file){Ok(n)=>{if let Ok(t)=&mut total{*t+=n;}},Err(e)=>total=Err(e)}}buf.push(f);}total}
+   Message::ActorMeta(v)=>{if v.is_empty(){Ok(0)}else{write_chunk(&mut file,TRACK_ACTOR_META,KIND_ACTOR_META,v.len() as u32,0,0,&encode_meta(&v))}}
    Message::ActorBatch{..}|Message::PlayerPose(..)=>unreachable!(),Message::Finish=>break};
   match r{Ok(n)=>bytes+=n,Err(e)=>{failed.get_or_insert(e.to_string());}}
   // Durability work remains on this writer; a crash can still lose the active chunk/queue.
@@ -282,6 +294,7 @@ fn validate_saved_world(path:&Path)->Result<(),String>{
    (TRACK_FLAGS,KIND_FLAGS_FULL)=>{let v=decode_flags(&r).ok_or("invalid flag snapshot")?;if v.len()!=count{return Err("flag group count mismatch".into());}},
    (TRACK_FLAGS,KIND_FLAG_EVENTS)=>times.extend(decode_events(&r,count).ok_or("invalid flag event payload")?.into_iter().map(|f|f.time)),
    (TRACK_ACTORS,KIND_ACTOR_INFO)=>for info in decode_infos(&r,count).ok_or("invalid actor catalog")?{if info.id==0||!ids.insert(info.id){return Err("duplicate/zero actor identity".into());}},
+   (TRACK_ACTOR_META,KIND_ACTOR_META)=>for m in decode_meta(&r,count).ok_or("invalid actor metadata")?{if m.id==0{return Err("actor metadata for id 0".into());}references.insert(m.id);},
    (TRACK_COMPANIONS,KIND_COMPANION)=>for c in decode_context(&r,count).ok_or("invalid companion payload")?{times.push(c.time);if c.id!=0{references.insert(c.id);}if c.mount_id!=0{references.insert(c.mount_id);}},
    (TRACK_ACTOR_LIFETIME,KIND_ACTOR_OBSERVATION)=>{let v=crate::actor_lifetime::decode(&r,count).ok_or("invalid actor observations")?;for o in v{references.insert(o.id);if last.insert((TRACK_ACTOR_LIFETIME,o.id),o.time).is_some_and(|p|p>=o.time){return Err("actor observation timestamp regression".into());}}},
    (TRACK_SKELETON,KIND_SKELETON)=>{if count!=1{return Err("invalid skeleton record count".into());}let d=decode_skeleton(&r).ok_or("invalid skeleton definition")?;
@@ -316,7 +329,7 @@ impl<T:Clone> Track<T>{
   let (_,frames)=self.cache.iter().find(|(k,_)|*k==c)?;frames.get(i-self.chunks[c].first_index)}
 }
 /// Everything in a world file. Player frames stay compressed (chunk cache); small tracks are decoded.
-pub struct WorldFile{pub player:PlayerTrack,pub world:Vec<WorldSample>,pub flags_start:Option<(u64,FlagGroups)>,pub flag_events:Vec<FlagEvent>,pub actors:Vec<(ActorInfo,ActorTrack)>,pub context:Vec<EntityContext>,pub skeletons:HashMap<u32,crate::skeleton::Definition>,pub actor_lifetime:crate::actor_lifetime::Timeline}
+pub struct WorldFile{pub player:PlayerTrack,pub world:Vec<WorldSample>,pub flags_start:Option<(u64,FlagGroups)>,pub flag_events:Vec<FlagEvent>,pub actors:Vec<(ActorInfo,ActorTrack)>,pub context:Vec<EntityContext>,pub skeletons:HashMap<u32,crate::skeleton::Definition>,pub actor_lifetime:crate::actor_lifetime::Timeline,pub meta:HashMap<u32,ActorMeta>}
 /// Opens a world file and indexes its chunks (every chunk's integrity is checked once here).
 pub fn open(path:&Path)->Result<WorldFile,String>{
  let data=std::fs::read(path).map_err(|e|e.to_string())?;
@@ -327,7 +340,7 @@ pub fn open(path:&Path)->Result<WorldFile,String>{
  let (mut at,mut chunks,mut times,mut skipped)=(16usize,Vec::new(),Vec::new(),HashMap::<u32,usize>::new());
  let (mut world,mut flags_start,mut flag_events)=(Vec::new(),None,Vec::new());
  let mut context=Vec::new();let mut observations=Vec::new();
- let mut skeletons=HashMap::new();
+ let mut skeletons=HashMap::new();let mut meta:HashMap<u32,ActorMeta>=HashMap::new();
  let (mut infos,mut actor_chunks):(Vec<ActorInfo>,HashMap<u32,(Vec<ChunkRef>,Vec<u64>)>)=(Vec::new(),HashMap::new());
  let u32_at=|i:usize|u32::from_le_bytes(data[i..i+4].try_into().unwrap());
  while at+CHUNK_HEADER<=data.len(){
@@ -349,6 +362,10 @@ pub fn open(path:&Path)->Result<WorldFile,String>{
     _=>flag_events.extend(decode_events(&raw,count).ok_or_else(bad)?)}}
   else if track==TRACK_ACTOR_LIFETIME&&kind==KIND_ACTOR_OBSERVATION{
    let r=codec::unpack_zeros(&data[body..body+packed]).filter(|r|r.len()==raw).ok_or("invalid actor observation chunk")?;observations.extend(crate::actor_lifetime::decode(&r,count).ok_or("invalid actor observations")?);
+  }
+  else if track==TRACK_ACTOR_META&&kind==KIND_ACTOR_META{
+   let r=codec::unpack_zeros(&data[body..body+packed]).filter(|r|r.len()==raw).ok_or("invalid actor metadata chunk")?;
+   for m in decode_meta(&r,count).ok_or("invalid actor metadata")?{meta.insert(m.id,m);}
   }
   else if track==TRACK_SKELETON&&kind==KIND_SKELETON{
    let unpacked=codec::unpack_zeros(&data[body..body+packed]).ok_or("skeleton chunk does not unpack")?;
@@ -381,11 +398,12 @@ pub fn open(path:&Path)->Result<WorldFile,String>{
  if context.iter().any(|c|(c.id!=0&&!ids.contains(&c.id))||(c.mount_id!=0&&!ids.contains(&c.mount_id))){return Err("companion context references unknown actor".into());}
  if !skipped.is_empty(){crate::log_game(&format!("WORLD_FILE: tracks this build does not use yet: {skipped:?}"));}
  if observations.iter().any(|o|!ids.contains(&o.id)){return Err("observation references unknown actor".into());}
+ if meta.keys().any(|id|!ids.contains(id)){return Err("metadata references unknown actor".into());}
  let actor_lifetime=crate::actor_lifetime::Timeline::from_records(observations)?;
  let data=Arc::new(data);
  let mut actors=Vec::new();
  for info in infos{if let Some((chunks,times))=actor_chunks.remove(&info.id){if times.windows(2).all(|w|w[1]>=w[0]){actors.push((info,Track{data:data.clone(),chunks,times,cache:Vec::new(),decode:actor_decoder}));}}}
- Ok(WorldFile{player:Track{data,chunks,times,cache:Vec::new(),decode:player_decoder},world,flags_start,flag_events,actors,context,skeletons,actor_lifetime})}
+ Ok(WorldFile{player:Track{data,chunks,times,cache:Vec::new(),decode:player_decoder},world,flags_start,flag_events,actors,context,skeletons,actor_lifetime,meta})}
 
 #[cfg(test)]mod tests{
  #[test]fn lifecycle_observations_roundtrip_and_seek_backwards(){

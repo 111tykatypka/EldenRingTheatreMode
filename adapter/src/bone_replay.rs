@@ -195,7 +195,7 @@ fn follow_loaded(s:&mut State,l:&Link){
  let _=std::thread::Builder::new().name("TheaterMode.BoneLoad".into()).spawn(move||{
   let opened=if world.is_file(){world_file::open(&world).map(|w|{
     let mut touched:Vec<u32>=w.flag_events.iter().map(|e|e.flag).collect();touched.sort_unstable();touched.dedup();
-    let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context,&w.skeletons,w.actor_lifetime));
+    let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context,&w.skeletons,w.actor_lifetime,w.meta));
     (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context,skeletons:w.skeletons},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
   let result=opened.map(|(mut store,world_data,actors)|{
    // Learn the skeleton hierarchy from a few frames spread over the recording (see replay_interpolation).
@@ -450,7 +450,7 @@ pub fn tick(group:usize,now:u64){
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);
    // Recorded enemies/NPCs/bosses at the same replay time (Phase 2.2).
    let (t,offset)=(s.last_t,s.now_offset);
-   if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.write(t,now,offset,interpolated_pose_enabled());}}
+   if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.set_options(s.options);a.write(t,now,offset,interpolated_pose_enabled());}}
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
    if let Some(e)=s.equip_written{if equipment::read(chr)!=Some(e){s.equip_lost+=1;}}
