@@ -402,7 +402,7 @@ void animRequestTest(U player) {
  tm_render_native_status("ANIM TEST (F9): requesting animation 60100 (prayer)...");
  U modules=get<U>(player+layout[1]),event=get<U>(modules+layout[10]),timeAct=get<U>(modules+layout[9]);
  if(!event||!timeAct){log("ANIM_TEST: event/time_act module missing");return;}
- const int32_t before=get<int32_t>(event+layout[11]);const int32_t id=60100; // 22100 (roll) was consumed but ignored; 60100 is an event animation community tools force this waySIZE_T n{};
+ const int32_t before=get<int32_t>(event+layout[11]);const int32_t id=60100; /* 22100 (roll) was consumed but ignored; 60100 is an event animation community tools force this way */SIZE_T n{};
  WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(event+layout[11]),&id,4,&n);
  log("ANIM_TEST: request_animation_id %d -> %d (written=%zu)",before,id,size_t(n));
  char line[1800];int len=snprintf(line,sizeof(line),"ANIM_TEST: time_act after request id/time:");
