@@ -25,6 +25,11 @@
 // Step1c found it: "debug_flags" read 0x8A2E8FD0, the low half of a pointer, so the SDK's
 // ChrIns::debug_flags offset is wrong for game 2.7.0.0 and OR-ing bit 3 corrupted that pointer.
 // Damage immunity through debug flags is removed; only gravity_disabled (physics module) is set.
+// Test 3 (Step1d) worked: bones 100% exact, physics position 0 cm, no crash. But the drawn model
+// matrix lagged one frame on moving frames (up to ~8 cm): the physics step put the position back to
+// the character proxy's old spot and the matrix was built from that before our PostPhysics rewrite.
+// Step1e asks the game to move the proxy to the written position (chr_proxy_pos_update_requested)
+// and reports the drawn-position error (model matrix at Draw_Pre vs recording) in the summary.
 // Offsets stay in this file until Step 2 moves them into GameProfile.
 use std::ffi::{c_char,c_void,CString};
 use std::sync::Mutex;
@@ -52,10 +57,10 @@ unsafe extern "C"{fn tm_hotkey_vk(action:u32)->u32;fn tm_render_native_status(te
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
 struct Frame{time:u64,local:Vec<u8>,model:Vec<u8>,transform:Transform,matrix:[f32;16]}
-#[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_bone_error:f32,max_position_cm:f32,sum_position_cm:f64}
+#[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_bone_error:f32,max_position_cm:f32,sum_position_cm:f64,max_drawn_cm:f32,sum_drawn_cm:f64}
 #[derive(PartialEq,Clone,Copy)]enum Mode{Idle,Recording,Playing,Restoring}
 struct State{mode:Mode,start:u64,frames:Vec<Frame>,last_second:u64,written:Option<usize>,writes:u64,saved:Option<Transform>,restore_left:u32,accuracy:Accuracy,saved_flags:Option<(u32,bool)>,diag_second:u64}
-static STATE:Mutex<State>=Mutex::new(State{mode:Mode::Idle,start:0,frames:Vec::new(),last_second:0,written:None,writes:0,saved:None,restore_left:0,accuracy:Accuracy{frames:0,exact_bones:0,max_bone_error:0.0,max_position_cm:0.0,sum_position_cm:0.0},saved_flags:None,diag_second:0});
+static STATE:Mutex<State>=Mutex::new(State{mode:Mode::Idle,start:0,frames:Vec::new(),last_second:0,written:None,writes:0,saved:None,restore_left:0,accuracy:Accuracy{frames:0,exact_bones:0,max_bone_error:0.0,max_position_cm:0.0,sum_position_cm:0.0,max_drawn_cm:0.0,sum_drawn_cm:0.0},saved_flags:None,diag_second:0});
 static KEYS:AtomicU64=AtomicU64::new(0);
 
 fn status(text:&str){if let Ok(c)=CString::new(text){unsafe{tm_render_native_status(c.as_ptr())}}}
@@ -80,6 +85,11 @@ fn protect(chr:usize)->Option<(u32,bool)>{
  unsafe{std::ptr::write_volatile(g as *mut u8,1);}Some((0,byte==1))}
 fn keep_protected(chr:usize,on:bool){if !on{return;}if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut u8,1)}}}
 fn unprotect(chr:usize,saved:(u32,bool)){if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut u8,saved.1 as u8)}}}
+// Ask the physics module to move the character proxy to the written position, so the physics step
+// keeps it instead of restoring last frame's spot. Only written if the byte looks like a bool.
+fn request_proxy_move(chr:usize)->bool{
+ let Some(p)=physics(chr) else {return false;};let m=p as *const CSChrPhysicsModule;let a=unsafe{&raw const (*m).chr_proxy_pos_update_requested as usize};
+ let byte=unsafe{std::ptr::read_volatile(a as *const u8)};if byte>1{return false;}unsafe{std::ptr::write_volatile(a as *mut u8,1)};true}
 fn pose_arrays(chr:usize)->Option<(usize,usize)>{
  let importer=read_ptr(chr+POSE_IMPORTER);if !object(importer){return None;}
  let (local,model)=(read_ptr(importer+LOCAL_POSE),read_ptr(importer+MODEL_POSE));
@@ -114,10 +124,10 @@ fn start_playback(s:&mut State,now:u64){
  status("BONE REPLAY: playing on your character (controls locked). F10 stops");}
 fn stop_playback(s:&mut State,reason:&str){
  let a=&s.accuracy;
- crate::log_game(&format!("BONE_REPLAY: playback {reason}; {} writes; accuracy over {} measured frames: bones exact {} ({:.1}%), max bone float error {:.6}, position error max {:.3} cm mean {:.3} cm",
-  s.writes,a.frames,a.exact_bones,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_bone_error,a.max_position_cm,a.sum_position_cm/(a.frames.max(1) as f64)));
+ crate::log_game(&format!("BONE_REPLAY: playback {reason}; {} writes; accuracy over {} measured frames: bones exact {} ({:.1}%), max bone float error {:.6}, physics position error max {:.3} cm mean {:.3} cm, drawn position error max {:.3} cm mean {:.3} cm",
+  s.writes,a.frames,a.exact_bones,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_bone_error,a.max_position_cm,a.sum_position_cm/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64)));
  s.mode=Mode::Restoring;s.restore_left=RESTORE_FRAMES;
- status(&format!("BONE REPLAY: playback {reason}. Position error max {:.2} cm, bones exact {:.0}% of frames",a.max_position_cm,100.0*a.exact_bones as f64/(a.frames.max(1) as f64)));}
+ status(&format!("BONE REPLAY: playback {reason}. Drawn position error max {:.1} cm (mean {:.2}), bones exact {:.0}% of frames",a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64),100.0*a.exact_bones as f64/(a.frames.max(1) as f64)));}
 
 pub fn tick(group:usize,now:u64){
  let mut guard=STATE.lock().unwrap();let s=&mut *guard;
@@ -149,6 +159,7 @@ pub fn tick(group:usize,now:u64){
     unsafe{std::ptr::copy_nonoverlapping(f.local.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(f.model.as_ptr(),model as *mut u8,POSE_BYTES);}
     if s.writes<3{crate::log_game(&format!("BONE_REPLAY_STEP: write {} frame {index}: bones written, writing transform",s.writes));}
     write_transform(chr,&f.transform);
+    let moved=request_proxy_move(chr);if s.writes==0&&!moved{crate::log_game("BONE_REPLAY_ERROR: chr_proxy_pos_update_requested not a bool; proxy move not requested");}
     if s.writes<3{crate::log_game("BONE_REPLAY_STEP: transform written, refreshing protection");}
     keep_protected(chr,s.saved_flags.is_some());s.writes+=1;}
    else if group==KEYS_GROUP{if let Some(i)=s.written{write_transform(chr,&s.frames[i].transform);}}
@@ -162,6 +173,7 @@ pub fn tick(group:usize,now:u64){
       drawn[12],drawn[13],drawn[14],f.matrix[12],f.matrix[13],f.matrix[14],pm[12],pm[13],pm[14],t[2][0],t[2][1],t[2][2],f.transform[2][0],f.transform[2][1],f.transform[2][2]));}
     let (l,m)=(pose(local),pose(model));let a=&mut s.accuracy;a.frames+=1;
     if l==&f.local[..]&&m==&f.model[..]{a.exact_bones+=1;}else{a.max_bone_error=a.max_bone_error.max(max_float_error(l,&f.local)).max(max_float_error(m,&f.model));}
+    let dd=(12..15).map(|k|(drawn[k]-f.matrix[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(dd);a.sum_drawn_cm+=dd as f64;
     let d=(0..3).map(|k|(t[2][k]-f.transform[2][k]).powi(2)).sum::<f32>().sqrt()*100.0;
     a.max_position_cm=a.max_position_cm.max(d);a.sum_position_cm+=d as f64;}
   }
