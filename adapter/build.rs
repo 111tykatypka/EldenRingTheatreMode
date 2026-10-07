@@ -15,5 +15,13 @@ fn main(){
  let profile=quoted(value(&text,"TM_PROFILE_NAME"));let path=quoted(value(&text,"TM_EXPECTED_EXE_PATH")).replace("\\\\","\\");
  let file=quoted(value(&text,"TM_EXPECTED_FILE_VERSION"));let product=quoted(value(&text,"TM_EXPECTED_PRODUCT_VERSION"));let sha=quoted(value(&text,"TM_EXPECTED_SHA256"));
  let generated=format!("pub const PROFILE_NAME:&str=\"{profile}\";\npub const EXPECTED_EXE_PATH:&str=r\"{path}\";\npub const EXPECTED_FILE_VERSION_STR:&str=\"{file}\";\npub const EXPECTED_PRODUCT_VERSION_STR:&str=\"{product}\";\npub const EXPECTED_SHA256_HEX:&str=\"{sha}\";\n");
+ // Every layout macro (TM_OFF_*, TM_VAL_*, TM_AOB_*) becomes a Rust constant, so offsets live only in GameProfile.h.
+ let mut generated=generated;
+ for line in text.lines(){let Some(rest)=line.trim().strip_prefix("#define TM_")else{continue};let Some((key,val))=rest.split_once(char::is_whitespace)else{continue};
+  let val=val.split("/*").next().unwrap().trim();
+  if key.starts_with("OFF_")||key.starts_with("VAL_"){generated+=&format!("#[allow(dead_code)]pub const {key}:usize={val};
+");}
+  else if key.starts_with("AOB_"){generated+=&format!("#[allow(dead_code)]pub const {key}:&str=\"{}\";
+",quoted(val));}}
  let out=PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("game_profile.rs");fs::write(out,generated).expect("write generated profile");
 }

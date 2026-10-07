@@ -39,3 +39,26 @@ struct TmValidationReport {
     char sha256[65];
 };
 extern "C" __declspec(dllexport) uint32_t __cdecl tm_validate_profile(const wchar_t* executable_path, uintptr_t image_base, TmValidationReport* report);
+
+// ---------------------------------------------------------------------------------------------
+// Game memory layout used by Theater Mode, for this exact executable (2.7.0.0, SHA above).
+// After a game patch, update this block only. TM_OFF_* are byte offsets, TM_VAL_* plain numbers,
+// TM_AOB_* byte patterns for pelite (' marks the address the code uses). adapter/build.rs exports
+// every TM_OFF_/TM_VAL_/TM_AOB_ macro to Rust as a constant of the same name without the TM_ prefix.
+// ---------------------------------------------------------------------------------------------
+// Bone pose (skeleton probe K1, write tests K2-K4, 2026-10-07)
+#define TM_OFF_CHRINS_POSE_IMPORTER 0x398      /* ChrIns -> CSFD4LocationHkaPoseImporter */
+#define TM_OFF_POSE_IMPORTER_LOCAL 0x50        /* -> hkQsTransform[bones], parent space */
+#define TM_OFF_POSE_IMPORTER_MODEL 0x60        /* -> hkQsTransform[bones], model space */
+#define TM_VAL_PLAYER_BONES 150                /* c0000 skeleton */
+// ChrIns debug flags: constructor RVA 0x3E7409 initializes +0x538 (the pinned SDK says +0x530,
+// which is a callback pointer; writing it crashed the game). Bit 0x8 ignore damage (from the SDK
+// bit list, applied at the corrected offset), 0x10 no move, 0x20 no attack.
+#define TM_OFF_CHRINS_DEBUG_FLAGS 0x538
+#define TM_VAL_DEBUG_FLAG_NO_DAMAGE 0x8
+// Grace warp, the game's own fast travel: fn(CSLuaEventScriptImitation*, CSLuaEventProxy*,
+// grace entity id - 1000). Same call the Hexinton all-in-one table's "Fast Travel and Warp" uses.
+#define TM_AOB_LUA_WARP "C3 ? ' ? ? ? ? ? 57 48 83 EC ? 48 8B FA 44"
+#define TM_VAL_GRACE_ID_BIAS 1000
+#define TM_OFF_LUA_EVENT_MAN_PROXY 0x8         /* CSLuaEventManImp -> CSLuaEventProxy (is_load_wait) */
+#define TM_OFF_LUA_EVENT_MAN_IMITATION 0x18    /* CSLuaEventManImp -> CSLuaEventScriptImitation */
