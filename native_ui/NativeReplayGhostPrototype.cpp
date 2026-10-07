@@ -492,10 +492,43 @@ void animSpike4(U player){
  WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x50),&roll,2,&n);
  log("SPIKE4: wrote roll index 0x%X into the prayer clip; holding local time 0.3 s for 1.5 s",roll);
  const float t=0.3f;const ULONGLONG until=GetTickCount64()+1500;
- while(GetTickCount64()<until){WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x140),&t,4,&n);Sleep(0);}
+ while(GetTickCount64()<until){WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x140),&t,4,&n);Sleep(1);}
  WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x50),&was,2,&n); // restore
  log("SPIKE4: restored the prayer index");
  tm_render_native_status("ANIM TEST 4 (F9): done. Did the prayer turn into a frozen walking pose?");
+}
+// Spike 5: start a move through the behavior graph's own event entry point, the method public
+// tools use ("PlayAnimation": hkbCharacter + event name such as W_BackStep). The function is found
+// by the same byte pattern those tools use (74 ?? 48 85 D2 74 ?? 48 8D 4C 24 50, entry = match-0xD)
+// and is only called if exactly one match exists in the game image.
+U findBehaviorEventFunction(){
+ static U cached=~U(0);if(cached!=~U(0))return cached;cached=0;
+ auto dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);auto nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(base+dos->e_lfanew);
+ auto section=IMAGE_FIRST_SECTION(nt);
+ for(unsigned i=0;i<nt->FileHeader.NumberOfSections;++i,++section){
+  if(memcmp(section->Name,".text",5))continue;
+  const unsigned char* begin=reinterpret_cast<const unsigned char*>(base+section->VirtualAddress);const size_t size=section->Misc.VirtualSize;
+  unsigned matches=0;U hit=0;
+  for(size_t k=0;k+12<=size;++k){const unsigned char*q=begin+k;
+   if(q[0]==0x74&&q[2]==0x48&&q[3]==0x85&&q[4]==0xD2&&q[5]==0x74&&q[7]==0x48&&q[8]==0x8D&&q[9]==0x4C&&q[10]==0x24&&q[11]==0x50){++matches;hit=reinterpret_cast<U>(q)-0xD;}}
+  log("SPIKE5: event function pattern matches=%u entry=0x%llX (rva 0x%llX)",matches,hit,hit?hit-base:0);
+  if(matches==1)cached=hit;}
+ return cached;}
+void animSpike5(U player){
+ tm_render_native_status("ANIM TEST 5 (F9): asking the animation graph for a back step (W_BackStep)...");
+ U modules=get<U>(player+layout[1]),behavior=get<U>(modules+layout[8]),timeAct=get<U>(modules+layout[9]);
+ U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0;
+ if(!character||rttiName(character)!="hkbCharacter"){log("SPIKE5: hkbCharacter missing");return;}
+ const U fn=findBehaviorEventFunction();
+ if(!fn){tm_render_native_status("ANIM TEST 5 (F9): event function not found uniquely, nothing called");return;}
+ static const char name[]="W_BackStep";
+ const auto result=reinterpret_cast<uint32_t(*)(U,const char*)>(fn)(character,name);
+ log("SPIKE5: W_BackStep returned 0x%X",result);
+ char line[900];int len=snprintf(line,sizeof(line),"SPIKE5: time_act after event id/time:");
+ for(int i=0;i<20;++i){const uint32_t idx=get<uint32_t>(timeAct+0x20+10*16+4);const U slot=timeAct+0x20+(idx%10)*16;
+  len+=snprintf(line+len,sizeof(line)-len," %d/%.3f",get<int32_t>(slot),get<float>(slot+4));Sleep(50);}
+ log("%s",line);
+ tm_render_native_status(result==0xFFFFFFFFu?"ANIM TEST 5 (F9): the game rejected W_BackStep":"ANIM TEST 5 (F9): done. Did your character back step by itself?");
 }
 std::atomic<bool> probeRunning{};
 void keys() {
@@ -520,7 +553,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))animSpike4(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
+     if(ready(w,player,recorder))animSpike5(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
