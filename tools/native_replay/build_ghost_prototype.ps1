@@ -29,7 +29,7 @@ $hashRows=@($sources|Sort-Object -Unique|ForEach-Object{$h=Get-FileHash -Literal
 $hashRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt') -Encoding utf8
 $binaryRows=@(Get-ChildItem -LiteralPath $OutputDirectory -File|Where-Object Extension -in '.exe','.dll'|ForEach-Object{"$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)  $($_.Name)"})
 @("branch=$branch","source_commit=$commit","build_timestamp_utc=$([DateTime]::UtcNow.ToString('o'))",'feature=native-replay-ghost-create-remove','configuration=Release x64','runtime=UNVERIFIED','game_sha256=D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134',"source_manifest_sha256=$((Get-FileHash -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt')).Hash)",'worktree_status_at_build:')+$status+$binaryRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'BUILD_MANIFEST.txt') -Encoding utf8
-$implementationNotes = Join-Path $repoRoot 'notes/RECOVERY_STARTUP_SLOWDOWN.md'
+$implementationNotes = Join-Path $repoRoot 'notes/REPLAY_STATUS.md'
 $runtimeNotes = Join-Path $repoRoot 'notes/RECOVERY_STARTUP_SLOWDOWN.md'
 if (!(Test-Path -LiteralPath $implementationNotes)) { $implementationNotes = Join-Path $repoRoot 'notes/NATIVE_GHOST_PROTOTYPE_IMPLEMENTATION_STATUS.md' }
 if (!(Test-Path -LiteralPath $runtimeNotes)) { $runtimeNotes = Join-Path $repoRoot 'notes/NATIVE_GHOST_PROTOTYPE_RUNTIME_TEST_PLAN.md' }

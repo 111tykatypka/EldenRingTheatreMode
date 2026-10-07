@@ -30,9 +30,12 @@ use std::sync::{Arc,Mutex};
 use eldenring::cs::{WorldChrMan,ChrIns,CSChrPhysicsModule};
 use fromsoftware_shared::FromStatic;
 
+// Bone interpolation between recorded frames: on by default (THEATER_POSE_INTERPOLATION=0 turns it off).
+// It is pure math on our own buffers and only runs while a replay owns the body, so it cannot affect
+// menus or normal play; without it slow motion steps at the recorded 60 Hz.
 fn interpolated_pose_enabled()->bool {
  static ENABLED:std::sync::OnceLock<bool>=std::sync::OnceLock::new();
- *ENABLED.get_or_init(||std::env::var("THEATER_POSE_INTERPOLATION").as_deref()==Ok("1"))
+ *ENABLED.get_or_init(||std::env::var("THEATER_POSE_INTERPOLATION").as_deref()!=Ok("0"))
 }
 const POSE_IMPORTER:usize=0x398;
 const LOCAL_POSE:usize=0x50;
@@ -57,14 +60,16 @@ unsafe extern "C"{fn tm_render_native_status(text:*const c_char);fn tm_render_lo
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
 struct Frame{time:u64,transform:Transform,matrix:[f32;16],local:Vec<u8>,model:Vec<u8>}
 #[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_drawn_cm:f32,sum_drawn_cm:f64}
-struct Loaded{path:String,frames:Arc<Vec<Frame>>}
+struct Loaded{path:String,frames:Arc<Vec<Frame>>,parents:Arc<Vec<i16>>}
 #[derive(PartialEq)]enum Loading{None,Busy(String),Missing(String),Failed(String)}
 struct State{
  recording:Option<(String,Vec<Frame>)>,record_paused:bool,last_second:u64,
  loaded:Option<Loaded>,loading:Loading,
  owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,evaluated_root:Option<Transform>,pose_alpha:f64,local_out:[u8;POSE_BYTES],model_out:[u8;POSE_BYTES],accuracy:Accuracy,
+ // Accuracy: where the body should be drawn this frame, and frames to skip after a start or seek.
+ expected:[f32;3],settle:u32,last_t:u64,fallback_bones:u64,
 }
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0}});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -151,7 +156,13 @@ fn follow_loaded(s:&mut State,l:&Link){
  if !file.is_file(){crate::log_game(&format!("BONE_REPLAY: {path} has no bone data (recorded before bone replays)"));status("BONE REPLAY: this replay has no bone data. Record a new one with F5");s.loading=Loading::Missing(path);return;}
  s.loading=Loading::Busy(path.clone());status("BONE REPLAY: loading bones...");
  let _=std::thread::Builder::new().name("TheaterMode.BoneLoad".into()).spawn(move||{
-  let result=load(&file).map(|frames|Loaded{path:path.clone(),frames:Arc::new(frames)}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
+  let result=load(&file).map(|frames|{
+   // Learn the skeleton hierarchy from a few frames spread over the recording (see replay_interpolation).
+   let picks=(0..5).map(|k|&frames[k*(frames.len()-1)/4]);
+   let parents=crate::replay_interpolation::learn_parents(picks.map(|f|(&f.local[..],&f.model[..])));
+   let known=parents.iter().filter(|p|**p!=crate::replay_interpolation::UNKNOWN_PARENT).count();
+   crate::log_game(&format!("BONE_REPLAY: skeleton hierarchy learned for {known} of {} bones; the rest interpolate on their own",parents.len()));
+   Loaded{path:path.clone(),frames:Arc::new(frames),parents:Arc::new(parents)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
 // The timeline position in source time, extrapolated between host snapshots while playing.
 fn timeline(l:&Link,now:u64)->u64{
@@ -162,8 +173,8 @@ fn timeline(l:&Link,now:u64)->u64{
 fn release(s:&mut State,chr:usize,reason:&str){
  if !s.owning{return;}s.owning=false;s.restore_left=RESTORE_FRAMES;
  let a=&s.accuracy;
- crate::log_game(&format!("BONE_REPLAY: released the body ({reason}); accuracy over {} frames: evaluated bones retained {:.1}%, drawn position error max {:.2} cm mean {:.3} cm",
-  a.frames,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64)));
+ crate::log_game(&format!("BONE_REPLAY: released the body ({reason}); accuracy over {} settled frames: written bones retained to draw {:.1}%, drawn position error vs interpolated recording max {:.2} cm mean {:.3} cm; bones kept at the earlier frame because interpolation was invalid: {}",
+  a.frames,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64),s.fallback_bones));
  if let Some(t)=s.saved{write_transform(chr,&t);}}
 
 pub fn tick(group:usize,now:u64){
@@ -199,7 +210,7 @@ pub fn tick(group:usize,now:u64){
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){
-     s.owning=true;s.written=None;s.accuracy=Accuracy::default();
+     s.owning=true;s.written=None;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;
      let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
    else if !want&&s.owning{release(s,chr,if s.loaded.is_none(){"replay unloaded"}else{"timeline idle and overlay closed"});}
@@ -213,8 +224,13 @@ pub fn tick(group:usize,now:u64){
    if let Some(loaded)=&s.loaded{
     let frames=&loaded.frames;let i=frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1);
     let a=&frames[i];let b=&frames[(i+1).min(frames.len()-1)];let span=b.time.saturating_sub(a.time);
-    let alpha=if span==0||span>250_000_000{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
+    // No blending across a gap in the recording or a teleport (warp, grace travel): hold the earlier frame.
+    let jump=(0..3).map(|k|(b.transform[2][k]-a.transform[2][k]).powi(2)).sum::<f32>().sqrt();
+    let alpha=if span==0||span>250_000_000||jump>1.5{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
     s.pose_alpha=alpha.clamp(0.0,1.0);s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,alpha);
+    // A seek or the first frames after taking the body teleport it; the draw lags one frame there.
+    if t<s.last_t||t-s.last_t>200_000_000{s.settle=s.settle.max(3);}s.last_t=t;
+    s.expected=std::array::from_fn(|k|a.matrix[12+k]+(b.matrix[12+k]-a.matrix[12+k])*s.pose_alpha as f32);
     if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}
     else if let Some(chr)=chr{release(s,chr,"invalid root interpolation");}
    }}
@@ -233,14 +249,17 @@ pub fn tick(group:usize,now:u64){
    let Some((local,model))=pose_arrays(chr) else {return;};
    let next=&loaded.frames[(i+1).min(loaded.frames.len()-1)];
    let alpha=if interpolated_pose_enabled(){s.pose_alpha}else{0.0};
-   let valid=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out).is_some() &&
-       crate::replay_interpolation::pose_into(&f.model,&next.model,alpha,&mut s.model_out).is_some();
-   if !valid{release(s,chr,"invalid bone interpolation");return;}
+   // Bones whose interpolation is invalid keep the earlier recorded frame instead of dropping the replay.
+   // Local pose is interpolated per bone; model space is rebuilt from it through the learned hierarchy.
+   let Some(l)=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out) else {release(s,chr,"pose size or time invalid");return;};
+   let Some(m)=crate::replay_interpolation::model_from_local(&s.local_out,&loaded.parents,&f.model,&next.model,alpha,&mut s.model_out) else {release(s,chr,"pose size or time invalid");return;};
+   s.fallback_bones+=(l+m) as u64;
    unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,POSE_BYTES);}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);}
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
+   if s.settle>0{s.settle-=1;return;}
    let a=&mut s.accuracy;a.frames+=1;if pose(local)==&s.local_out[..]&&pose(model)==&s.model_out[..]{a.exact_bones+=1;}
-   let d=(12..15).map(|k|(drawn[k]-f.matrix[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(d);a.sum_drawn_cm+=d as f64;}
+   let d=(0..3).map(|k|(drawn[12+k]-s.expected[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(d);a.sum_drawn_cm+=d as f64;}
   _=>{}}
 }
