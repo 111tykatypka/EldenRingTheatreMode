@@ -472,7 +472,7 @@ NameTable findAnimationNames(U character){
 int32_t findName(const NameTable& names,const char* needle){
  for(int32_t i=0;i<names.size;++i){U p=get<U>(names.data+size_t(i)*8)&~U(1);if(!pointerish(p))continue;if(asciiAt(p).find(needle)!=std::string::npos)return i;}return -1;}
 void animSpike4(U player){
- tm_render_native_status("ANIM TEST 4 (F9): praying, then switching the prayer clip to the roll...");
+ tm_render_native_status("ANIM TEST 4 (F9): praying, then switching the prayer clip to the walk animation...");
  U modules=get<U>(player+layout[1]),behavior=get<U>(modules+layout[8]),event=get<U>(modules+layout[10]);
  U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0,graph=character?get<U>(character+0x98):0;
  if(!graph||!event){log("SPIKE4: graph/event missing");return;}
@@ -485,15 +485,17 @@ void animSpike4(U player){
  if(!prayer){log("SPIKE4: prayer clip not found");tm_render_native_status("ANIM TEST 4 (F9): prayer clip not found");return;}
  const uint16_t was=get<uint16_t>(prayer+0x50);
  log("SPIKE4: prayer clip @0x%llX +50 low16=0x%X (matches name table: %s)",prayer,was,was==uint16_t(prayIndex)?"YES":"no");
- if(rollIndex<0||was!=uint16_t(prayIndex)){log("SPIKE4: index hypothesis not confirmed; no swap attempted");tm_render_native_status("ANIM TEST 4 (F9): index not confirmed, no swap (see log)");return;}
- const uint16_t roll=uint16_t(rollIndex);SIZE_T n{};
+ // The name table is empty in this build (FromSoftware strips hkbCharacterStringData), so swap to an
+ // index observed directly in probe 6b instead: 0x0045 belonged to the active walk clip
+ // a000_002000. If the prayer pose turns into a walk pose, the index field selects the animation.
+ (void)rollIndex;const uint16_t roll=0x0045;SIZE_T n{};
  WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x50),&roll,2,&n);
  log("SPIKE4: wrote roll index 0x%X into the prayer clip; holding local time 0.3 s for 1.5 s",roll);
  const float t=0.3f;const ULONGLONG until=GetTickCount64()+1500;
  while(GetTickCount64()<until){WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x140),&t,4,&n);Sleep(0);}
  WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x50),&was,2,&n); // restore
  log("SPIKE4: restored the prayer index");
- tm_render_native_status("ANIM TEST 4 (F9): done. Did the prayer turn into a frozen roll pose?");
+ tm_render_native_status("ANIM TEST 4 (F9): done. Did the prayer turn into a frozen walking pose?");
 }
 std::atomic<bool> probeRunning{};
 void keys() {
