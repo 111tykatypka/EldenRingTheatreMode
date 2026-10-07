@@ -23,9 +23,9 @@ fn copy(address:usize,out:&mut [u8])->bool {
  let mut read=0;
  unsafe{ReadProcessMemory(-1isize as *mut c_void,address as *const c_void,out.as_mut_ptr().cast(),out.len(),&mut read)!=0&&read==out.len()}
 }
-fn word(address:usize)->Option<usize>{let mut b=[0;8];copy(address,&mut b).then(||usize::from_le_bytes(b))}
+pub(crate) fn word(address:usize)->Option<usize>{let mut b=[0;8];copy(address,&mut b).then(||usize::from_le_bytes(b))}
 fn byte(address:usize)->Option<u8>{let mut b=[0];copy(address,&mut b).then_some(b[0])}
-fn dword(address:usize)->Option<u32>{let mut b=[0;4];copy(address,&mut b).then(||u32::from_le_bytes(b))}
+pub(crate) fn dword(address:usize)->Option<u32>{let mut b=[0;4];copy(address,&mut b).then(||u32::from_le_bytes(b))}
 fn bit(address:usize)->Option<bool>{match byte(address)?{0=>Some(false),1=>Some(true),_=>None}}
 
 fn readable_body(chr:usize)->bool{
@@ -78,13 +78,18 @@ pub fn buddies(world:&WorldChrMan,diagnostic:bool)->Result<Vec<usize>,&'static s
  let mut statuses=[0usize;256];let mut active=0;let mut rejected=0;
  let bodies=bytes.chunks_exact(stride).filter_map(|e|{
   statuses[e[status] as usize]+=1;
-  if e[status]!=ChrLoadStatus::Active as u8{return None;}active+=1;
+  // The mounted test stayed in ReadyForActivation (4), not Active (2).
+  // Include this status for read-only capture discovery; owner and downstream full
+  // skeleton checks still apply. Unloading/initializing bodies remain excluded.
+  if !capturable_status(e[status]){return None;}active+=1;
   let p=usize::from_le_bytes(e[pointer..pointer+8].try_into().ok()?);
   if p>=0x10000&&p%8==0&&readable_body(p){Some(p)}else{rejected+=1;None}
  }).collect::<Vec<_>>();
  if diagnostic{let histogram:Vec<_>=statuses.iter().enumerate().filter(|(_,n)|**n>0).map(|(s,n)|format!("{s}:{n}")).collect();crate::log_game(&format!("COMPANION_SCAN: capacity={capacity} statuses=[{}] active={active} owner_rejected={rejected} accepted={}",histogram.join(","),bodies.len()));}
  Ok(bodies)
 }
+
+fn capturable_status(status:u8)->bool{status==ChrLoadStatus::Active as u8||status==ChrLoadStatus::ReadyForActivation as u8}
 
 pub fn category(chr:usize,in_buddy_set:bool,r:Option<Ride>)->u32{
  let kind=dword(unsafe{&raw const (*(chr as *const ChrIns)).chr_type as usize});
@@ -103,6 +108,7 @@ pub fn mount_compatible(recorded:u32,live:Option<Ride>)->bool{
 
 #[cfg(test)]mod tests{
  use super::*;
+ #[test]fn discovery_excludes_unloading_and_unknown_status(){assert!(capturable_status(2));assert!(capturable_status(4));for s in [0,1,3,5,255]{assert!(!capturable_status(s));}}
  #[test]fn unreadable_ride_is_unavailable(){assert!(ride(0).is_none());assert!(ride(0x10000).is_none());}
  #[test]fn read_scalars_rejects_bad_bool(){let b=2u8;assert_eq!(bit(&b as *const _ as usize),None);}
  #[test]fn mounted_state_is_never_fabricated(){assert!(!mount_compatible(RIDE_VALID|MOUNTED,None));assert!(!mount_compatible(RIDE_VALID|MOUNTED,Some(Ride{flags:RIDE_VALID,..Default::default()})));assert!(mount_compatible(RIDE_VALID|MOUNTED,Some(Ride{flags:RIDE_VALID|MOUNTED,..Default::default()})));assert!(!mount_compatible(RIDE_VALID,Some(Ride{flags:RIDE_VALID|MOUNTED,..Default::default()})));assert!(mount_compatible(0,None));}

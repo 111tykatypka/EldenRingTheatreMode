@@ -38,6 +38,19 @@ pub const KIND_ACTOR:u32=6;
 pub const TRACK_COMPANIONS:u32=5;
 pub const KIND_COMPANION:u32=7;
 
+#[cfg(test)]
+#[test]
+#[ignore = "requires THEATER_INSPECT_WORLD pointing to a real recording"]
+fn inspect_real_root_track(){
+ let path=std::env::var("THEATER_INSPECT_WORLD").expect("recording path");
+ let mut file=open(Path::new(&path)).expect("valid recording");
+ let mut min=[[f32::INFINITY;3];2];let mut max=[[f32::NEG_INFINITY;3];2];
+ for i in 0..file.player.len(){let f=file.player.get(i).unwrap();
+  for (j,v) in [f.transform[2],f.place.global].iter().enumerate(){for k in 0..3{min[j][k]=min[j][k].min(v[k]);max[j][k]=max[j][k].max(v[k]);}}
+ }
+ println!("REAL_ROOT_INSPECTION samples={} physics_min={:?} physics_max={:?} chunk_min={:?} chunk_max={:?}",file.player.len(),min[0],max[0],min[1],max[1]);
+}
+
 /// Pointer-free role/ride observation. id=0 is the player; mount_id=0 means unknown/unmounted.
 /// All other ids refer to ActorInfo. A buddy-set member is not automatically a spirit ash.
 #[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]

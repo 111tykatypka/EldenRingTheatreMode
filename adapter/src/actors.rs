@@ -24,8 +24,8 @@ use std::collections::{HashMap,HashSet};
 use std::sync::mpsc::SyncSender;
 
 const QS:usize=48;
-fn read_ptr(a:usize)->usize{if a<0x10000{0}else{unsafe{std::ptr::read_volatile(a as *const usize)}}}
-fn read_i32(a:usize)->i32{if a<0x10000{0}else{unsafe{std::ptr::read_volatile(a as *const i32)}}}
+fn read_ptr(a:usize)->usize{crate::companions::word(a).unwrap_or(0)}
+fn read_i32(a:usize)->i32{crate::companions::dword(a).map(|v|v as i32).unwrap_or(0)}
 fn object(p:usize)->bool{(0x10000000000..0x800000000000).contains(&p)&&p%8==0}
 fn array(p:usize)->bool{object(p)&&p%16==0}
 
@@ -85,7 +85,7 @@ impl Recorder{
     let importer=read_ptr(chr+profile::OFF_CHRINS_POSE_IMPORTER);
     let skel=if object(importer){read_ptr(importer+profile::OFF_POSE_IMPORTER_SKELETON)}else{0};
     let counts=if object(skel){Some([read_i32(skel+profile::OFF_HKA_SKELETON_PARENT_COUNT),read_i32(skel+profile::OFF_HKA_SKELETON_BONE_COUNT),read_i32(skel+profile::OFF_HKA_SKELETON_REFPOSE_COUNT)])}else{None};
-    crate::log_game(&format!("COMPANION_CANDIDATE: handle=0x{:X} character_id={} npc_id={} npc_param={} buddy={} ride={:?} skeleton_counts={counts:?} pose_arrays={} transform={}",handle_of(c),c.character_id,c.npc_id,c.npc_param_id,buddies.contains(&chr),crate::companions::ride(chr),pose_arrays(chr).is_some(),read_transform(chr).is_some()));
+    crate::log_game(&format!("COMPANION_CANDIDATE: handle=0x{:X} character_id={} npc_id={} npc_param={} buddy={} ride={:?} importer=0x{importer:X} skeleton=0x{skel:X} skeleton_counts={counts:?} pose_arrays={} transform={}",handle_of(c),c.character_id,c.npc_id,c.npc_param_id,buddies.contains(&chr),crate::companions::ride(chr),pose_arrays(chr).is_some(),read_transform(chr).is_some()));
    }
    let p=c.modules.physics.position;let d=((p.0-origin.0).powi(2)+(p.1-origin.1).powi(2)+(p.2-origin.2).powi(2)).sqrt();
    if !d.is_finite()||d>radius{continue;}
@@ -143,8 +143,8 @@ impl Player{
     if role_matches(category,observed){candidates.push(a);}}}
   // No ordinal guesses for identical spirit ashes: a different handle is accepted only uniquely.
   (candidates.len()==1).then(||candidates[0])}
- /// Writes every recorded actor that exists at replay time `t`; `offset` is today's (global - physics).
- pub fn write(&mut self,t:u64,now:u64,offset:[f32;3],interpolate:bool){
+ /// Writes existing bodies at master replay time, in their verified original coordinate frame.
+ pub fn write(&mut self,t:u64,now:u64,_offset:[f32;3],interpolate:bool){
   let alive=live();
   if now>=self.next_match{self.next_match=now+500_000_000;
    let mut taken:Vec<usize>=self.controlled.values().map(|c|c.chr).collect();let mut newly=0;
@@ -169,8 +169,12 @@ impl Player{
    let span=b.body.time.saturating_sub(a.body.time);
    let jump=(0..3).map(|k|(b.body.transform[2][k]-a.body.transform[2][k]).powi(2)).sum::<f32>().sqrt();
    let alpha=if !interpolate||span==0||span>500_000_000||jump>1.5{0.0}else{(t-a.body.time) as f64/span as f64};
-   let Some(mut root)=crate::replay_interpolation::evaluate(&a.body.transform,&b.body.transform,alpha) else {continue};
-   if a.body.place.block!=-1{let w=alpha as f32;for k in 0..3{root[2][k]=a.body.place.global[k]+(b.body.place.global[k]-a.body.place.global[k])*w-offset[k];}}
+   let Some(root)=crate::replay_interpolation::evaluate(&a.body.transform,&b.body.transform,alpha) else {continue};
+   let here=crate::arrival::place(chr);
+   if a.body.place.block!=-1&&![a.body.place,b.body.place].iter().all(|p|crate::replay_interpolation::same_root_space(p.origin,p.global,here.origin,here.global)){
+    if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
+    if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} coordinate origin differs; no guessed root rebase",info.id));}continue;
+   }
    let bones=a.body.local.len()/QS;
    let mut pose_written=false;
    if bone_count(chr)==Some(bones)&&b.body.local.len()==a.body.local.len(){

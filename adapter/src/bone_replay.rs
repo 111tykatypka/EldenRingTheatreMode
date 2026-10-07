@@ -224,7 +224,7 @@ fn replay_time(s:&mut State,now:u64)->u64{
 // Picks the two recorded frames around this frame's replay time and the blend between them, and
 // computes the root transform and where the body should be drawn. Called once per game frame, before
 // the writes, so bones and root always come from the same instant.
-fn select(s:&mut State,now:u64)->bool{
+fn select(s:&mut State,now:u64,live_place:Place)->bool{
  let t=replay_time(s,now);
  let Some(loaded)=&mut s.loaded else {return false;};
  let i=loaded.store.index_at(t);let n=loaded.store.len();
@@ -235,17 +235,15 @@ fn select(s:&mut State,now:u64)->bool{
  let alpha=if span==0||span>250_000_000||jump>1.5{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
  s.pose_alpha=alpha.clamp(0.0,1.0);s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,s.pose_alpha);
  let (a,b)=&*s.cur.insert((a,b));
- // Recorded physics space -> today's physics space (the physics origin moves as map tiles stream in).
- // global = recorded physics + (recorded global - recorded physics); physics now = global - today's offset.
- let w=s.pose_alpha as f32;
+ // The recorded chunk field stayed constant during real movement. Treat it as
+ // coordinate-frame evidence, not moving XYZ: the physics root contains the motion.
  s.expected_global=None;
- if let (Some(now_offset),true)=(s.shift.first().map(|_|s.shift),a.place.block!=-1&&b.place.block!=-1){
-  let global:[f32;4]=std::array::from_fn(|k|a.place.global[k]+(b.place.global[k]-a.place.global[k])*w);
-  let phys:[f32;3]=std::array::from_fn(|k|a.transform[2][k]+(b.transform[2][k]-a.transform[2][k])*w);
-  let delta:[f32;3]=std::array::from_fn(|k|global[k]-phys[k]-now_offset[k]);
-  if let Some(root)=&mut s.evaluated_root{for k in 0..3{root[2][k]+=delta[k];}}
-  s.expected_global=Some(global);s.shift=delta;
- }else{s.shift=[0.0;3];}
+ s.shift=[0.0;3];
+ if a.place.block!=-1&&b.place.block!=-1&&![a.place,b.place].iter().all(|p|crate::replay_interpolation::same_root_space(p.origin,p.global,live_place.origin,live_place.global)){
+  s.evaluated_root=None;
+  crate::log_game(&format!("ROOT_SPACE_UNAVAILABLE: replay_origin={} replay_anchor={:?} live_origin={} live_anchor={:?}; no guessed rebase",a.place.origin,a.place.global,live_place.origin,live_place.global));
+  status("REPLAY BLOCKED: coordinate origin changed. Cross-origin root conversion requires validation; no transform written.");return false;
+ }
  // A seek or the first frames after taking the body teleport it; the draw lags one frame there.
  if t<s.last_t||t-s.last_t>200_000_000{s.settle=s.settle.max(3);}s.last_t=t;
  let (shift,w)=(s.shift,s.pose_alpha as f32);s.expected=std::array::from_fn(|k|a.matrix[12+k]+(b.matrix[12+k]-a.matrix[12+k])*w+shift[k]);
@@ -283,6 +281,12 @@ fn begin_arrival(s:&mut State,chr:usize){
  let Some(loaded)=&mut s.loaded else {return;};
  let t=s.host.2;let i=loaded.store.index_at(t);let Some(target)=loaded.store.get(i).map(|f|f.place) else {return;};
  let here=arrival::place(chr);
+ // Do not fast travel based on a chunk anchor mistaken for the player's position.
+ if target.block!=-1&&!crate::replay_interpolation::same_root_space(target.origin,target.global,here.origin,here.global){
+  crate::log_game("ARRIVAL_ERROR: different coordinate origin; automatic travel disabled until root conversion is verified");
+  status("REPLAY BLOCKED: different coordinate origin. Automatic travel requires corrected location metadata.");
+  if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}return;
+ }
  if target.block==-1{s.arrival=Arrival::Ready;crate::log_game("ARRIVAL: recording has no map data (older file); positions used as recorded");return;}
  crate::log_game(&format!("ARRIVAL: here {} {:?}, replay {} {:?}, distance {:.1} m",arrival::block_name(here.block),&here.global[..3],arrival::block_name(target.block),&target.global[..3],arrival::distance(here.global,target.global)));
  if !arrival::needs_warp(&here,&target){return;}
@@ -398,10 +402,10 @@ pub fn tick(group:usize,now:u64){
   WRITE_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};
    if matches!(s.arrival,Arrival::Warping{..}){return;}
-   // Today's offset between global and physics space (a consistent pair from the last frame).
+   // Keep the actual recorded physics root. The chunk field is only an origin guard.
    let here=arrival::place(chr);
-   s.shift=match read_transform(chr){Some(t)=>std::array::from_fn(|k|here.global[k]-t[2][k]),None=>[0.0;3]};s.now_offset=s.shift;
-   if !select(s,now){release(s,chr,"invalid root interpolation");return;}
+   s.shift=[0.0;3];s.now_offset=[0.0;3];
+   if !select(s,now,here){release(s,chr,"invalid root interpolation or coordinate origin");return;}
    let (Some((f,next)),Some(loaded))=(&s.cur,&s.loaded) else {return;};
    let alpha=if interpolated_pose_enabled(){s.pose_alpha}else{0.0};
    // Equipment first (grip, active slots, pieces), then the pose: the frame's full state, so scrubbing
