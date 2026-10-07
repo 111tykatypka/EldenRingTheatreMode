@@ -399,10 +399,10 @@ void animFreezeTest(U player,U modulesOffset,U behaviorOffset) {
 // what TimeAct plays for 1.5 s. If the character rolls in place, TAE IDs can start animations,
 // which together with spike 2 (clip time) is the puppet driver.
 void animRequestTest(U player) {
- tm_render_native_status("ANIM TEST (F9): requesting animation 22100 (roll)...");
+ tm_render_native_status("ANIM TEST (F9): requesting animation 60100 (prayer)...");
  U modules=get<U>(player+layout[1]),event=get<U>(modules+layout[10]),timeAct=get<U>(modules+layout[9]);
  if(!event||!timeAct){log("ANIM_TEST: event/time_act module missing");return;}
- const int32_t before=get<int32_t>(event+layout[11]);const int32_t id=22100;SIZE_T n{};
+ const int32_t before=get<int32_t>(event+layout[11]);const int32_t id=60100; // 22100 (roll) was consumed but ignored; 60100 is an event animation community tools force this waySIZE_T n{};
  WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(event+layout[11]),&id,4,&n);
  log("ANIM_TEST: request_animation_id %d -> %d (written=%zu)",before,id,size_t(n));
  char line[1800];int len=snprintf(line,sizeof(line),"ANIM_TEST: time_act after request id/time:");
@@ -410,7 +410,7 @@ void animRequestTest(U player) {
   len+=snprintf(line+len,sizeof(line)-len," %d/%.3f",get<int32_t>(slot),get<float>(slot+4));
   if(i==2)len+=snprintf(line+len,sizeof(line)-len," [req now %d]",get<int32_t>(event+layout[11]));Sleep(50);}
  log("%s",line);
- tm_render_native_status("ANIM TEST (F9): done. Did your character roll by itself?");
+ tm_render_native_status("ANIM TEST (F9): done. Did your character kneel and pray?");
 }
 std::atomic<bool> probeRunning{};
 void keys() {
