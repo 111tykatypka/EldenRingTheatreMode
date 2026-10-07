@@ -12,7 +12,8 @@ pub fn initialize() {
         offset_of!(ChrInsModuleContainer,physics),offset_of!(CSChrPhysicsModule,position),
         offset_of!(CSChrPhysicsModule,orientation),offset_of!(ChrIns,chr_type),
         offset_of!(PlayerIns,current_block_id),offset_of!(ChrIns,chr_model_ins),
-        offset_of!(ChrInsModuleContainer,behavior),offset_of!(ChrInsModuleContainer,time_act)];
+        offset_of!(ChrInsModuleContainer,behavior),offset_of!(ChrInsModuleContainer,time_act),
+        offset_of!(ChrInsModuleContainer,event),offset_of!(eldenring::cs::CSChrEventModule,request_animation_id)];
     let result=unsafe{tm_native_ghost_start(log,layout.as_ptr())};
     crate::log_game(&format!("NATIVE_GHOST: bridge initialization={result}; feature=native-replay-ghost-create-remove; runtime UNVERIFIED"));
 }

@@ -22,7 +22,7 @@ extern "C" void tm_render_native_status(const char*);
 
 namespace {
 using U=uintptr_t;
-U base{}, layout[10]{}; // [7] ChrIns::chr_model_ins, [8] modules.behavior, [9] modules.time_act (SDK offsets)
+U base{}, layout[12]{}; // [7] ChrIns::chr_model_ins, [8] modules.behavior, [9] modules.time_act, [10] modules.event, [11] CSChrEventModule::request_animation_id (SDK offsets)
 void(*logger)(const char*){};
 void log(const char* fmt,...) { char text[2048];va_list a;va_start(a,fmt);vsnprintf(text,sizeof(text),fmt,a);va_end(a);logger(text);if(strncmp(text,"NATIVE_GHOST",12)==0)tm_render_native_status(text); }
 bool read(U address,void* out,size_t bytes) { SIZE_T n{};return address>=0x10000 && address<=UINTPTR_MAX-bytes && ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes; }
@@ -394,6 +394,24 @@ void animFreezeTest(U player,U modulesOffset,U behaviorOffset) {
  log("ANIM_TEST: done; %llu corrections written (the game advanced the time %llu times)",writes,drift);
  char hud[200];snprintf(hud,sizeof(hud),"ANIM TEST (F9): done. %zu active clips held for 2 s. Did your pose freeze?",active.size());tm_render_native_status(hud);
 }
+// Spike 3 (WRITE test): ask the player's own character to play animation 22100 (the roll the
+// TimeAct module reported in spike 1) through CSChrEventModule.request_animation_id, then log
+// what TimeAct plays for 1.5 s. If the character rolls in place, TAE IDs can start animations,
+// which together with spike 2 (clip time) is the puppet driver.
+void animRequestTest(U player) {
+ tm_render_native_status("ANIM TEST (F9): requesting animation 22100 (roll)...");
+ U modules=get<U>(player+layout[1]),event=get<U>(modules+layout[10]),timeAct=get<U>(modules+layout[9]);
+ if(!event||!timeAct){log("ANIM_TEST: event/time_act module missing");return;}
+ const int32_t before=get<int32_t>(event+layout[11]);const int32_t id=22100;SIZE_T n{};
+ WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(event+layout[11]),&id,4,&n);
+ log("ANIM_TEST: request_animation_id %d -> %d (written=%zu)",before,id,size_t(n));
+ char line[1800];int len=snprintf(line,sizeof(line),"ANIM_TEST: time_act after request id/time:");
+ for(int i=0;i<30;++i){const uint32_t idx=get<uint32_t>(timeAct+0x20+10*16+4);const U slot=timeAct+0x20+(idx%10)*16;
+  len+=snprintf(line+len,sizeof(line)-len," %d/%.3f",get<int32_t>(slot),get<float>(slot+4));
+  if(i==2)len+=snprintf(line+len,sizeof(line)-len," [req now %d]",get<int32_t>(event+layout[11]));Sleep(50);}
+ log("%s",line);
+ tm_render_native_status("ANIM TEST (F9): done. Did your character roll by itself?");
+}
 std::atomic<bool> probeRunning{};
 void keys() {
  bool lastCreate=false,lastRemove=false;
@@ -417,7 +435,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))animFreezeTest(player,layout[1],layout[8]);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
+     if(ready(w,player,recorder))animRequestTest(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
