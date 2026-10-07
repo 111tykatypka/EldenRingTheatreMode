@@ -35,12 +35,18 @@ static SEGMENT:AtomicU64=AtomicU64::new(u64::MAX);
 fn status(text:&str){if let Ok(c)=CString::new(text){unsafe{tm_render_native_status(c.as_ptr())}}}
 fn read_ptr(address:usize)->usize{if address<0x10000{return 0;}unsafe{std::ptr::read_volatile(address as *const usize)}}
 fn plausible(p:usize)->bool{(0x10000000000..0x800000000000).contains(&p)&&p%16==0}
+// Object pointers only need 8-byte alignment; bone arrays are 16-byte aligned. A missing extra
+// array (importer+0x198) is reported as 0 and skipped instead of blocking the test.
+fn object(p:usize)->bool{(0x10000000000..0x800000000000).contains(&p)&&p%8==0}
 fn pose_arrays()->Option<[usize;4]>{
  let world=unsafe{WorldChrMan::instance()}.ok()?;let player=world.main_player.as_ref()?;
- let chr=&player.chr_ins as *const _ as usize;let importer=read_ptr(chr+POSE_IMPORTER);if !plausible(importer){return None;}
- let extra=read_ptr(importer+0x198);if !plausible(extra){return None;}
- let a=[read_ptr(importer+0x50),read_ptr(importer+0x60),read_ptr(extra+0xA8),read_ptr(extra+0xB8)];
- a.iter().all(|p|plausible(*p)).then_some(a)}
+ let chr=&player.chr_ins as *const _ as usize;let importer=read_ptr(chr+POSE_IMPORTER);
+ if !object(importer){crate::log_game(&format!("POSE_SPIKE2: importer pointer 0x{importer:X} not usable"));return None;}
+ let extra=read_ptr(importer+0x198);
+ let pick=|p:usize|if plausible(p){p}else{0};
+ let a=[pick(read_ptr(importer+0x50)),pick(read_ptr(importer+0x60)),if object(extra){pick(read_ptr(extra+0xA8))}else{0},if object(extra){pick(read_ptr(extra+0xB8))}else{0}];
+ if a[0]==0||a[1]==0{crate::log_game(&format!("POSE_SPIKE2: main pose arrays missing {a:X?} extra=0x{extra:X}"));return None;}
+ Some(a)}
 // Segment for a time since F9: Some(group) = write in that group; None = pause or finished.
 fn segment(elapsed_ms:u64)->(Option<usize>,u64){match elapsed_ms{0..3000=>(Some(1),0),3000..5000=>(None,1),5000..8000=>(Some(2),2),8000..10000=>(None,3),10000..13000=>(Some(3),4),_=>(None,5)}}
 
@@ -52,7 +58,7 @@ pub fn tick(group:usize,now:u64){
   if down&&!was&&START.load(Ordering::Acquire)==0{
    match pose_arrays(){
     Some(a)=>{
-     let data=a.iter().map(|p|unsafe{std::slice::from_raw_parts(*p as *const u8,BYTES).to_vec()}).collect();
+     let data=a.iter().map(|p|if *p==0{Vec::new()}else{unsafe{std::slice::from_raw_parts(*p as *const u8,BYTES).to_vec()}}).collect();
      *SNAPSHOT.lock().unwrap()=Some(Snapshot{data,writes:[0;5],held:[[0;4];5],checks:[0;5]});SEGMENT.store(u64::MAX,Ordering::Relaxed);START.store(now.max(1),Ordering::Release);
      crate::log_game(&format!("POSE_SPIKE2: snapshot taken arrays={a:X?} bones={BONES}"));}
     None=>{status("POSE TEST (F9): player not ready, load in first");crate::log_game("POSE_SPIKE2: pose arrays not found");}}
@@ -74,10 +80,10 @@ pub fn tick(group:usize,now:u64){
  let mut guard=SNAPSHOT.lock().unwrap();let Some(snap)=guard.as_mut() else {return;};
  if group==4{
   snap.checks[active]+=1;
-  for(i,p)in arrays.iter().enumerate(){if unsafe{std::slice::from_raw_parts(*p as *const u8,BYTES)}==&snap.data[i][..]{snap.held[active][i]+=1;}}
+  for(i,p)in arrays.iter().enumerate(){if *p==0||snap.data[i].is_empty(){continue;}if unsafe{std::slice::from_raw_parts(*p as *const u8,BYTES)}==&snap.data[i][..]{snap.held[active][i]+=1;}}
   return;}
  if group!=active{return;}
- for(i,p)in arrays.iter().enumerate(){unsafe{std::ptr::copy_nonoverlapping(snap.data[i].as_ptr(),*p as *mut u8,BYTES);}}
+ for(i,p)in arrays.iter().enumerate(){if *p==0||snap.data[i].is_empty(){continue;}unsafe{std::ptr::copy_nonoverlapping(snap.data[i].as_ptr(),*p as *mut u8,BYTES);}}
  snap.writes[group]+=1;
  if snap.writes[group]==1{crate::log_game(&format!("POSE_SPIKE2: first write in {}",GROUPS[group]));}
 }
