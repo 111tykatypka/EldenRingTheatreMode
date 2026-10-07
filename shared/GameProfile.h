@@ -39,6 +39,8 @@ struct TmValidationReport {
     char sha256[65];
 };
 extern "C" __declspec(dllexport) uint32_t __cdecl tm_validate_profile(const wchar_t* executable_path, uintptr_t image_base, TmValidationReport* report);
+// 0: known anti-cheat process absent, 1: present, -1: enumeration unavailable.
+extern "C" __declspec(dllexport) int __cdecl tm_anti_cheat_state();
 
 // ---------------------------------------------------------------------------------------------
 // Game memory layout used by Theater Mode, for this exact executable (2.7.0.0, SHA above).

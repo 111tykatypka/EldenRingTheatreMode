@@ -6,6 +6,16 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <tlhelp32.h>
+extern "C" int __cdecl tm_anti_cheat_state(){
+ HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+ if(snapshot==INVALID_HANDLE_VALUE)return -1;
+ PROCESSENTRY32W p{};p.dwSize=sizeof(p);int state=0;
+ if(!Process32FirstW(snapshot,&p)){CloseHandle(snapshot);return -1;}
+ do{if(_wcsicmp(p.szExeFile,L"EasyAntiCheat.exe")==0||_wcsicmp(p.szExeFile,L"EasyAntiCheat_EOS.exe")==0||_wcsicmp(p.szExeFile,L"start_protected_game.exe")==0){state=1;break;}}while(Process32NextW(snapshot,&p));
+ if(state==0&&GetLastError()!=ERROR_NO_MORE_FILES)state=-1;
+ CloseHandle(snapshot);return state;
+}
 #pragma comment(lib,"Version.lib")
 #pragma comment(lib,"Bcrypt.lib")
 

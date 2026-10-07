@@ -21,8 +21,7 @@ PlaybackView playback_view() {
   std::lock_guard lock(app.replay_mutex);
   PlaybackView v;
   v.loaded = bool(app.replay_player);
-  // The player character plays bone replays inside the game (adapter bone_replay); the host only
-  // owns the timeline clock, so "active" (the retired position-only in-game replay) is always false.
+  v.active = app.replay_application_requested;
   v.clock_hz = app.clock_hz;
   if (v.loaded) {
     v.state = app.replay_player->state();
@@ -101,6 +100,10 @@ bool handle_global_hotkey(UINT id) {
   return true;
 }
 void post_command(Command c) {
+  if((c==Command::start||c==Command::resume)&&tm_anti_cheat_state()!=0){
+    log_line("RECORD_BLOCKED: anti-cheat active or process inspection unavailable");
+    std::lock_guard lock(app.mutex);app.data.error=L"Recording blocked: anti-cheat active or process inspection unavailable.";return;
+  }
   if ((c == Command::start || c == Command::resume) && playback_view().active) {
     log_line("Recording refused while in-game replay is active; press STOP / "
              "F6 first");
@@ -244,6 +247,7 @@ void choose_game() {
 }
 void emergency_stop() {
   std::lock_guard playback_lock(app.replay_mutex);
+  app.replay_application_requested=false;
   app.control.emergency_stop();
   if (app.replay_player)
     app.replay_player->stop();
@@ -273,12 +277,14 @@ void seek_replay(std::uint64_t t) {
   if (!app.replay_player)
     return;
   app.replay_player->seek(t);
+  app.replay_application_requested=tm_anti_cheat_state()==0&&has_bones(app.opened_replay);
 }
 void step_replay(int direction) {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
   app.replay_player->step(direction);
+  app.replay_application_requested=tm_anti_cheat_state()==0&&has_bones(app.opened_replay);
 }
 void save_bookmarks() {
   std::lock_guard playback_lock(app.replay_mutex);
@@ -360,17 +366,21 @@ void launch_game() {
 bool has_bones(const fs::path& replay){if(replay.empty())return false;std::error_code ec;for(const wchar_t* ext:{L".world",L".bones"}){auto p=replay;p+=ext;if(fs::is_regular_file(p,ec))return true;}return false;}
 void play_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
+  if(tm_anti_cheat_state()!=0){log_line("REPLAY_BLOCKED: anti-cheat active or process inspection unavailable");return;}
   if (!app.replay_player)
     return;
   // Replays without bone data (recorded before bone replays) only move the timeline.
   if (!has_bones(app.opened_replay)) log_line("REPLAY_PLAY timeline only: this replay has no bone data");
   app.replay_player->play();
+  app.replay_application_requested=has_bones(app.opened_replay);
 }
 void restart_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
+  if(tm_anti_cheat_state()!=0){log_line("REPLAY_BLOCKED: anti-cheat active or process inspection unavailable");return;}
   if (!app.replay_player)
     return;
   app.replay_player->restart();
+  app.replay_application_requested=has_bones(app.opened_replay);
 }
 void pipe_worker() {
   fs::path log_path = app.logs / L"TheaterModeRecorder.log";

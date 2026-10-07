@@ -7,6 +7,17 @@ int main(){using namespace theater;
  auto dir=fs::temp_directory_path()/("TheaterEditorPipe_"+std::to_string(GetCurrentProcessId()));fs::create_directories(dir);app.root=dir;app.logs=dir;
  auto path=dir/L"transport.erplay";{erplay::Writer writer(path,{},2);for(unsigned i=0;i<4;++i){erplay::Sample s;s.index=i;s.source_time_ns=100+i*1'000'000'000ULL;s.replay_time_ns=i*1'000'000'000ULL;writer.append(s);}auto result=writer.finalize();}
  app.replay_player=std::make_unique<replay::Player>(path);app.game_pid=GetCurrentProcessId();
+ app.opened_replay=path;{auto sidecar=path;sidecar+=L".world";std::ofstream(sidecar)<<"fixture marker (ownership test only)";}
+ if(playback_view().active)return 23; // loading never requests engine writes
+ // The same authoritative transport toggle backs the UI button and keyboard.
+ app.replay_player->seek(2'000'000'000);toggle_replay();if(app.replay_player->state().status!=replay::Status::playing)return 20;
+ toggle_replay();if(app.replay_player->state().status!=replay::Status::paused||app.replay_player->state().timestamp_ns<2'000'000'000)return 21;
+ const auto paused=app.replay_player->state().timestamp_ns;toggle_replay();if(app.replay_player->state().status!=replay::Status::playing||app.replay_player->state().timestamp_ns!=paused)return 22;
+ pause_replay();
+ if(!playback_view().active)return 24; // Pause holds the requested replay state
+ emergency_stop();if(playback_view().active)return 25;
+ seek_replay(2'000'000'000);if(!playback_view().active)return 26;
+ emergency_stop();if(playback_view().active)return 27;
  const auto endpoint=std::wstring(theater_ui::pipe)+L"_Test_"+std::to_wstring(GetCurrentProcessId());
  ingame_editor::start(endpoint.c_str());std::atomic_bool done{},ok{true};
  std::thread client([&]{HANDLE h=INVALID_HANDLE_VALUE;for(unsigned i=0;i<100&&h==INVALID_HANDLE_VALUE;++i){h=CreateFileW(endpoint.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE)Sleep(10);}if(h==INVALID_HANDLE_VALUE){ok=false;done=true;return;}
@@ -15,6 +26,7 @@ int main(){using namespace theater;
  });
  for(unsigned i=0;i<500&&!done;++i){ingame_editor::poll();Sleep(2);}client.join();ingame_editor::poll();ingame_editor::shutdown();
  if(!ok||app.replay_player->state().timestamp_ns!=2'000'000'000||app.replay_player->state().timescale!=.0105)return 1;
+ if(!playback_view().active)return 28;emergency_stop();if(playback_view().active)return 29;
  // Replay Library helpers: safe file names, unique paths, sorting.
  {using namespace theater::library;
   if(safe_stem("  My: run/one?.  ")!=L"My runone"||safe_stem("")!=L"Replay"||safe_stem("CON")!=L"CON_"||safe_stem("<>|")!=L"Replay")return 2;

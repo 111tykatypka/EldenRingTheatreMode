@@ -1,4 +1,16 @@
-# Independent continuation — P2c checkpoint
+# Independent continuation — P2d fidelity/core checkpoint
+
+2026-10-07 latest independent changes: ERWORLD v2 full-precision local/model pose
+words, dynamic importer bone count, actual hierarchy/model identity, host master
+clock, shared Play/Pause toggle, explicit Stop/ownership, offline refusal, read-only
+flag/clock replay, background writer initialization/durability and no ten-minute cutoff.
+Build/tests pass; new game behavior is NOT verified. Full-world/camera/light/Look
+roadmap is NOT complete. See `notes/P2D_ROADMAP_STATUS.md`, `notes/P2D_RUNTIME_TEST.md`,
+`notes/P2D_TEST_RESULTS.md`, and `docs/ERWORLD_V2_FORMAT.md`.
+Output: this duplicate's `outputs/P2d-fidelity-core`. Original packages are preserved.
+
+Historical checkpoint summaries follow for provenance; they do not establish new
+runtime acceptance or supersede the limits above.
 
 2026-10-07: copied the latest P2b source into `EldenRingTheatreMode-P2b-independent`, branch `codex/p2b-continuation`. Original source and package remain unchanged.
 

@@ -1,5 +1,21 @@
 //! Pure interpolation of the known recorded physics transform. No game memory access.
 pub type Transform=[[f32;4];3];
+fn usable_quaternion(q:&[f32])->bool{
+ let n=q.iter().map(|x|(*x as f64).powi(2)).sum::<f64>();
+ q.len()==4&&q.iter().all(|x|x.is_finite())&&n.is_finite()&&(n-1.0).abs()<=0.1
+}
+/// Storage preserves every bit for research; game writes accept semantic components only.
+/// hkQsTransform padding W words are deliberately excluded (they are not pose coordinates).
+pub fn pose_safe_to_apply(pose:&[u8])->bool{
+ !pose.is_empty()&&pose.len()%48==0&&pose.chunks_exact(48).all(|b|{
+  let values=std::array::from_fn::<_,12,_>(|i|f32::from_le_bytes(b[i*4..i*4+4].try_into().unwrap()));
+  [0,1,2,8,9,10].into_iter().all(|i|values[i].is_finite())&&usable_quaternion(&values[4..8])
+ })
+}
+pub fn source_time(source:u64,anchor:u64,now:u64,playing:bool,speed:f64)->u64{
+ if !playing||anchor==0||!speed.is_finite()||speed<=0.0{return source;}
+ source.saturating_add((now.saturating_sub(anchor).min(250_000_000) as f64*speed) as u64)
+}
 /// Playback in the same measured coordinate frame preserves the physics trajectory.
 /// ChrIns.chunk_position is not a sampled moving root; never replace root XYZ with it.
 /// Different origin translations need a verified conversion, not a guessed sign/offset.
@@ -22,7 +38,8 @@ fn quaternion(a:[f32;4],mut b:[f32;4],t:f64)->Option<[f32;4]> {
     unit(std::array::from_fn(|i|(a[i]as f64*wa+b[i]as f64*wb)as f32))
 }
 pub fn evaluate(a:&Transform,b:&Transform,t:f64)->Option<Transform> {
-    if !t.is_finite()||!a.iter().flatten().chain(b.iter().flatten()).all(|v|v.is_finite()){return None;}
+    if !t.is_finite()||!a.iter().flatten().chain(b.iter().flatten()).all(|v|v.is_finite())
+       ||!usable_quaternion(&a[0])||!usable_quaternion(&a[1])||!usable_quaternion(&b[0])||!usable_quaternion(&b[1]){return None;}
     let t=t.clamp(0.0,1.0);
     // Preserve recorded endpoints exactly, including engine padding/position W.
     if t==0.0{return Some(*a);}if t==1.0{return Some(*b);}
@@ -33,6 +50,13 @@ pub fn evaluate(a:&Transform,b:&Transform,t:f64)->Option<Transform> {
 }
 #[cfg(test)]mod tests {
     use super::*;
+    #[test]fn master_clock_pause_seek_and_speed(){
+     assert_eq!(source_time(1000,100,200,false,4.0),1000);
+     assert_eq!(source_time(1000,100,200,true,0.5),1050);
+     assert_eq!(source_time(1000,100,200,true,2.0),1200);
+     assert_eq!(source_time(10,200,200,true,1.0),10); // backward seek is exact
+     assert_eq!(source_time(10,200,100,true,1.0),10); // no timestamp underflow
+    }
     #[test]fn endpoints_and_shortest_quaternion(){
         let a=[[0.,0.,0.,1.],[0.,0.,0.,1.],[1.,2.,3.,1.]];
         let b=[[0.,0.,0.,-1.],[0.,1.,0.,0.],[3.,4.,5.,1.]];
@@ -41,6 +65,11 @@ pub fn evaluate(a:&Transform,b:&Transform,t:f64)->Option<Transform> {
         for q in &mid[..2]{assert!((q.iter().map(|v|v*v).sum::<f32>()-1.).abs()<1e-5);}
     }
     #[test]fn reject_invalid_data(){let a=[[0.,0.,0.,1.];3];let mut b=a;b[2][0]=f32::NAN;assert!(evaluate(&a,&b,0.5).is_none());}
+    #[test]fn writes_reject_invalid_endpoints_but_ignore_pose_padding(){
+     let a=[[0.,0.,0.,1.];3];let mut b=a;b[0]=[0.;4];assert!(evaluate(&a,&b,1.).is_none());
+     let mut pose:Vec<u8>=[0.,0.,0.,f32::NAN,0.,0.,0.,1.,1.,1.,1.,f32::NAN].into_iter().flat_map(f32::to_le_bytes).collect();
+     assert!(pose_safe_to_apply(&pose));pose[16..32].fill(0);assert!(!pose_safe_to_apply(&pose));assert!(!pose_safe_to_apply(&[]));
+    }
     #[test]fn chunk_anchor_cannot_cancel_root_motion(){
       let a=[[0.,0.,0.,1.],[0.,0.,0.,1.],[-12.,3.,0.,1.]];
       let b=[[0.,0.,0.,1.],[0.,0.,0.,1.],[11.,9.,28.,1.]];

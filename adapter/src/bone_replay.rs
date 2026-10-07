@@ -8,10 +8,10 @@
 // chunked, written by a background thread) beside the host's file (the library already moves and
 // recycles "<file>.<anything>" sidecars with it). Older "<replay>.erplay.bones" files still play. When a
 // replay with bones is loaded, the body follows the host timeline: play, pause and scrubbing.
-// The host and overlay state arrives through tm_overlay_bone_link (theater_ui snapshot v5).
+// The host and overlay state arrives through tm_overlay_bone_link (theater_ui snapshot v11).
 //
 // Where the pose lives (skeleton probe K1, write tests K2-K4): ChrIns+0x398 is the
-// CSFD4LocationHkaPoseImporter; +0x50 -> 150 local-space hkQsTransforms, +0x60 -> 150 model-space
+// CSFD4LocationHkaPoseImporter; +0x50 -> local-space hkQsTransforms, +0x60 -> model-space
 // hkQsTransforms (48 bytes each). Writes in ChrIns_PrePhysicsSafe survive until Draw_Pre and are what
 // is drawn; writes in ChrIns_BehaviorSafe are overwritten; writes after the importer show nothing.
 // World placement comes from CSChrPhysicsModule orientation, interpolated_orientation, position; the
@@ -23,7 +23,7 @@
 //   0 ChrIns_PostPhysics: link state, ownership changes; while owning, rewrites the transform after physics
 //   2 ChrIns_PrePhysicsSafe: while owning, writes bones and transform
 //   4 Draw_Pre: while recording, samples what is about to be drawn; while owning, measures accuracy
-// Offsets stay in this file until they move into GameProfile.
+// Offsets belong to GameProfile. New capture validates the runtime skeleton count and hierarchy.
 use std::ffi::{c_char,CStr,CString};
 use std::io::Read;
 use std::path::PathBuf;
@@ -49,7 +49,6 @@ const LOCAL_POSE:usize=profile::OFF_POSE_IMPORTER_LOCAL;
 const MODEL_POSE:usize=profile::OFF_POSE_IMPORTER_MODEL;
 const BONES:usize=profile::VAL_PLAYER_BONES;
 const POSE_BYTES:usize=BONES*48;
-const MAX_SECONDS:u64=600;
 const KEYS_GROUP:usize=0;
 const WRITE_GROUP:usize=2;
 const DRAW_GROUP:usize=4;
@@ -65,24 +64,24 @@ const FRAME_BYTES:usize=FRAME_BYTES_V2+equipment::BYTES;
 const RECORD_RECORDING:u32=1;
 const RECORD_PAUSED:u32=2;
 
-#[repr(C)]struct Link{linked:u32,recording:u32,loaded:u32,playing:u32,overlay_shown:u32,options:u32,timescale:f64,play_source_ns:u64,received_ns:u64,recording_path:[c_char;260],loaded_path:[c_char;260]}
+#[repr(C)]struct Link{linked:u32,recording:u32,loaded:u32,playing:u32,apply_requested:u32,options:u32,timescale:f64,play_source_ns:u64,received_ns:u64,recording_path:[c_char;260],loaded_path:[c_char;260]}
 unsafe extern "C"{fn tm_render_event(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
 // place.block == -1: recorded before map data existed (bones file version 1); positions are used as recorded.
 type Frame=world_file::PlayerFrame;
 // Player frames of the loaded replay: the old .bones format is read whole, .world is decoded a chunk at
-// a time (cached), so memory stays small for long replays.
+// a time (cached). Compressed file bytes and the timestamp index still reside in RAM.
 enum Store{Memory(Vec<Frame>),Chunked(world_file::PlayerTrack)}
 // World state of the loaded replay (Phase 2.1); empty for older files.
-#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>,context:Vec<world_file::EntityContext>}
+#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>,context:Vec<world_file::EntityContext>,skeletons:std::collections::HashMap<u32,crate::skeleton::Definition>}
 impl Store{
  fn len(&self)->usize{match self{Store::Memory(v)=>v.len(),Store::Chunked(t)=>t.len()}}
  fn time(&self,i:usize)->u64{match self{Store::Memory(v)=>v[i].time,Store::Chunked(t)=>t.times[i]}}
  fn index_at(&self,t:u64)->usize{let n=self.len();let (mut lo,mut hi)=(0,n);while lo<hi{let m=(lo+hi)/2;if self.time(m)<=t{lo=m+1}else{hi=m}}lo.saturating_sub(1).min(n-1)}
  fn get(&mut self,i:usize)->Option<Frame>{match self{Store::Memory(v)=>v.get(i).cloned(),Store::Chunked(t)=>t.get(i).cloned()}}}
 // The game thread hands frames to the world file writer thread; it never waits for the disk.
-struct Recorder{path:String,tx:SyncSender<Message>,frames:u64,first:u64,last:u64,dropped:u64,next_world:u64,flags:world_file::FlagGroups,actors:crate::actors::Recorder}
+struct Recorder{path:String,tx:SyncSender<Message>,frames:u64,first:u64,last:u64,dropped:u64,next_world:u64,flags:world_file::FlagGroups,actors:crate::actors::Recorder,skeleton:Option<crate::skeleton::Definition>,skeleton_warned:bool}
 #[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_drawn_cm:f32,sum_drawn_cm:f64}
 struct Loaded{path:String,store:Store,parents:Arc<Vec<i16>>,seconds:f64,world:Arc<WorldData>,actors:Option<crate::actors::Player>}
 #[derive(PartialEq)]enum Loading{None,Busy(String),Missing(String),Failed(String)}
@@ -91,12 +90,12 @@ struct State{
  // The two recorded frames around this game frame's replay time (chosen once per frame by select()).
  cur:Option<(Frame,Frame)>,
  loaded:Option<Loaded>,loading:Loading,
- owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,evaluated_root:Option<Transform>,pose_alpha:f64,local_out:[u8;POSE_BYTES],model_out:[u8;POSE_BYTES],accuracy:Accuracy,
+ owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,evaluated_root:Option<Transform>,pose_alpha:f64,local_out:Vec<u8>,model_out:Vec<u8>,accuracy:Accuracy,
  // Accuracy: where the body should be drawn this frame, and frames to skip after a start or seek.
  expected:[f32;3],settle:u32,last_t:u64,fallback_bones:u64,
  // Timeline as last seen from the host (playing, timescale, source time, when it arrived) and the
- // replay clock that advances smoothly between host updates.
- host:(bool,f64,u64,u64),clock_t:f64,clock_at:u64,clock_valid:bool,
+ // host monotonic anchor used to evaluate the same master clock between updates.
+ host:(bool,f64,u64,u64),
  // Phase 1.4 arrival: how the body gets to the recorded place before the replay plays, and the
  // shift from recorded physics space to today's physics space for this frame.
  arrival:Arrival,warped:bool,shift:[f32;3],expected_global:Option<[f32;4]>,
@@ -105,12 +104,12 @@ struct State{
  equip_saved:Option<Equip>,equip_written:Option<Equip>,equip_lost:u64,equip_frames:u64,
  // Phase 2.1: the player's clock and (if flags are replayed) their own values of the flags the replay touches.
  clock_saved:Option<world_state::Clock>,flags_saved:Option<Vec<(u32,bool)>>,options:u32,
- // Today's (global - physics) offset, measured each frame before the writes (used for actors too).
+ // Reserved root-rebase value; remains zero until cross-origin conversion is verified.
  now_offset:[f32;3],
- mount_blocked:bool,
+ replay_blocked:bool,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),clock_t:0.0,clock_at:0,clock_valid:false,arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_global:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],mount_blocked:false});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_global:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -137,7 +136,7 @@ fn pose_arrays(chr:usize)->Option<(usize,usize)>{
  let importer=read_ptr(chr+POSE_IMPORTER);if !object(importer){return None;}
  let (local,model)=(read_ptr(importer+LOCAL_POSE),read_ptr(importer+MODEL_POSE));
  (array(local)&&array(model)).then_some((local,model))}
-fn pose(p:usize)->&'static [u8]{unsafe{std::slice::from_raw_parts(p as *const u8,POSE_BYTES)}}
+fn pose(p:usize,bytes:usize)->&'static [u8]{unsafe{std::slice::from_raw_parts(p as *const u8,bytes)}}
 fn bones_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.bones"))}
 fn world_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.world"))}
 
@@ -171,7 +170,7 @@ fn finish_recording(s:&mut State){
  crate::log_game(&format!("BONE_REPLAY: recording stopped; {} frames over {seconds:.2} s ({} dropped while the disk was busy), {} characters; finishing {}",r.frames,r.dropped,r.actors.count(),world_path(&r.path).display()));
  crate::log_game(&format!("COMPANIONS_SUMMARY: {} companion identities, {} dropped actor samples (no lost catalog announcements)",r.actors.companions(),r.actors.drops()));
  if r.frames==0{status("BONE REPLAY: no bones were recorded (load in first)");}
- let _=r.tx.send(Message::Finish);} // the writer saves and reports when done
+ drop(r.tx);} // close the producer; writer drains queued data and finalizes without blocking a game task
 
 fn adopt_loaded(s:&mut State){
  let Some(result)=LOADED.lock().unwrap().take() else {return;};
@@ -188,7 +187,7 @@ fn follow_loaded(s:&mut State,l:&Link){
  let known=match &s.loading{Loading::Busy(p)|Loading::Missing(p)|Loading::Failed(p)=>Some(p.clone()),Loading::None=>s.loaded.as_ref().map(|x|x.path.clone())};
  if known.as_deref()==Some(path.as_str())||(path.is_empty()&&known.is_none()){return;}
  if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.release();}
- s.loaded=None;s.loading=Loading::None;s.written=None;s.evaluated_root=None;s.cur=None;s.mount_blocked=false;
+ s.loaded=None;s.loading=Loading::None;s.written=None;s.evaluated_root=None;s.cur=None;s.replay_blocked=false;
  if path.is_empty(){LOADED.lock().unwrap().take();crate::log_game("BONE_REPLAY: unloaded pose data; pending loads invalidated");return;}
  let (world,file)=(world_path(&path),bones_path(&path));
  if !world.is_file()&&!file.is_file(){crate::log_game(&format!("BONE_REPLAY: {path} has no bone data (recorded before bone replays)"));status("BONE REPLAY: this replay has no bone data. Record a new one with F5");s.loading=Loading::Missing(path);return;}
@@ -196,12 +195,12 @@ fn follow_loaded(s:&mut State,l:&Link){
  let _=std::thread::Builder::new().name("TheaterMode.BoneLoad".into()).spawn(move||{
   let opened=if world.is_file(){world_file::open(&world).map(|w|{
     let mut touched:Vec<u32>=w.flag_events.iter().map(|e|e.flag).collect();touched.sort_unstable();touched.dedup();
-    let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context));
-    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
+    let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context,&w.skeletons));
+    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context,skeletons:w.skeletons},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
   let result=opened.map(|(mut store,world_data,actors)|{
    // Learn the skeleton hierarchy from a few frames spread over the recording (see replay_interpolation).
    let n=store.len();let picks:Vec<Frame>=(0..5).filter_map(|k|store.get(k*(n-1)/4)).collect();
-   let parents=crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..])));
+   let parents=world_data.skeletons.get(&0).map(|d|d.parents.clone()).unwrap_or_else(||crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..]))));
    let known=parents.iter().filter(|p|**p!=crate::replay_interpolation::UNKNOWN_PARENT).count();
    crate::log_game(&format!("BONE_REPLAY: skeleton hierarchy learned for {known} of {} bones; the rest interpolate on their own",parents.len()));
    let seconds=(store.time(n-1)-store.time(0)) as f64/1e9;
@@ -211,16 +210,14 @@ fn follow_loaded(s:&mut State,l:&Link){
 
 // The replay time for this game frame, in source time. The host sends the timeline about 20 times a
 // second; between updates the replay clock advances by elapsed game time x speed, so motion is
-// continuous at any speed. While playing it never steps backwards: small differences to the host
-// are blended in over a few frames, and only a real jump (seek, > 0.1 s) is taken at once.
+// continuous at any speed. Every evaluation derives from the authoritative host anchor;
+// backward seeks and pauses take effect exactly, without a second clock integrator.
 // While paused or scrubbing it follows the host exactly.
 fn replay_time(s:&mut State,now:u64)->u64{
  let (playing,speed,source,received)=s.host;let speed=speed.clamp(0.001,10.0);
- let host=if playing&&received!=0{source as f64+now.saturating_sub(received).min(250_000_000) as f64*speed}else{source as f64};
- let t=if !playing||!s.clock_valid{host}else{
-  let predicted=s.clock_t+now.saturating_sub(s.clock_at) as f64*speed;let error=host-predicted;
-  if error.abs()>100_000_000.0{host}else{(predicted+error*0.1).max(s.clock_t)}};
- s.clock_t=t;s.clock_at=now;s.clock_valid=true;t as u64}
+ // Derive from the single host anchor on the shared unscaled Windows clock.
+ // No local integrator, monotonic clamp or error smoothing can delay backward seeks.
+ crate::replay_interpolation::source_time(source,received,now,playing,speed)}
 // Picks the two recorded frames around this frame's replay time and the blend between them, and
 // computes the root transform and where the body should be drawn. Called once per game frame, before
 // the writes, so bones and root always come from the same instant.
@@ -263,10 +260,15 @@ fn release(s:&mut State,chr:usize,reason:&str){
  if let Some(c)=s.clock_saved.take(){world_state::write_clock(&c);crate::log_game("WORLD: your time of day restored");}
  if let Some(f)=s.flags_saved.take(){for (flag,state) in &f{world_state::write_flag(*flag,*state);}crate::log_game(&format!("WORLD: {} event flags restored to your own values",f.len()));}}
 
+fn reject(s:&mut State,chr:usize,reason:&str){
+ s.replay_blocked=true;release(s,chr,reason);
+ crate::log_game(&format!("REPLAY_ERROR_LATCHED: {reason}; stop and explicitly play again to retry"));
+}
+
 // Phase 2.1: time of day (always) and, if enabled, the event flags at this frame's replay time.
 fn apply_world(s:&mut State){
  let (Some(loaded),t)=(&s.loaded,s.last_t) else {return};let w=loaded.world.clone();
- if !w.samples.is_empty(){let i=w.samples.partition_point(|x|x.time<=t).saturating_sub(1);let mut c=w.samples[i].clock;c.multiplier=0.0;world_state::write_clock(&c);}
+ if s.clock_saved.is_some()&&!w.samples.is_empty(){let i=w.samples.partition_point(|x|x.time<=t).saturating_sub(1);let mut c=w.samples[i].clock;c.multiplier=0.0;world_state::write_clock(&c);}
  if s.flags_saved.is_some(){
   if let Some((_,start))=&w.flags_start{
    for flag in &w.touched{
@@ -304,7 +306,7 @@ fn advance_arrival(s:&mut State,chr:usize,now:u64){
    let settled=!arrival::loading()&&here.block!=-1&&BlockArea::same(here.block,target.block);
    let stable=if settled{stable+1}else{0};
    if stable>=90{crate::log_game(&format!("ARRIVAL: map loaded ({} after {:.1} s); placing the body",arrival::block_name(here.block),(now-since) as f64/1e9));s.arrival=Arrival::Placing{tries:0,frames:0,good:0};s.settle=s.settle.max(3);}
-   else if now.saturating_sub(since)>60_000_000_000{crate::log_game("ARRIVAL_ERROR: the map did not finish loading within 60 s");status("BONE REPLAY ERROR: the replay's location did not finish loading (see log)");release(s,chr,"warp timed out");}
+   else if now.saturating_sub(since)>60_000_000_000{crate::log_game("ARRIVAL_ERROR: the map did not finish loading within 60 s");status("BONE REPLAY ERROR: the replay's location did not finish loading (see log)");reject(s,chr,"warp timed out");}
    else{s.arrival=Arrival::Warping{target,since,stable};}}
   Arrival::Placing{tries,frames,good}=>{
    let Some(expected)=s.expected_global else {s.arrival=Arrival::Ready;return;};
@@ -312,7 +314,7 @@ fn advance_arrival(s:&mut State,chr:usize,now:u64){
    let good=if error<0.5{good+1}else{0};let frames=frames+1;
    if good>=5{crate::log_game(&format!("ARRIVAL: body on the recorded spot (error {:.2} m, try {})",error,tries+1));s.arrival=Arrival::Ready;}
    else if frames>=30{
-    if tries+1>=3{crate::log_game(&format!("ARRIVAL_ERROR: body is {:.2} m from the recorded spot after 3 tries",error));status("BONE REPLAY ERROR: could not place you on the recorded spot (see log)");release(s,chr,"placement failed");}
+    if tries+1>=3{crate::log_game(&format!("ARRIVAL_ERROR: body is {:.2} m from the recorded spot after 3 tries",error));status("BONE REPLAY ERROR: could not place you on the recorded spot (see log)");reject(s,chr,"placement failed");}
     else{crate::log_game(&format!("ARRIVAL: retry {} (error {:.2} m)",tries+2,error));set_flag(proxy_flag(chr),true);s.arrival=Arrival::Placing{tries:tries+1,frames:0,good:0};}}
    else{s.arrival=Arrival::Placing{tries,frames,good};}}}}
 struct BlockArea;impl BlockArea{fn same(a:i32,b:i32)->bool{eldenring::cs::BlockId::from(a).area()==eldenring::cs::BlockId::from(b).area()}}
@@ -332,8 +334,18 @@ pub fn tick(group:usize,now:u64){
  let chr=player_chr();
  if group==KEYS_GROUP{
   let l=link();
+  if !crate::offline_allowed(){
+   s.replay_blocked=true;
+   if s.recording.is_some(){finish_recording(s);status("RECORDING STOPPED: offline/anti-cheat check failed.");}
+   if let Some(chr)=chr{release(s,chr,"offline/anti-cheat check failed");}
+   // Cleanup only, never leave a delayed return teleport armed for a later player/session.
+   s.restore_left=0;s.saved=None;
+   if let Some(g)=s.gravity_saved.take(){if let Some(chr)=chr{set_flag(gravity_flag(chr),g);}}
+   unsafe{tm_render_lock_game_input(0)};return;
+  }
   // Player loss cannot leave the keyboard lock or a return transform armed for a new player.
   if chr.is_none()&&(s.owning||s.restore_left>0){
+   s.replay_blocked=true;
    s.owning=false;s.restore_left=0;s.saved=None;s.gravity_saved=None;s.written=None;s.evaluated_root=None;
    unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: player unavailable; ownership and input lock released");}
   // Recording follows the host recorder.
@@ -344,7 +356,7 @@ pub fn tick(group:usize,now:u64){
      Ok(tx)=>{
       let flags=world_state::read_flags();let _=tx.send(Message::Flags(now,flags.clone()));
       crate::log_game(&format!("BONE_REPLAY: recording started for {path} ({} event flag groups)",flags.len()));
-      s.recording=Some(Recorder{path,tx,frames:0,first:0,last:0,dropped:0,next_world:now,flags,actors:crate::actors::Recorder::new()});s.last_second=0;}
+      s.recording=Some(Recorder{path,tx,frames:0,first:0,last:0,dropped:0,next_world:now,flags,actors:crate::actors::Recorder::new(),skeleton:None,skeleton_warned:false});s.last_second=0;}
      Err(e)=>{crate::log_game(&format!("BONE_REPLAY_ERROR: cannot create the world file for {path}: {e}"));status("BONE REPLAY ERROR: cannot write the recording file (see log)");}}}}
   if !recording&&s.recording.is_some(){finish_recording(s);}
   s.record_paused=l.recording==RECORD_PAUSED;
@@ -353,18 +365,18 @@ pub fn tick(group:usize,now:u64){
    if let Some(clock)=world_state::read_clock(){let _=r.tx.try_send(Message::World(world_file::WorldSample{time:now,clock}));}
    let flags=world_state::read_flags();let changes=world_state::diff(&r.flags,&flags);r.flags=flags;
    if !changes.is_empty(){let _=r.tx.try_send(Message::FlagEvents(changes.into_iter().map(|(flag,state)|world_file::FlagEvent{time:now,flag,state}).collect()));}}}
-  if let Some(r)=&s.recording{if r.frames>0&&r.last-r.first>MAX_SECONDS*1_000_000_000&&s.last_second!=u64::MAX{s.last_second=u64::MAX;crate::log_game("BONE_REPLAY: 10 minute limit reached; later frames are not recorded");status("BONE REPLAY: 10 minute limit reached, stop the recording (F6)");}}
   // Playback follows the loaded replay and the timeline.
   adopt_loaded(s);follow_loaded(s,&l);
   let fresh=l.linked!=0&&l.received_ns!=0&&now.saturating_sub(l.received_ns)<500_000_000;
-  if l.playing!=0&&!s.host.0{s.mount_blocked=false;}
-  let mut want=fresh&&s.loaded.is_some()&&s.recording.is_none()&&(l.playing!=0||l.overlay_shown!=0)&&!s.mount_blocked;
+  if !fresh&&s.owning{s.replay_blocked=true;}
+  if fresh&&l.apply_requested!=0&&l.playing!=0&&!s.host.0{s.replay_blocked=false;}
+  let mut want=fresh&&s.loaded.is_some()&&s.recording.is_none()&&l.apply_requested!=0&&!s.replay_blocked;
   // No guessed mounting API: reject a mounted/unmounted mismatch before body ownership/writes.
   if want{if let Some(chr)=chr{
    let required=s.loaded.as_ref().and_then(|x|world_file::context_at(&x.world.context,0,l.play_source_ns));
    let live_ride=crate::companions::ride(chr);
    if let Some(required)=required.filter(|c|!crate::companions::mount_compatible(c.ride_flags,live_ride)){
-    want=false;s.mount_blocked=true;if s.owning{release(s,chr,"mount state mismatch");}
+    want=false;s.replay_blocked=true;if s.owning{release(s,chr,"mount state mismatch");}
     let recorded=if required.ride_flags&crate::companions::MOUNTED!=0{"mounted"}else{"on foot"};
     let live=match live_ride{Some(r) if r.flags&crate::companions::MOUNTED!=0=>"mounted",Some(_)=>"on foot",None=>"unavailable"};
     crate::log_game(&format!("COMPANION_REPLAY_BLOCKED: source_ns={} recorded={recorded} flags=0x{:X} state={} param={} mount_id={} live={live} live_ride={live_ride:?}; mount/dismount reconstruction unavailable",l.play_source_ns,required.ride_flags,required.ride_state,required.ride_param,required.mount_id));
@@ -372,10 +384,13 @@ pub fn tick(group:usize,now:u64){
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){
-     s.owning=true;s.written=None;s.evaluated_root=None;s.clock_valid=false;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;s.warped=false;
+     s.owning=true;s.written=None;s.evaluated_root=None;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;s.warped=false;
      s.equip_saved=equipment::read(chr);s.equip_written=None;s.equip_lost=0;s.equip_frames=0;
-     s.clock_saved=world_state::read_clock();s.options=l.options;
-     s.flags_saved=(l.options&1!=0).then(||s.loaded.as_ref().map(|x|x.world.touched.iter().map(|f|(*f,world_state::read_flag(*f))).collect())).flatten();
+     // The clock may also be save-backed. Capture it, but do not override before save isolation.
+     s.clock_saved=None;s.options=l.options;
+     // Temporary flag restoration alone cannot prevent autosave persisting an override.
+     // Keep flag tracks read-only until a verified no-save/lifecycle contract exists.
+     s.flags_saved=None;
      begin_arrival(s,chr);
      let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
@@ -391,32 +406,47 @@ pub fn tick(group:usize,now:u64){
   if s.owning&&!matches!(s.arrival,Arrival::Warping{..}){apply_world(s);}
   return;}
  let Some(chr)=chr else {return;};
- if group==DRAW_GROUP&&!s.record_paused&&s.last_second!=u64::MAX{
+ if group==DRAW_GROUP&&!s.record_paused{
   if let Some(r)=&mut s.recording{
    let (Some((local,model)),Some(transform))=(pose_arrays(chr),read_transform(chr)) else {return;};
-   let frame=Frame{time:now,transform,matrix:read_matrix(matrix_address(chr)),local:pose(local).to_vec(),model:pose(model).to_vec(),place:arrival::place(chr),equip:equipment::read(chr).unwrap_or_default()};
-   match r.tx.try_send(Message::Player(frame)){Ok(())=>{if r.frames==0{r.first=now;}r.frames+=1;r.last=now;}Err(_)=>r.dropped+=1}
+   let Some(count)=crate::actors::bone_count(chr) else{return;};let bytes=count*48;
+   let frame=Frame{time:now,transform,matrix:read_matrix(matrix_address(chr)),local:pose(local,bytes).to_vec(),model:pose(model,bytes).to_vec(),place:arrival::place(chr),equip:equipment::read(chr).unwrap_or_default()};
+   let definition=crate::skeleton::read(chr,0);
+   if definition.is_none()||r.skeleton.as_ref().is_some_and(|d|Some(d)!=definition.as_ref()){
+    r.dropped+=1;if !r.skeleton_warned{r.skeleton_warned=true;crate::log_game("PLAYER_CAPTURE_UNAVAILABLE: missing/changed skeleton identity; incompatible pose samples skipped");status("CAPTURE GAP: player skeleton unavailable or changed (see log).");}return;
+   }
+   let first_definition=if r.frames==0{definition.clone()}else{None};
+   match r.tx.try_send(Message::PlayerPose(frame,first_definition)){Ok(())=>{if r.frames==0{r.first=now;r.skeleton=definition;}r.frames+=1;r.last=now;}Err(_)=>r.dropped+=1}
    r.actors.sample(now,chr,&r.tx);}}
  if !s.owning{return;}
  match group{
   WRITE_GROUP=>{
-   let Some((local,model))=pose_arrays(chr) else {return;};
+   if s.loaded.as_ref().and_then(|l|l.world.skeletons.get(&0)).is_some_and(|d|crate::skeleton::read(chr,0).as_ref()!=Some(d)){
+    status("REPLAY BLOCKED: player skeleton identity changed; pose not applied.");reject(s,chr,"skeleton identity mismatch");return;
+   }
+   let Some((local,model))=pose_arrays(chr) else {reject(s,chr,"player pose arrays unavailable");return;};
    if matches!(s.arrival,Arrival::Warping{..}){return;}
    // Keep the actual recorded physics root. The chunk field is only an origin guard.
    let here=arrival::place(chr);
    s.shift=[0.0;3];s.now_offset=[0.0;3];
-   if !select(s,now,here){release(s,chr,"invalid root interpolation or coordinate origin");return;}
+   if !select(s,now,here){reject(s,chr,"invalid root interpolation or coordinate origin");return;}
    let (Some((f,next)),Some(loaded))=(&s.cur,&s.loaded) else {return;};
+   if !crate::replay_interpolation::pose_safe_to_apply(&f.local)||!crate::replay_interpolation::pose_safe_to_apply(&f.model)
+       ||!crate::replay_interpolation::pose_safe_to_apply(&next.local)||!crate::replay_interpolation::pose_safe_to_apply(&next.model){
+    reject(s,chr,"invalid recorded bone coordinates/quaternion");status("REPLAY BLOCKED: invalid pose data; controls released.");return;
+   }
+   if crate::actors::bone_count(chr)!=Some(f.local.len()/48){reject(s,chr,"player bone count differs");return;}
+   s.local_out.resize(f.local.len(),0);s.model_out.resize(f.model.len(),0);
    let alpha=if interpolated_pose_enabled(){s.pose_alpha}else{0.0};
    // Equipment first (grip, active slots, pieces), then the pose: the frame's full state, so scrubbing
    // backwards across a weapon swap reverts it.
    s.equip_written=if f.equip.recorded()&&equipment::write(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}else{None};
    // Bones whose interpolation is invalid keep the earlier recorded frame instead of dropping the replay.
    // Local pose is interpolated per bone; model space is rebuilt from it through the learned hierarchy.
-   let Some(l)=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out) else {release(s,chr,"pose size or time invalid");return;};
-   let Some(m)=crate::replay_interpolation::model_from_local(&s.local_out,&loaded.parents,&f.model,&next.model,alpha,&mut s.model_out) else {release(s,chr,"pose size or time invalid");return;};
+   let Some(l)=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out) else {reject(s,chr,"pose size or time invalid");return;};
+   let Some(m)=crate::replay_interpolation::model_from_local(&s.local_out,&loaded.parents,&f.model,&next.model,alpha,&mut s.model_out) else {reject(s,chr,"pose size or time invalid");return;};
    s.fallback_bones+=(l+m) as u64;
-   unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,POSE_BYTES);}
+   unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,s.local_out.len());std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,s.model_out.len());}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);
    // Recorded enemies/NPCs/bosses at the same replay time (Phase 2.2).
    let (t,offset)=(s.last_t,s.now_offset);
@@ -425,7 +455,7 @@ pub fn tick(group:usize,now:u64){
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
    if let Some(e)=s.equip_written{if equipment::read(chr)!=Some(e){s.equip_lost+=1;}}
    if s.settle>0{s.settle-=1;return;}
-   let a=&mut s.accuracy;a.frames+=1;if pose(local)==&s.local_out[..]&&pose(model)==&s.model_out[..]{a.exact_bones+=1;}
+   let a=&mut s.accuracy;a.frames+=1;if pose(local,s.local_out.len())==&s.local_out[..]&&pose(model,s.model_out.len())==&s.model_out[..]{a.exact_bones+=1;}
    let d=(0..3).map(|k|(drawn[12+k]-s.expected[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(d);a.sum_drawn_cm+=d as f64;}
   _=>{}}
 }

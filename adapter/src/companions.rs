@@ -18,7 +18,7 @@ unsafe extern "system" {
 }
 
 // Copy scalars as bytes: malformed bools/enums are never materialized as Rust values.
-fn copy(address:usize,out:&mut [u8])->bool {
+pub(crate) fn copy(address:usize,out:&mut [u8])->bool {
  if address<0x10000||address.checked_add(out.len()).is_none(){return false;}
  let mut read=0;
  unsafe{ReadProcessMemory(-1isize as *mut c_void,address as *const c_void,out.as_mut_ptr().cast(),out.len(),&mut read)!=0&&read==out.len()}

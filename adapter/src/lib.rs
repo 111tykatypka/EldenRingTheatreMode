@@ -25,6 +25,10 @@ mod world_file;
 mod world_state;
 mod actors;
 mod companions;
+mod skeleton;
+static OFFLINE_ALLOWED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
+pub(crate) fn offline_allowed()->bool{OFFLINE_ALLOWED.load(Ordering::Acquire)}
+unsafe extern "C"{fn tm_anti_cheat_state()->i32;}
 mod replay_interpolation;
 mod visual_capture;
 mod fidelity_capture;
@@ -127,7 +131,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     return;
                 }
                 log_game("Runtime profile accepted: EldenRing_1_17 / WW 2.7.0.0");
-                log_game("BUILD=P2c-companions-independent; existing-body replay; mount/summon spawning NOT IMPLEMENTED; runtime validation required");
+                log_game("BUILD=P2d-fidelity-core-independent; ERWORLD v2 lossless pose/hierarchy; host master clock; full-world reconstruction NOT COMPLETE; runtime validation required");
                 // Early, after exact executable guard; never under the loader lock.
                 let graphics=unsafe{tm_render_start(render_emergency_stop)};
                 log_game(&format!("IN_GAME_UI_HOOKS={graphics}; visuals UNVERIFIED"));
@@ -194,7 +198,11 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 unsafe{register_task(task,CSTaskGroupIndex::LocationUpdate_PrePhysics,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(3,monotonic_ns()));}))));}
                 unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(4,monotonic_ns()));}))));}
                 log_game(&format!("Recurring task registered using resolved function eldenring.exe+0x{register_rva:X}; group=ChrIns_PostPhysics; waiting for WORLDCHR_READY and PLAYER_FOUND"));
-                loop { std::thread::sleep(Duration::from_secs(60)); }
+                loop {
+                    let allowed=unsafe{tm_anti_cheat_state()}==0;
+                    if OFFLINE_ALLOWED.swap(allowed,Ordering::AcqRel)!=allowed{log_game(if allowed{"OFFLINE_GUARD: anti-cheat process check passed"}else{"OFFLINE_GUARD: anti-cheat active/inspection unavailable; capture and replay disabled"});}
+                    std::thread::sleep(Duration::from_secs(1));
+                }
             });
             if outcome.is_err() {
                 log_game("Initialization panic caught; module failed closed (0x202)");

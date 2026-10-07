@@ -86,6 +86,7 @@ struct App {
   std::jthread worker;
   std::ofstream log;
   std::unique_ptr<replay::Player> replay_player;
+  bool replay_application_requested{}; // under replay_mutex; loading/overlay visibility never arms writes
   // UI-owned document data; replay worker only touches replay_player under
   // replay_mutex.
   std::vector<std::uint64_t> replay_bookmarks;
@@ -118,6 +119,7 @@ void post_command(Command);
 bool handle_global_hotkey(UINT);
 void emergency_stop();
 void play_replay();
+bool has_bones(const fs::path&);
 void pause_replay();
 void toggle_replay();
 void restart_replay();

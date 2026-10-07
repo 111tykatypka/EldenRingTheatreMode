@@ -576,8 +576,9 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         }
         section(T(Str::ReplayWorld));
         {
-            bool flags = (gReplayOptions.load() & 1) != 0;
-            if (ImGui::Checkbox(T(Str::ReplayWorldFlags), &flags)) { gReplayOptions = flags ? (gReplayOptions | 1u) : (gReplayOptions & ~1u); SaveSettings(); }
+            bool flags = false; // unsupported overrides must not appear enabled from old settings
+            ImGui::BeginDisabled();ImGui::Checkbox(T(Str::ReplayWorldFlags), &flags);ImGui::EndDisabled();
+            ImGui::TextWrapped("World flags and time-of-day are captured read-only. Replay overrides are disabled until autosave isolation is verified.");
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);
@@ -1005,7 +1006,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     ImGui::PopFont();
     x += badgeW + Px(Space::LG, s);
 
-    // Transport. The owner asked for Play/Stop without Pause.
+    // One authoritative toggle shared with the configured Play/Pause hotkey.
     const bool canTransport = f.hostLinked && snap.loaded;
     char icon[4];
     auto iconButton = [&](const char* id, std::uint16_t glyph, const char* tip, bool enabled, Rgba fill, Rgba text, float width) -> bool
@@ -1022,7 +1023,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     if (iconButton("restart", Glyph::Restart, T(Str::Restart), canTransport, Rgba{ 0, 0, 0, 0 }, Color::TextPrimary, ib)) Emit(theater_ui::restart);
     if (iconButton("prev", Glyph::StepBack, T(Str::StepBack), canTransport, Rgba{ 0, 0, 0, 0 }, Color::TextPrimary, ib)) Emit(theater_ui::previous);
     const bool playing = snap.phase == 2;
-    if (iconButton("play", Glyph::Play, T(Str::Play), canTransport && !playing, Color::AccentBlue, Color::TextOnAccent, Px(36, s))) Emit(theater_ui::play);
+    if (iconButton("play", playing ? Glyph::Pause : Glyph::Play, playing ? "Pause / Play-Pause hotkey" : T(Str::Play), canTransport, Color::AccentBlue, Color::TextOnAccent, Px(36, s))) Emit(theater_ui::toggle_playback);
     if (iconButton("stop", Glyph::Stop, "Stop / F6", f.hostLinked, Rgba{ 0, 0, 0, 0 }, Color::TextPrimary, ib)) Emit(theater_ui::stop);
     if (iconButton("next", Glyph::StepFwd, T(Str::StepForward), canTransport, Rgba{ 0, 0, 0, 0 }, Color::TextPrimary, ib)) Emit(theater_ui::next);
     x += Px(Space::MD, s);

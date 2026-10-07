@@ -127,7 +127,7 @@ namespace TheaterUI
     {
         inline constexpr std::uint16_t Scene = 0xE81E, Camera = 0xE714, Look = 0xE706, Replays = 0xE8B2,
             Export = 0xE898, Debug = 0xEBE8, Settings = 0xE713, HideUi = 0xE73F, ShowUi = 0xE740,
-            Play = 0xE768, Stop = 0xE71A, Restart = 0xE892, StepBack = 0xE76B, StepFwd = 0xE76C,
+            Play = 0xE768, Pause = 0xE769, Stop = 0xE71A, Restart = 0xE892, StepBack = 0xE76B, StepFwd = 0xE76C,
             Record = 0xE7C8, Person = 0xE77B, Flag = 0xE7C1, Globe = 0xE774, Warning = 0xE7BA;
     }
     // UTF-8 for a BMP code point; the buffer must hold 4 bytes.

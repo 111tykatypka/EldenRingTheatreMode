@@ -1,12 +1,12 @@
 //! World state for replays (Phase 2.1): in-game clock and event flags.
 //!
-//! - Time of day: WorldAreaTime.clock (FILETIME + packed date), sampled once a second. Playback sets
-//!   the recorded clock and holds time still (time_passage_multiplier 0), then restores both.
+//! - Time of day: WorldAreaTime.clock (FILETIME + packed date), sampled once a second. Playback
+//!   override is disabled pending save-isolation proof; read-only clock data remains available.
 //! - Event flags (doors, fog walls, bosses, graces, everything the game tracks): the whole flag memory
 //!   is copied once at the start of a recording and compared once a second; changes become events.
 //!   Playback can rebuild the flags at any time T (start copy + changes up to T). Writing them changes
-//!   save-relevant state, so restoring flags during playback is OFF unless the user enables it in
-//!   Settings; the player's own flags are put back afterwards either way.
+//!   save-relevant state. Replay flag writes are disabled until autosave isolation is verified;
+//!   the track is read-only even when an older settings file has its flag-override bit set.
 //! - Weather: not recorded or restored yet. The weather controller is not described by the pinned SDK;
 //!   reported as "not possible yet" until it is researched.
 use eldenring::cs::{CSEventFlagMan,WorldAreaTime};

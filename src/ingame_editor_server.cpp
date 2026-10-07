@@ -59,6 +59,7 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  default:break;}}
  const auto view=playback_view();const auto remote=app.control.state();theater_ui::Snapshot s;
  s.loaded=view.loaded;s.active=view.active;s.phase=static_cast<std::uint32_t>(view.phase);s.time_ns=view.state.timestamp_ns;s.duration_ns=view.summary.duration_ns;s.timescale=view.state.timescale;
+ s.application_requested=view.active;
  s.selected=app.selected_replay_actor;s.connected=remote.connected;s.player_found=remote.ready;std::copy(remote.live.position.begin(),remote.live.position.end(),s.live_position);
  auto diagnostic=game_launcher::utf8(view.diagnostic);memcpy(s.diagnostic,diagnostic.data(),std::min(diagnostic.size(),sizeof(s.diagnostic)-1));
  s.total=static_cast<std::uint32_t>(app.character_views.size());s.offset=std::min(offset,s.total);s.count=std::min(16u,s.total-s.offset);
@@ -81,8 +82,11 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  // Bone replay link: the loaded file and the timeline position in source-clock time. Each sample keeps
  // the source time it was recorded at, so pauses during recording map correctly.
  {std::lock_guard lock(app.replay_mutex);if(app.replay_player&&!app.opened_replay.empty()){
+  app.replay_player->advance();
+  ULONGLONG anchor=0;QueryInterruptTimePrecise(&anchor);s.master_clock_ns=anchor*100;
   copy(s.loaded_path,sizeof(s.loaded_path),game_launcher::utf8(app.opened_replay.wstring()));
   const auto& st=app.replay_player->state();s.host_playing=st.status==replay::Status::playing;
+  s.time_ns=st.timestamp_ns;s.timescale=st.timescale;
   if (!s.active) s.phase=s.host_playing?2u:(st.status==replay::Status::paused?3u:0u);
   try{const auto sample=app.replay_player->reader().sample(st.sample_index);s.play_source_ns=sample.source_time_ns+(st.timestamp_ns>sample.replay_time_ns?st.timestamp_ns-sample.replay_time_ns:0);}catch(...){s.play_source_ns=0;}}}
  {std::lock_guard lock(mutex);cached=s;}

@@ -17,7 +17,9 @@ inline constexpr std::uint32_t magic=0x37495554;
 // Version 7: explicit unload via the normal replay ownership path.
 // Version 8: shared expanded speed preset contract.
 // Version 9: continuous timescale, request value = IEEE-754 binary64 bits, no centi-speed quantization.
-inline constexpr std::uint32_t version=9;
+// Version 10: authoritative host clock anchor in shared QueryInterruptTimePrecise nanoseconds.
+// Version 11: explicit replay application ownership, independent from overlay visibility.
+inline constexpr std::uint32_t version=11;
 enum Command : std::uint32_t { poll, play, pause, stop, restart, seek, previous, next, timescale, select, page, record_start, record_stop, replay_page, replay_open,
  record_named,    // text = display name; starts recording with that name
  replay_sort,     // value = key*2 + descending; key: 0 date, 1 size, 2 name, 3 duration
@@ -55,7 +57,8 @@ struct Snapshot {std::uint32_t magic_value{magic},version{theater_ui::version},l
  char loaded_path[260]{};        // UTF-8 .erplay path of the loaded replay (empty when none)
  std::uint64_t play_source_ns{}; // timeline position in the recorder's source clock (the game's monotonic clock)
  std::uint32_t host_playing{};   // the host timeline is advancing
- std::uint32_t v5_reserved{};
+ std::uint32_t application_requested{};
+ std::uint64_t master_clock_ns{};
 };
 static_assert(sizeof(Request)==32+text_size);
 inline bool has_text(const Request&r){return r.text[0]!=0&&memchr(r.text,0,text_size)!=nullptr;}
