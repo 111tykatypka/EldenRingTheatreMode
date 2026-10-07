@@ -19,6 +19,9 @@
 // records and writes ChrIns.model_matrix (the final matrix the renderer uses, after easing and the
 // vertical offset), logs drawn vs recorded matrices once a second, and makes the player immune to
 // damage with gravity off while the replay owns the body.
+// Test 2 (Step1b) crashed the game right after F10 (access violation in eldenring.exe+0x41B050,
+// no diagnostics flushed). Step1c isolates it: model_matrix is only READ and logged (never written),
+// damage immunity and gravity stay; the first playback frames log each step before it happens.
 // Offsets stay in this file until Step 2 moves them into GameProfile.
 use std::ffi::{c_char,c_void,CString};
 use std::sync::Mutex;
@@ -65,7 +68,6 @@ fn ctrl(chr:usize)->usize{unsafe{&*(*(chr as *const ChrIns)).chr_ctrl as *const 
 fn matrix_address(chr:usize)->usize{let c=ctrl(chr) as *const eldenring::cs::ChrCtrl;unsafe{&raw const (*c).model_matrix as usize}}
 fn physics_matrix_address(chr:usize)->usize{let c=ctrl(chr) as *const eldenring::cs::ChrCtrl;unsafe{&raw const (*c).physics_model_matrix as usize}}
 fn read_matrix(a:usize)->[f32;16]{unsafe{std::ptr::read_volatile(a as *const [f32;16])}}
-fn write_matrix(chr:usize,m:&[f32;16]){unsafe{std::ptr::write_volatile(matrix_address(chr) as *mut [f32;16],*m)}}
 // ChrDebugFlags bit 3 = disabled_hit (ignore all incoming damage); CSChrPhysicsModule.gravity_disabled.
 fn flags_address(chr:usize)->usize{let c=chr as *const ChrIns;unsafe{&raw const (*c).debug_flags as usize}}
 fn gravity_address(chr:usize)->Option<usize>{let p=physics(chr)? as *const CSChrPhysicsModule;Some(unsafe{&raw const (*p).gravity_disabled as usize})}
@@ -99,7 +101,10 @@ fn stop_recording(s:&mut State){
 fn start_playback(s:&mut State,now:u64){
  let Some(chr)=player_chr() else {status("BONE REPLAY: player not ready");return;};
  s.saved=read_transform(chr);if s.saved.is_none(){status("BONE REPLAY: player not ready");return;}
+ let m=read_matrix(matrix_address(chr));
+ crate::log_game(&format!("BONE_REPLAY_STEP: before protect: debug_flags=0x{:X} model_matrix t=({:.2},{:.2},{:.2}) physics_pos=({:.2},{:.2},{:.2})",unsafe{std::ptr::read_volatile(flags_address(chr) as *const u32)},m[12],m[13],m[14],s.saved.unwrap()[2][0],s.saved.unwrap()[2][1],s.saved.unwrap()[2][2]));
  s.saved_flags=protect(chr);s.diag_second=u64::MAX;
+ crate::log_game("BONE_REPLAY_STEP: protection set (no damage, no gravity)");
  s.mode=Mode::Playing;s.start=now;s.written=None;s.writes=0;s.accuracy=Accuracy::default();
  unsafe{tm_render_lock_game_input(1)};
  crate::log_game(&format!("BONE_REPLAY: playback started; {} frames, {:.2} s; controls locked; return transform saved",s.frames.len(),duration(s)));
@@ -139,8 +144,11 @@ pub fn tick(group:usize,now:u64){
     let index=s.frames.partition_point(|f|f.time<=elapsed).saturating_sub(1);s.written=Some(index);
     let Some((local,model))=pose_arrays(chr) else {return;};let f=&s.frames[index];
     unsafe{std::ptr::copy_nonoverlapping(f.local.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(f.model.as_ptr(),model as *mut u8,POSE_BYTES);}
-    write_transform(chr,&f.transform);keep_protected(chr);s.writes+=1;}
-   else if group==KEYS_GROUP{if let Some(i)=s.written{write_transform(chr,&s.frames[i].transform);write_matrix(chr,&s.frames[i].matrix);}}
+    if s.writes<3{crate::log_game(&format!("BONE_REPLAY_STEP: write {} frame {index}: bones written, writing transform",s.writes));}
+    write_transform(chr,&f.transform);
+    if s.writes<3{crate::log_game("BONE_REPLAY_STEP: transform written, refreshing protection");}
+    keep_protected(chr);s.writes+=1;}
+   else if group==KEYS_GROUP{if let Some(i)=s.written{write_transform(chr,&s.frames[i].transform);}}
    else if group==DRAW_GROUP{
     let Some(i)=s.written else {return;};let f=&s.frames[i];
     let (Some((local,model)),Some(t))=(pose_arrays(chr),read_transform(chr)) else {return;};
@@ -149,7 +157,6 @@ pub fn tick(group:usize,now:u64){
     if second!=s.diag_second{s.diag_second=second;let pm=read_matrix(physics_matrix_address(chr));
      crate::log_game(&format!("BONE_REPLAY_DIAG: t={second}s frame={i} model_matrix drawn=({:.2},{:.2},{:.2}) recorded=({:.2},{:.2},{:.2}) physics_matrix=({:.2},{:.2},{:.2}) physics_pos=({:.2},{:.2},{:.2}) recorded_pos=({:.2},{:.2},{:.2})",
       drawn[12],drawn[13],drawn[14],f.matrix[12],f.matrix[13],f.matrix[14],pm[12],pm[13],pm[14],t[2][0],t[2][1],t[2][2],f.transform[2][0],f.transform[2][1],f.transform[2][2]));}
-    write_matrix(chr,&f.matrix);
     let (l,m)=(pose(local),pose(model));let a=&mut s.accuracy;a.frames+=1;
     if l==&f.local[..]&&m==&f.model[..]{a.exact_bones+=1;}else{a.max_bone_error=a.max_bone_error.max(max_float_error(l,&f.local)).max(max_float_error(m,&f.model));}
     let d=(0..3).map(|k|(t[2][k]-f.transform[2][k]).powi(2)).sum::<f32>().sqrt()*100.0;
