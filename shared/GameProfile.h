@@ -62,3 +62,18 @@ extern "C" __declspec(dllexport) uint32_t __cdecl tm_validate_profile(const wcha
 #define TM_VAL_GRACE_ID_BIAS 1000
 #define TM_OFF_LUA_EVENT_MAN_PROXY 0x8         /* CSLuaEventManImp -> CSLuaEventProxy (is_load_wait) */
 #define TM_OFF_LUA_EVENT_MAN_IMITATION 0x18    /* CSLuaEventManImp -> CSLuaEventScriptImitation */
+// Skeleton (hkaSkeleton via the pose importer). Bone count is read three ways (parent indices, bones,
+// reference pose) and only trusted when all three agree, which also checks these offsets at runtime.
+#define TM_OFF_POSE_IMPORTER_SKELETON 0x48     /* importer -> hkaSkeleton */
+#define TM_OFF_HKA_SKELETON_PARENTS 0x20       /* -> int16 parent index per bone */
+#define TM_OFF_HKA_SKELETON_PARENT_COUNT 0x28
+#define TM_OFF_HKA_SKELETON_BONE_COUNT 0x38
+#define TM_OFF_HKA_SKELETON_REFPOSE_COUNT 0x48
+// Structural guard for the debug flags: +0x530 must hold this callback (RVA) before +0x538 is written.
+#define TM_OFF_CHRINS_DEBUG_CALLBACK 0x530
+#define TM_VAL_CHRINS_DEBUG_CALLBACK_RVA 0x3F8FD0
+#define TM_VAL_DEBUG_FLAG_NO_MOVE 0x10
+#define TM_VAL_DEBUG_FLAG_NO_ATTACK 0x20
+// Recording radius for enemies/NPCs/bosses (metres) and the "near" distance for full-rate sampling.
+#define TM_VAL_ACTOR_RADIUS 100
+#define TM_VAL_ACTOR_NEAR 30

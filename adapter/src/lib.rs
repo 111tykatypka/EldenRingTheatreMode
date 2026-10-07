@@ -23,6 +23,7 @@ mod equipment;
 mod codec;
 mod world_file;
 mod world_state;
+mod actors;
 mod replay_interpolation;
 mod visual_capture;
 mod fidelity_capture;

@@ -59,3 +59,49 @@ Every claim below is "built and unit-tested" unless it says "confirmed in game".
 9. Record across a long run over the overworld (crossing map tiles) and play it: no jump or fall at tile borders.
 10. After playback ends (stop the timeline and close the overlay): your own equipment is back, controls work.
 Send the event log (Debug > Copy all) and %TEMP%\TheaterModeGame.log if anything looks wrong.
+
+## Phase 2: whole world (in progress; stopped here for testing)
+
+### What changed
+- **2.8 File and performance (core).** Recordings now stream to `<replay>.erplay.world`: one-second
+  chunks per track with a keyframe at each chunk start (any point seeks by decoding one chunk),
+  compact encoding (rotations as "smallest three", 0.01 mm translations, varint deltas, zero runs
+  packed, CRC per chunk). The game thread only queues data; a background thread writes, and a stalled
+  disk drops frames (counted in the log) instead of stuttering the game. No more 10-minute in-memory
+  buffer. The log reports MB per minute when a recording is saved. Older `.bones` replays still play.
+- **2.1 World.** Once a second: the in-game clock and every event flag change (full flag copy at the
+  start, then changes). Playback holds the recorded time of day and gives your own time back after.
+  Settings > Replay world > "Restore doors, fog walls and bosses as recorded" (off by default) also
+  sets the flags the recording changed to their value at the replay time and puts your own back
+  afterwards. Not 1:1 yet: weather (the weather controller isn't described by the game library we use;
+  needs research), and whether fog walls/doors visibly react to a flag change mid-scene is unverified.
+- **2.2 Enemies, NPCs, bosses** (approach (a), recommended in the thread): every character within
+  100 m gets a stable recording id (entity id, NpcParam, handle; never a pointer) and is recorded with
+  root, global position, HP and its full skeleton (bone count read from its own skeleton and only
+  trusted when three counts agree), every frame within 30 m and every 3rd frame beyond. On playback
+  each recorded character is matched to the live one (same entity id + NpcParam, or handle), held
+  with the game's own no-move/no-attack flags (written only after a structural check of the flag
+  word), gravity off, and driven with interpolated bones and root like your character. When playback
+  ends they get their flags and position back. Limits: characters that no longer exist (a defeated
+  boss) can't be shown; characters that appear later or died earlier aren't hidden yet (needs
+  spawned puppets, approach (b)). HP is recorded but not yet applied.
+
+### Test checklist (Phase 2 so far)
+1. Near a group of enemies, F5, fight for 20-30 s (kill one), F6. The event log / TheaterModeGame.log
+   says "WORLD_FILE: saved ... N actors ... MB per minute"; please send that line.
+2. Walk away a bit, load the replay and play: your character and the enemies repeat the fight;
+   live enemies don't attack you during playback. Scrub back and forth: everyone follows.
+3. Stop playback and close the overlay: enemies are back where they were and act normally again.
+4. Record across a dusk/dawn change (or wait a minute in-game), play it: the sky follows the
+   recording; after playback your own time of day is back.
+5. Optional: tick Settings > Replay world > Restore doors, fog walls and bosses, record opening a door
+   or a fog wall, then play it back from before that moment. Tell me what you see.
+6. FPS while recording and playing near many enemies: tell me if it drops.
+
+## Where work stopped (resume point)
+Done: Phase 1 (1.1-1.5), UI sounds, 2.8 core, 2.1, 2.2 (build P2b).
+Next, in order: 2.3 mounts and summons, 2.4 props, 2.5 projectiles/VFX/SFX, 2.6 events and params,
+2.7 timeline tracks (follow docs/theater-ui-v4 blueprint A.7, load card A.6), then Phase 3.1-3.4
+(cameras; CameraTools is a proprietary binary, behaviour reference only).
+Open questions in the thread: enemy approach (a) vs (b), .world file format (both proceeding on the
+recommended option).
