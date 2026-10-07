@@ -302,9 +302,13 @@ fn begin_arrival(s:&mut State,chr:usize){
  let here=arrival::place(chr);
  // Do not fast travel based on a chunk anchor mistaken for the player's position.
  if target.block!=-1&&!crate::replay_interpolation::same_root_space(target.origin,target.global,here.origin,here.global){
-  crate::log_game("ARRIVAL_ERROR: different coordinate origin; automatic travel disabled until root conversion is verified");
-  status("REPLAY BLOCKED: different coordinate origin. Automatic travel requires corrected location metadata.");
-  if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}return;
+  let live_root=read_transform(chr).map(|t|t[2]);
+  let recorded_root=loaded.store.get(i).map(|f|f.transform[2]);
+  crate::log_game(&format!("ARRIVAL_ORIGIN_MISMATCH: path={} source_ns={} sample={} recorded_block={} recorded_origin={} recorded_chunk={:?} recorded_root={:?} live_block={} live_origin={} live_chunk={:?} live_root={:?} origin_equal={} anchor_equal={}; playback retained, no guessed conversion",
+   loaded.path,t,i,target.block,target.origin,target.global,recorded_root,here.block,here.origin,here.global,live_root,
+   target.origin==here.origin,crate::replay_interpolation::same_root_space(0,target.global,0,here.global)));
+  status("REPLAY BLOCKED: saved coordinate frame differs from the live frame. Replay remains loaded; origin conversion is not verified. See ARRIVAL_ORIGIN_MISMATCH in game log.");
+  reject(s,chr,"recorded/live coordinate frame mismatch");return;
  }
  if target.block==-1{s.arrival=Arrival::Ready;crate::log_game("ARRIVAL: recording has no map data (older file); positions used as recorded");return;}
  crate::log_game(&format!("ARRIVAL: here {} {:?}, replay {} {:?}, distance {:.1} m",arrival::block_name(here.block),&here.global[..3],arrival::block_name(target.block),&target.global[..3],arrival::distance(here.global,target.global)));
@@ -409,6 +413,7 @@ pub fn tick(group:usize,now:u64){
      // Keep flag tracks read-only until a verified no-save/lifecycle contract exists.
      s.flags_saved=None;
      begin_arrival(s,chr);
+     if s.replay_blocked{s.host=(l.playing!=0,l.timescale,l.play_source_ns,l.received_ns);return;}
      let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
    else if !want&&s.owning{release(s,chr,if s.loaded.is_none(){"replay unloaded"}else{"timeline idle and overlay closed"});}

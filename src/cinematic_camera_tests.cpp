@@ -9,6 +9,14 @@
 #include <limits>
 void check(bool ok){if(!ok)throw std::runtime_error("cinematic check failed");}
 int main(){using namespace cinematic;
+ // Upright mouse look must not accumulate roll while yawing at a nonzero pitch.
+ {Quat q{0,0,0,1};q=*mouse_look(q,0,.6,0);
+  for(int i=0;i<5000;++i){q=*mouse_look(q,.003,(i%2?.001:-.001),0);
+   const double right_y=2*(q[0]*q[1]+q[3]*q[2]);check(std::abs(right_y)<1e-10);
+   double norm=0;for(double v:q)norm+=v*v;check(std::abs(norm-1)<1e-12);}
+  auto rolled=*mouse_look({0,0,0,1},0,0,.3);check(std::abs(rolled[2]-std::sin(.15))<1e-12);
+  check(!mouse_look(q,NAN,0,0));check(!mouse_look({0,0,0,0},0,0,0));
+ }
  {using namespace theater_hotkeys;std::array<std::uint32_t,static_cast<std::size_t>(Action::Count)> keys{};
   std::istringstream ok("THEATER_KEYBINDS_V1\ncycle_camera=119\n");check(DecodeBindings(ok,keys));check(keys[static_cast<std::size_t>(Action::CycleCamera)]==119);
   for(auto text:{"BAD\n","THEATER_KEYBINDS_V1\ncycle_camera=87\n","THEATER_KEYBINDS_V1\ncycle_camera=0\n","THEATER_KEYBINDS_V1\ncycle_camera=256\n","THEATER_KEYBINDS_V1\ncycle_camera=119xx\n","THEATER_KEYBINDS_V1\ncycle_camera=119\ncycle_camera=118\n","THEATER_KEYBINDS_V1\nunknown=119\n"}){auto saved=keys;std::istringstream bad(text);check(!DecodeBindings(bad,keys));check(keys==saved);}}

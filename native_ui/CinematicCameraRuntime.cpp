@@ -76,11 +76,11 @@ bool down(int key){return (GetAsyncKeyState(key)&0x8000)!=0;}
 bool held(theater_hotkeys::Action action){return down(theater_hotkeys::Key(action));}
 void move(double dt){
  if(ui_visible){mouse_x=0;mouse_y=0;velocity={};return;}
- auto turn=[&](int axis,double angle){cinematic::Quat q{0,0,0,std::cos(angle/2)};q[axis]=std::sin(angle/2);state.pose.orientation=*cinematic::normalized(product(state.pose.orientation,q));};
  using A=theater_hotkeys::Action;
- turn(1,(int(held(A::YawRight))-int(held(A::YawLeft)))*dt+std::clamp(mouse_x.exchange(0)*state.mouse_sensitivity,-.25,.25));
- turn(0,(int(held(A::PitchDown))-int(held(A::PitchUp)))*dt+std::clamp(mouse_y.exchange(0)*state.mouse_sensitivity,-.25,.25));
- turn(2,(int(held(A::RollRight))-int(held(A::RollLeft)))*dt);
+ const double yaw=(int(held(A::YawRight))-int(held(A::YawLeft)))*dt+std::clamp(mouse_x.exchange(0)*state.mouse_sensitivity,-.25,.25);
+ const double pitch=(int(held(A::PitchDown))-int(held(A::PitchUp)))*dt+std::clamp(mouse_y.exchange(0)*state.mouse_sensitivity,-.25,.25);
+ const double roll=(int(held(A::RollRight))-int(held(A::RollLeft)))*dt;
+ if(auto orientation=cinematic::mouse_look(state.pose.orientation,yaw,pitch,roll))state.pose.orientation=*orientation;
  float m[16];encode(state.pose,m);
  if(held(A::ResetRoll)){double horizontal=std::hypot(m[8],m[10]);if(horizontal>1e-5){
   theater_camera::Slot slot;std::copy(m,m+16,slot.matrix);slot.fov=1;slot.aspect=1;slot.near_plane=.1f;slot.far_plane=1000;

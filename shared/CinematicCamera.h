@@ -16,6 +16,15 @@ inline Vec mix(Vec a,Vec b,double u){return add(mul(a,1-u),mul(b,u));}
 inline double length(Vec v){return std::hypot(v[0],v[1],v[2]);}
 inline bool finite(Vec v){return std::all_of(v.begin(),v.end(),[](double x){return std::isfinite(x);});}
 inline std::optional<Quat> normalized(Quat q){double n=0;for(auto v:q){if(!std::isfinite(v))return {};n+=v*v;}if(!std::isfinite(n)||n<1e-12)return {};for(auto&v:q)v/=std::sqrt(n);return q;}
+// Mouse yaw uses world up. Pitch and deliberate roll use camera-local axes.
+// Post-multiplying yaw after pitch banks the horizon during ordinary mouse look.
+inline Quat compose(Quat a,Quat b){return {a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]};}
+inline std::optional<Quat> mouse_look(Quat orientation,double yaw,double pitch,double roll){
+ if(!std::isfinite(yaw)||!std::isfinite(pitch)||!std::isfinite(roll))return {};
+ auto unit=normalized(orientation);if(!unit)return {};
+ auto axis=[](int i,double angle){Quat q{0,0,0,std::cos(angle/2)};q[i]=std::sin(angle/2);return q;};
+ return normalized(compose(compose(compose(axis(1,yaw),*unit),axis(0,pitch)),axis(2,roll)));
+}
 inline Quat slerp(Quat a,Quat b,double t){double d=0;for(int i=0;i<4;++i)d+=a[i]*b[i];if(d<0){for(auto&v:b)v=-v;d=-d;}d=std::clamp(d,-1.,1.);
  double x=1-t,y=t;if(d<0.9995){double angle=std::acos(d),s=std::sin(angle);x=std::sin((1-t)*angle)/s;y=std::sin(t*angle)/s;}
  for(int i=0;i<4;++i)a[i]=a[i]*x+b[i]*y;return *normalized(a);}
