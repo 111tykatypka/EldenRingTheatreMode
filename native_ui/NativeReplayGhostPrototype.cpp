@@ -462,13 +462,15 @@ void animProbe6(U player){
 struct NameTable{U data{};int32_t size{};};
 NameTable findAnimationNames(U character){
  U setup=get<U>(character+0x90),charData=setup?get<U>(setup+0x48):0,strings=charData?get<U>(charData+0x98):0;
+ log("SPIKE4: setup=0x%llX(%s) charData=0x%llX(%s) strings=0x%llX(%s)",setup,rttiName(setup).c_str(),charData,rttiName(charData).c_str(),strings,rttiName(strings).c_str());
  NameTable best;if(!strings){log("SPIKE4: hkbCharacterStringData missing");return best;}
  for(U o=0x10;o<0x100;o+=0x10){U data=get<U>(strings+o);int32_t size=get<int32_t>(strings+o+8);
-  if(!pointerish(data)||size<=0||size>100000)continue;U first=get<U>(data);const auto t=pointerish(first)?asciiAt(first):std::string();
+  log("SPIKE4: strings+%llX data=0x%llX size=%d",o,data,size);
+  if(!pointerish(data)||size<=0||size>100000)continue;U first=get<U>(data)&~U(1);const auto t=pointerish(first)?asciiAt(first):std::string();
   log("SPIKE4: string array +%llX size=%d first=%s",o,size,t.c_str());if(size>best.size&&!t.empty())best={data,size};}
  return best;}
 int32_t findName(const NameTable& names,const char* needle){
- for(int32_t i=0;i<names.size;++i){U p=get<U>(names.data+size_t(i)*8);if(!pointerish(p))continue;if(asciiAt(p).find(needle)!=std::string::npos)return i;}return -1;}
+ for(int32_t i=0;i<names.size;++i){U p=get<U>(names.data+size_t(i)*8)&~U(1);if(!pointerish(p))continue;if(asciiAt(p).find(needle)!=std::string::npos)return i;}return -1;}
 void animSpike4(U player){
  tm_render_native_status("ANIM TEST 4 (F9): praying, then switching the prayer clip to the roll...");
  U modules=get<U>(player+layout[1]),behavior=get<U>(modules+layout[8]),event=get<U>(modules+layout[10]);
