@@ -15,6 +15,8 @@
 #include "TheaterLayout.h"
 #include "TheaterStrings.h"
 #include "CameraTelemetry.h"
+#include "CinematicCamera.h"
+#include "TheaterHotkeys.h"
 
 namespace TheaterUI
 {
@@ -52,6 +54,8 @@ namespace TheaterUI
 
         // Exposed for tests.
         UIState& State() { return ui_; }
+        // Render-thread only; window thread queues actions instead of editing UI state.
+        void CameraHotkey(theater_hotkeys::Action action);
         Lang     language = Lang::English;
 
     private:
@@ -77,6 +81,10 @@ namespace TheaterUI
         void SaveSettings() const;
 
         UIState ui_;
+        unsigned cameraSelection_ = 0; // selection, not native ownership
+        cinematic::Track dollyTrack_;
+        bool clearDollyDialog_ = false;
+        std::string cameraMessage_;
         ImFont* iconFont_ = nullptr;
         float   appliedScale_ = 0.0f;
         EmitFn  emit_ = nullptr;

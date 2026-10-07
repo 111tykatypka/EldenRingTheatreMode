@@ -15,6 +15,16 @@
 
 namespace TheaterUI
 {
+void Overlay::CameraHotkey(theater_hotkeys::Action action)
+{
+    ui_.activeTool=Tool::Camera;ui_.layout.panelOpen=true;
+    if(action==theater_hotkeys::Action::CycleCamera){
+        cameraSelection_=(cameraSelection_+1)%3;
+        cameraMessage_=cameraSelection_?"Selected mode unavailable: native camera backend is not verified. Default camera remains active.":"Default camera remains active.";
+    } else if(action==theater_hotkeys::Action::AddDollyKey){
+        cameraMessage_="Cannot add keyframe: a verified active camera transform and FOV are required. No key was added.";
+    } else if(action==theater_hotkeys::Action::ClearDollyKeys) clearDollyDialog_=true;
+}
 namespace
 {
     using namespace Theme;
@@ -535,6 +545,12 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     }
     case Tool::Camera:
     {
+        section("CAMERA SHORTCUTS");
+        const char* modes[]={"Default","Free (unavailable)","Dolly (unavailable)"};
+        ImGui::Text("Selection: %s | F3: cycle",modes[cameraSelection_]);
+        ImGui::TextWrapped("Active game camera: Default. K: add dolly key. L: delete all dolly keys with confirmation.");
+        ImGui::Text("Dolly keys: %zu",dollyTrack_.keys().size());
+        if(!cameraMessage_.empty())ImGui::TextWrapped("%s",cameraMessage_.c_str());
         section("NATIVE CAMERA DIAGNOSTICS");
         ImGui::TextWrapped("Read-only SDK candidates. Active camera ownership is not yet verified; Free and Dolly game control are unavailable.");
         bool probe=theater_camera::probe_enabled.load();
@@ -861,6 +877,15 @@ void Overlay::DrawLibrary(const OverlayFrame& f)
 
 void Overlay::DrawDialogs(const OverlayFrame& f)
 {
+    if(clearDollyDialog_){ImGui::OpenPopup("Delete all dolly keyframes?");clearDollyDialog_=false;}
+    if(ImGui::BeginPopupModal("Delete all dolly keyframes?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        ImGui::TextWrapped("Delete all %zu dolly keyframes? This cannot be undone.",dollyTrack_.keys().size());
+        ImGui::TextWrapped("The original gameplay recording will not be changed.");
+        if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape,false))ImGui::CloseCurrentPopup();
+        ImGui::SameLine();
+        if(ImGui::Button("Delete all")){dollyTrack_.replace({});cameraMessage_="All dolly keyframes deleted.";ImGui::CloseCurrentPopup();}
+        ImGui::EndPopup();
+    }
     const float s = ui_.rects.uiScale;
     const auto& snap = f.snapshot;
 

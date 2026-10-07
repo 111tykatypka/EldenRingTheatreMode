@@ -15,6 +15,9 @@ enum class Action : std::uint32_t {
     GhostCreateTest,     // F10: unused (native ghost retired; bone replays follow the timeline)
     GhostRemoveTest,     // F11: unused (was native ghost remove)
     AnimProbe,           // F9: unused (was research probes)
+    CycleCamera,
+    AddDollyKey,
+    ClearDollyKeys,
     Count
 };
 
@@ -36,6 +39,9 @@ inline constexpr Binding kDefaults[] = {
     { Action::GhostCreateTest, "ghost_create_test", "Unused (was ghost create)",   0x79 /*VK_F10*/,   Scope::GameWindow },
     { Action::GhostRemoveTest, "ghost_remove_test", "Unused (was ghost remove)",   0x7A /*VK_F11*/,   Scope::GameWindow },
     { Action::AnimProbe,       "anim_probe",        "Unused (was research probe)",    0x78 /*VK_F9*/,    Scope::GameWindow },
+    { Action::CycleCamera, "cycle_camera", "Cycle camera selection", 0x72 /*F3*/, Scope::GameWindow },
+    { Action::AddDollyKey, "add_dolly_key", "Add dolly keyframe", 0x4B /*K*/, Scope::GameWindow },
+    { Action::ClearDollyKeys, "clear_dolly_keys", "Delete all dolly keys (confirm)", 0x4C /*L*/, Scope::GameWindow },
 };
 static_assert(sizeof(kDefaults) / sizeof(kDefaults[0]) == static_cast<std::size_t>(Action::Count), "one row per action");
 

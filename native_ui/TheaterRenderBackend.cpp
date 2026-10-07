@@ -30,6 +30,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 std::mutex camera_mutex;
 theater_camera::Telemetry camera_snapshot;
+std::deque<theater_hotkeys::Action> camera_actions;
 using Present=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT);
 using Resize=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT,UINT,DXGI_FORMAT,UINT);
 using Create=HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*,IUnknown*,DXGI_SWAP_CHAIN_DESC*,IDXGISwapChain**);
@@ -155,6 +156,7 @@ public:
  TheaterUI::LayoutRects draw(){
   TheaterUI::OverlayFrame frame;{std::lock_guard lock(ipc);frame.snapshot=snapshot;}
   {std::lock_guard lock(camera_mutex);frame.camera=camera_snapshot;}
+  {std::lock_guard lock(camera_mutex);while(!camera_actions.empty()){overlay.CameraHotkey(camera_actions.front());camera_actions.pop_front();}}
   frame.hostLinked=host_linked.load();frame.visibility=TheaterUI::UiVisibility(visibility.load());
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
   {std::lock_guard lock(events_mutex);frame.events.assign(events.begin(),events.end());events.clear();}
@@ -219,6 +221,14 @@ LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
  // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
  using theater_hotkeys::Action;using theater_hotkeys::Key;
+ if((m==WM_KEYDOWN||m==WM_KEYUP)&&!b.text_input.load()){
+  for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys})if(w==Key(action)){
+   if(m==WM_KEYDOWN&&!(l&(1LL<<30))){
+    {std::lock_guard lock(camera_mutex);if(camera_actions.size()<32)camera_actions.push_back(action);}
+    b.set_visibility(TheaterUI::UiVisibility::Shown);
+   }return 0;
+  }
+ }
  if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==Key(Action::ToggleOverlay)&&!b.text_input.load()){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
  if(m==WM_KEYDOWN&&w==Key(Action::StopRecording)){b.command(theater_ui::stop);return 0;}
  if((m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR)&&w==Key(Action::TogglePlayback)&&b.owns_playback_key()&&!b.text_input.load()){
