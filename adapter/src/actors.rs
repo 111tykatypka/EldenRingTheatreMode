@@ -199,8 +199,8 @@ impl Recorder{
 pub enum Representation{Live,Puppet,Missing}
 struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,transform:Transform,puppet:bool,saved_1c5:u8}
 /// A puppet request in flight: the game's debug creator consumes it asynchronously.
-#[derive(Clone,Copy)]
-struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32}
+#[derive(Clone)]
+struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32,pos:[f32;3],before:HashSet<(usize,u64)>}
 pub struct Player{tracks:Vec<(ActorInfo,ActorTrack,Vec<i16>)>,controlled:HashMap<u32,Controlled>,next_match:u64,local:Vec<u8>,model:Vec<u8>,logged:bool,categories:HashMap<u32,u32>,warned:HashSet<u32>,skeletons:HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,
  meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>}
 const MAX_PUPPETS:usize=8;
@@ -236,21 +236,32 @@ impl Player{
   let prev_last=unsafe{(*creator).last_created_chr}.map(|p|p.as_ptr() as usize).unwrap_or(0);
   world.spawn_debug_character(&eldenring::cs::ChrDebugSpawnRequest{chr_id:m.character_id as i32,chara_init_param_id:-1,npc_param_id:m.npc_param,npc_think_param_id:m.think_param,event_entity_id:0,talk_id:0,is_player:false,pos_x:position[0],pos_y:position[1],pos_z:position[2]});
   let entry=self.tries.entry(info.id).or_insert((0,0));entry.0+=1;entry.1=now+5_000_000_000;
-  self.request=Some(Request{id:info.id,at:now,prev_last,npc_param:m.npc_param});
+  // Bodies that exist now; the creator's product is whatever new body shows up afterwards.
+  let before:HashSet<(usize,u64)>=live().into_iter().map(|a|(a,handle_of(unsafe{&*(a as *const ChrIns)}))).collect();
+  self.request=Some(Request{id:info.id,at:now,prev_last,npc_param:m.npc_param,pos:position,before});
   crate::log_game(&format!("PUPPET_REQUESTED: id={} chr=c{:04} npc_param={} think={} ({why}); entity id 0, so no map scripts, rewards or progression are tied to it",info.id,m.character_id,m.npc_param,m.think_param));}
  /// Looks for the body the creator made for the outstanding request and takes it over safely.
  fn poll_request(&mut self,now:u64){
-  let Some(r)=self.request else {return};
-  if now.saturating_sub(r.at)>3_000_000_000{crate::log_game(&format!("PUPPET_TIMEOUT: id={} no new character appeared within 3 s; no retry for 5 s",r.id));self.request=None;return;}
-  let Ok(world)=(unsafe{WorldChrMan::instance()}) else {return};
-  let creator=&*world.debug_chr_creator as *const eldenring::cs::CSDebugChrCreator;
-  let spawn=unsafe{&raw const (*creator).spawn as usize};if read_byte(spawn)!=0{return;} // still queued
-  let Some(last)=unsafe{(*creator).last_created_chr}.map(|p|p.as_ptr() as usize) else {return};
-  if last==r.prev_last||self.controlled.values().any(|c|c.chr==last){return;}
-  let live_now=live();if !live_now.contains(&last){return;}
+  let Some(r)=self.request.clone() else {return};
+  let live_now=live();
+  // The body the creator made: a body that did not exist at request time, same NpcParam, entity id 0 and
+  // near the requested spot. The creator's own last_created_chr is a hint only (it did not change in the
+  // field test: two enemies appeared and were never adopted because adoption waited for it).
+  let hint=unsafe{WorldChrMan::instance()}.ok().and_then(|w|w.debug_chr_creator.last_created_chr).map(|p|p.as_ptr() as usize).filter(|a|*a!=r.prev_last);
+  let mut candidates:Vec<usize>=live_now.iter().copied().filter(|a|{
+   let c=unsafe{&*(*a as *const ChrIns)};if c.field_ins_handle.is_empty()||self.controlled.values().any(|x|x.chr==*a){return false;}
+   if r.before.contains(&(*a,handle_of(c))){return false;}
+   let p=c.modules.physics.position;let d=((p.0-r.pos[0]).powi(2)+(p.1-r.pos[1]).powi(2)+(p.2-r.pos[2]).powi(2)).sqrt();
+   c.npc_param_id==r.npc_param&&c.event_entity_id==0&&d<8.0}).collect();
+  if candidates.is_empty(){if let Some(h)=hint{if live_now.contains(&h)&&!self.controlled.values().any(|x|x.chr==h)&&!r.before.contains(&(h,handle_of(unsafe{&*(h as *const ChrIns)}))){candidates.push(h);}}}
+  if candidates.is_empty(){
+   if now.saturating_sub(r.at)>6_000_000_000{
+    let new_bodies:Vec<String>=live_now.iter().filter(|a|!r.before.contains(&(**a,handle_of(unsafe{&*(**a as *const ChrIns)})))).map(|a|{let c=unsafe{&*(*a as *const ChrIns)};format!("npc_param={} entity={}",c.npc_param_id,c.event_entity_id)}).collect();
+    crate::log_game(&format!("PUPPET_TIMEOUT: id={} no matching new body within 6 s (new bodies seen: {new_bodies:?}); no retry for 5 s",r.id));self.request=None;}
+   return;}
+  if candidates.len()>1{crate::log_game(&format!("PUPPET_AMBIGUOUS: id={} {} new bodies match; taking the first",r.id,candidates.len()));}
+  let last=candidates[0];
   let c=unsafe{&*(last as *const ChrIns)};
-  if c.npc_param_id!=r.npc_param||c.field_ins_handle.is_empty()||c.event_entity_id!=0{
-   crate::log_game(&format!("PUPPET_REJECTED: id={} created body does not match the request (npc_param {} vs {}, entity {})",r.id,c.npc_param_id,r.npc_param,c.event_entity_id));self.request=None;return;}
   let (Some(transform),Some(flags),Some(gravity))=(read_transform(last),debug_flags(last).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)}),gravity_flag(last).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1)) else {
    crate::log_game(&format!("PUPPET_REJECTED: id={} control flags could not be validated; the body is left alone",r.id));self.request=None;return;};
   // Safety first: invincible (it cannot be killed, so it cannot reward), rewards already marked as given.
