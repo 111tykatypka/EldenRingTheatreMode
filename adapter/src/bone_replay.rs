@@ -39,6 +39,7 @@ fn interpolated_pose_enabled()->bool {
 }
 use crate::game_profile as profile;
 use crate::arrival::{self,Place};
+use crate::equipment::{self,Equip};
 const POSE_IMPORTER:usize=profile::OFF_CHRINS_POSE_IMPORTER;
 const LOCAL_POSE:usize=profile::OFF_POSE_IMPORTER_LOCAL;
 const MODEL_POSE:usize=profile::OFF_POSE_IMPORTER_MODEL;
@@ -50,10 +51,12 @@ const WRITE_GROUP:usize=2;
 const DRAW_GROUP:usize=4;
 const RESTORE_FRAMES:u32=10;
 const MAGIC:&[u8;8]=b"ERBONES1";
-const FILE_VERSION:u32=2;
+const FILE_VERSION:u32=3;
 const FRAME_BYTES_V1:usize=8+48+64+POSE_BYTES*2;
 // Version 2 adds where the frame was: block id, origin block, global (chunk) position.
-const FRAME_BYTES:usize=FRAME_BYTES_V1+24;
+const FRAME_BYTES_V2:usize=FRAME_BYTES_V1+24;
+// Version 3 adds the render equipment assembly (arm style, active slots, handles, param ids).
+const FRAME_BYTES:usize=FRAME_BYTES_V2+equipment::BYTES;
 // theater_ui::RecordingState
 const RECORD_RECORDING:u32=1;
 const RECORD_PAUSED:u32=2;
@@ -63,7 +66,7 @@ unsafe extern "C"{fn tm_render_event(text:*const c_char);fn tm_render_lock_game_
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
 // place.block == -1: recorded before map data existed (file version 1); positions are used as recorded.
-struct Frame{time:u64,transform:Transform,matrix:[f32;16],local:Vec<u8>,model:Vec<u8>,place:Place}
+struct Frame{time:u64,transform:Transform,matrix:[f32;16],local:Vec<u8>,model:Vec<u8>,place:Place,equip:Equip}
 #[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_drawn_cm:f32,sum_drawn_cm:f64}
 struct Loaded{path:String,frames:Arc<Vec<Frame>>,parents:Arc<Vec<i16>>}
 #[derive(PartialEq)]enum Loading{None,Busy(String),Missing(String),Failed(String)}
@@ -79,9 +82,12 @@ struct State{
  // Phase 1.4 arrival: how the body gets to the recorded place before the replay plays, and the
  // shift from recorded physics space to today's physics space for this frame.
  arrival:Arrival,warped:bool,shift:[f32;3],expected_global:Option<[f32;4]>,
+ // Phase 1.5: the player's own equipment assembly while the replay owns the body, and how often the
+ // game replaced the written one before drawing (diagnostic).
+ equip_saved:Option<Equip>,equip_written:Option<Equip>,equip_lost:u64,equip_frames:u64,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),clock_t:0.0,clock_at:0,clock_valid:false,arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_global:None});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),clock_t:0.0,clock_at:0,clock_valid:false,arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_global:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -113,14 +119,16 @@ fn bones_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.bones"))}
 
 // File: "ERBONES1", u32 version, u32 bone count, u32 frame bytes, u32 reserved, u64 frame count,
 // then per frame: u64 source time (game monotonic ns), 12 f32 transform, 16 f32 model matrix,
-// local pose, model pose, and (version 2) i32 block, i32 origin block, 4 f32 global position.
+// local pose, model pose, (version 2) i32 block, i32 origin block, 4 f32 global position, and
+// (version 3) the equipment assembly (see equipment.rs).
 // Written to .tmp and renamed, so a crash never leaves a half file. Version 1 files still load.
 fn save(path:PathBuf,frames:Vec<Frame>)->std::io::Result<u64>{
  let tmp=path.with_extension("bones.tmp");
  {let mut f=std::io::BufWriter::new(std::fs::File::create(&tmp)?);
   f.write_all(MAGIC)?;for v in [FILE_VERSION,BONES as u32,FRAME_BYTES as u32,0]{f.write_all(&v.to_le_bytes())?;}f.write_all(&(frames.len() as u64).to_le_bytes())?;
   for fr in &frames{f.write_all(&fr.time.to_le_bytes())?;for v in fr.transform.iter().flatten().chain(fr.matrix.iter()){f.write_all(&v.to_le_bytes())?;}f.write_all(&fr.local)?;f.write_all(&fr.model)?;
-   f.write_all(&fr.place.block.to_le_bytes())?;f.write_all(&fr.place.origin.to_le_bytes())?;for v in fr.place.global{f.write_all(&v.to_le_bytes())?;}}
+   f.write_all(&fr.place.block.to_le_bytes())?;f.write_all(&fr.place.origin.to_le_bytes())?;for v in fr.place.global{f.write_all(&v.to_le_bytes())?;}
+   let mut e=Vec::with_capacity(equipment::BYTES);fr.equip.encode(&mut e);f.write_all(&e)?;}
   f.flush()?;f.get_ref().sync_all()?;}
  std::fs::rename(&tmp,&path)?;Ok(std::fs::metadata(&path)?.len())}
 fn load(path:&PathBuf)->Result<Vec<Frame>,String>{
@@ -128,17 +136,18 @@ fn load(path:&PathBuf)->Result<Vec<Frame>,String>{
  if data.len()<32||&data[0..8]!=MAGIC{return Err("not a bone replay file".into());}
  let u32_at=|i:usize|u32::from_le_bytes(data[i..i+4].try_into().unwrap());
  let (version,stride)=(u32_at(8),u32_at(16) as usize);
- if !((version==1&&stride==FRAME_BYTES_V1)||(version==2&&stride==FRAME_BYTES))||u32_at(12)!=BONES as u32{return Err(format!("unsupported version {version} / bones {} / frame size {stride}",u32_at(12)));}
+ if !((version==1&&stride==FRAME_BYTES_V1)||(version==2&&stride==FRAME_BYTES_V2)||(version==3&&stride==FRAME_BYTES))||u32_at(12)!=BONES as u32{return Err(format!("unsupported version {version} / bones {} / frame size {stride}",u32_at(12)));}
  let count=u64::from_le_bytes(data[24..32].try_into().unwrap()) as usize;
  if count==0||data.len()!=32+count*stride{return Err(format!("size {} does not match {count} frames",data.len()));}
  let f32_at=|i:usize|f32::from_le_bytes(data[i..i+4].try_into().unwrap());
  let i32_at=|i:usize|i32::from_le_bytes(data[i..i+4].try_into().unwrap());
  let frames=(0..count).map(|k|{let o=32+k*stride;
   let p=o+FRAME_BYTES_V1;
+  let equip=if version>=3{Equip::decode(&data[o+FRAME_BYTES_V2..o+FRAME_BYTES])}else{Equip::default()};
   let place=if version>=2{Place{block:i32_at(p),origin:i32_at(p+4),global:std::array::from_fn(|i|f32_at(p+8+i*4))}}else{Place{block:-1,origin:-1,global:[0.0;4]}};
   let transform=std::array::from_fn(|r|std::array::from_fn(|c|f32_at(o+8+(r*4+c)*4)));
   let matrix=std::array::from_fn(|i|f32_at(o+56+i*4));
-  Frame{time:u64::from_le_bytes(data[o..o+8].try_into().unwrap()),transform,matrix,local:data[o+120..o+120+POSE_BYTES].to_vec(),model:data[o+120+POSE_BYTES..o+FRAME_BYTES_V1].to_vec(),place}}).collect::<Vec<_>>();
+  Frame{time:u64::from_le_bytes(data[o..o+8].try_into().unwrap()),transform,matrix,local:data[o+120..o+120+POSE_BYTES].to_vec(),model:data[o+120+POSE_BYTES..o+FRAME_BYTES_V1].to_vec(),place,equip}}).collect::<Vec<_>>();
  if frames.windows(2).any(|w|w[1].time<w[0].time){return Err("frame times go backwards".into());}
  Ok(frames)}
 
@@ -229,7 +238,9 @@ fn release(s:&mut State,chr:usize,reason:&str){
   a.frames,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64),s.fallback_bones));
  // After a grace warp the saved spot is in another map; the player stays where the replay was.
  if s.warped{s.saved=None;status("BONE REPLAY: you stay at the replay's location (the replay travelled there by grace warp)");}
- if let Some(t)=s.saved{write_transform(chr,&t);}}
+ if let Some(t)=s.saved{write_transform(chr,&t);}
+ if s.equip_frames>0{crate::log_game(&format!("EQUIPMENT: written {} frames; the game replaced it before drawing on {} of them",s.equip_frames,s.equip_lost));}
+ if let Some(e)=s.equip_saved.take(){if equipment::write(chr,&e){crate::log_game("EQUIPMENT: your own equipment restored");}}}
 
 // Phase 1.4: decide how to reach the recorded place when the replay takes the body.
 fn begin_arrival(s:&mut State,chr:usize){
@@ -301,6 +312,7 @@ pub fn tick(group:usize,now:u64){
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){
      s.owning=true;s.written=None;s.evaluated_root=None;s.clock_valid=false;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;s.warped=false;
+     s.equip_saved=equipment::read(chr);s.equip_written=None;s.equip_lost=0;s.equip_frames=0;
      begin_arrival(s,chr);
      let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
@@ -318,7 +330,7 @@ pub fn tick(group:usize,now:u64){
  if group==DRAW_GROUP&&!s.record_paused&&s.last_second!=u64::MAX{
   if let Some((_,frames))=&mut s.recording{
    let (Some((local,model)),Some(transform))=(pose_arrays(chr),read_transform(chr)) else {return;};
-   frames.push(Frame{time:now,transform,matrix:read_matrix(matrix_address(chr)),local:pose(local).to_vec(),model:pose(model).to_vec(),place:arrival::place(chr)});}}
+   frames.push(Frame{time:now,transform,matrix:read_matrix(matrix_address(chr)),local:pose(local).to_vec(),model:pose(model).to_vec(),place:arrival::place(chr),equip:equipment::read(chr).unwrap_or_default()});}}
  if !s.owning{return;}
  match group{
   WRITE_GROUP=>{
@@ -331,6 +343,9 @@ pub fn tick(group:usize,now:u64){
    let (Some(i),Some(loaded))=(s.written,&s.loaded) else {return;};let f=&loaded.frames[i];
    let next=&loaded.frames[(i+1).min(loaded.frames.len()-1)];
    let alpha=if interpolated_pose_enabled(){s.pose_alpha}else{0.0};
+   // Equipment first (grip, active slots, pieces), then the pose: the frame's full state, so scrubbing
+   // backwards across a weapon swap reverts it.
+   s.equip_written=if f.equip.recorded()&&equipment::write(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}else{None};
    // Bones whose interpolation is invalid keep the earlier recorded frame instead of dropping the replay.
    // Local pose is interpolated per bone; model space is rebuilt from it through the learned hierarchy.
    let Some(l)=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out) else {release(s,chr,"pose size or time invalid");return;};
@@ -340,6 +355,7 @@ pub fn tick(group:usize,now:u64){
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);}
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
+   if let Some(e)=s.equip_written{if equipment::read(chr)!=Some(e){s.equip_lost+=1;}}
    if s.settle>0{s.settle-=1;return;}
    let a=&mut s.accuracy;a.frames+=1;if pose(local)==&s.local_out[..]&&pose(model)==&s.model_out[..]{a.exact_bones+=1;}
    let d=(0..3).map(|k|(drawn[12+k]-s.expected[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(d);a.sum_drawn_cm+=d as f64;}

@@ -19,6 +19,7 @@ mod player_action;
 mod character_capture;
 mod bone_replay;
 mod arrival;
+mod equipment;
 mod replay_interpolation;
 mod visual_capture;
 mod fidelity_capture;
