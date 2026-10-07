@@ -334,7 +334,7 @@ void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
    U items[16];if(!read(v,items,sizeof(items)))continue;for(U it:items)if(pointerish(it))consider(it);
   }}
  log("ANIM_PROBE: %zu Havok objects visited, %zu hkbClipGenerator found",seen.size(),clips.size());
- constexpr int samples=30;constexpr size_t words=0x140/4;
+ constexpr int samples=30;constexpr size_t words=0x400/4; // whole clip generator incl. internal state
  std::vector<std::vector<float>> series(clips.size(),std::vector<float>(samples*words));
  std::vector<std::array<float,4>> tae(samples);
  for(int i=0;i<samples;++i){
@@ -351,10 +351,13 @@ void animProbe(U player,U modulesOffset,U behaviorOffset,U timeActOffset) {
   log("ANIM_PROBE: ACTIVE clip @0x%llX name %s",clips[c],clipName(clips[c]).c_str());
   for(size_t w=0;w<words;++w){float first=series[c][w];bool changes=false,ok=true;
    for(int i=0;i<samples;++i){float v=series[c][i*words+w];if(!std::isfinite(v)||std::fabs(v)>1e6f){ok=false;break;}if(v!=first)changes=true;}
-   if(!ok||!changes)continue;int n=snprintf(line,sizeof(line),"ANIM_PROBE:   +%zX:",w*4);
+   if(!ok||!changes)continue;
+   int up=0;float lo=1e9f,hi=-1e9f;for(int i=0;i<samples;++i){float v=series[c][i*words+w];lo=std::min(lo,v);hi=std::max(hi,v);if(i&&v>series[c][(i-1)*words+w])++up;}
+   const bool timeLike=lo>=-0.001f&&hi<=30.f&&up>=samples/3;
+   if(!timeLike)continue;int n=snprintf(line,sizeof(line),"ANIM_PROBE:   TIME? +%zX:",w*4);
    for(int i=0;i<samples&&n<int(sizeof(line))-16;++i)n+=snprintf(line+n,sizeof(line)-n," %.3f",series[c][i*words+w]);log("%s",line);}
   // Static words (first sample) for field identification: hex, 0x30..0x140
-  int n=snprintf(line,sizeof(line),"ANIM_PROBE:   static:");for(size_t w=0x30/4;w<words&&n<int(sizeof(line))-24;++w){uint32_t u;memcpy(&u,&series[c][w],4);n+=snprintf(line+n,sizeof(line)-n," %zX=%08X",w*4,u);}log("%s",line);
+  int n=snprintf(line,sizeof(line),"ANIM_PROBE:   static:");for(size_t w=0x140/4;w<0x240/4&&n<int(sizeof(line))-24;++w){uint32_t u;memcpy(&u,&series[c][w],4);n+=snprintf(line+n,sizeof(line)-n," %zX=%08X",w*4,u);}log("%s",line);
  }
  log("ANIM_PROBE: done; %u active clips",active);
  {char hud[160];snprintf(hud,sizeof(hud),"ANIM PROBE (F9): done, %zu clips found, %u active. You can press F9 again.",clips.size(),active);tm_render_native_status(hud);}
