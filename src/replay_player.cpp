@@ -1,5 +1,5 @@
 #include "replay_player.hpp"
-#include "../shared/PlaybackSpeeds.h"
+#include "../shared/TheaterTimescale.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -83,27 +83,28 @@ void Player::update_state() {
     previous_action_clock_=clock_ns_;
 }
 void Player::play(Clock::time_point now) {
-    if(clock_ns_>=summary().duration_ns)clock_ns_=0;
+    if(clock_ns_>=summary().duration_ns){clock_ns_=0;fractional_ns_=0;}
     anchor_=now; state_.status=Status::playing; update_state();
 }
 void Player::pause(Clock::time_point now) { if(state_.status==Status::playing){advance(now);if(state_.status==Status::playing)state_.status=Status::paused;} }
-void Player::stop(){action_cursor_valid_=false;clock_ns_=0;state_.status=Status::stopped;update_state();}
-void Player::restart(Clock::time_point now){action_cursor_valid_=false;clock_ns_=0;anchor_=now;state_.status=Status::playing;update_state();}
-void Player::set_speed(double speed,Clock::time_point now) {
-    if(!theater_speed::valid(speed))throw std::invalid_argument("unsupported replay speed");
-    const auto was=state_.status==Status::playing;if(was)advance(now);state_.speed=speed;if(was)anchor_=now;
+void Player::stop(){action_cursor_valid_=false;clock_ns_=0;fractional_ns_=0;state_.status=Status::stopped;update_state();}
+void Player::restart(Clock::time_point now){action_cursor_valid_=false;clock_ns_=0;fractional_ns_=0;anchor_=now;state_.status=Status::playing;update_state();}
+void Player::set_timescale(double value,Clock::time_point now) {
+    if(!theater_timescale::valid(value))throw std::invalid_argument("invalid Theater timescale");
+    const auto was=state_.status==Status::playing;if(was)advance(now);state_.timescale=value;if(was)anchor_=now;
 }
-void Player::seek(std::uint64_t t) {action_cursor_valid_=false;state_.status=Status::seeking;clock_ns_=std::min(t,summary().duration_ns);update_state();state_.status=Status::paused;}
+void Player::seek(std::uint64_t t) {action_cursor_valid_=false;state_.status=Status::seeking;clock_ns_=std::min(t,summary().duration_ns);fractional_ns_=0;update_state();state_.status=Status::paused;}
 void Player::step(int direction) {
-    if(direction==0)return;state_.status=Status::paused;
+    if(direction==0)return;state_.status=Status::paused;fractional_ns_=0;
     if(direction>0&&state_.sample_index+1<summary().sample_count)clock_ns_=reader_->sample(state_.sample_index+1).replay_time_ns;
     else if(direction<0&&state_.sample_index>0)clock_ns_=reader_->sample(state_.sample_index-1).replay_time_ns;
     update_state();
 }
 void Player::advance(Clock::time_point now) {
     if(state_.status!=Status::playing)return;
-    const long double delta=static_cast<long double>(ns_between(anchor_,now))*state_.speed;
+    const long double delta=static_cast<long double>(ns_between(anchor_,now))*state_.timescale+fractional_ns_;
     const auto scaled=delta>=static_cast<long double>(UINT64_MAX)?UINT64_MAX:static_cast<std::uint64_t>(delta);
+    fractional_ns_=delta>=static_cast<long double>(UINT64_MAX)?0:delta-static_cast<long double>(scaled);
     clock_ns_=scaled>summary().duration_ns-clock_ns_?summary().duration_ns:clock_ns_+scaled;anchor_=now;update_state();
     if(clock_ns_>=summary().duration_ns)state_.status=Status::paused;
 }

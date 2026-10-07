@@ -34,6 +34,7 @@ mod native_ghost_prototype;
 mod ghost_appearance;
 mod bone_replay;
 mod timescale;
+mod replay_interpolation;
 mod actor_replay;
 mod visual_capture;
 mod fidelity_capture;

@@ -23,8 +23,6 @@ namespace
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking |
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 
-    constexpr auto& kSpeeds = theater_speed::presets;
-    constexpr auto& kSpeedLabels = theater_speed::labels;
     constexpr size_t kMaxLog = 400;
 
     void FormatTime(double seconds, char* out, size_t n)
@@ -220,7 +218,8 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         navigatorGrab_ = 0;
         selectedReplay_ = -1;
         pendingDialog_ = 0;
-        pendingSpeed_ = -1;
+        pendingTimescale_ = 0;
+        timescaleInput_[0] = 0;
     }
     ImGuiIO& io = ImGui::GetIO();
     ui_.visibility = f.visibility;
@@ -994,32 +993,64 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     x += dsz.x + Px(Space::LG, s);
     ImGui::PopFont();
 
-    // Speed.
-    int selected = 5;
-    for (int i = 0; i < (int)kSpeeds.size(); ++i)
-        if (std::fabs(snap.playback_speed * 100.0 - (double)kSpeeds[i]) < 0.5) selected = i;
-    if (pendingSpeed_ == selected || f.now - speedSentAt_ > 1.0) pendingSpeed_ = -1;
-    if (pendingSpeed_ >= 0) selected = pendingSpeed_;
-    ImGui::SetCursorScreenPos(ImVec2(x, o.y + (height - ImGui::GetFrameHeight()) * 0.5f));
-    ImGui::SetNextItemWidth(Px(84, s));
+    // One continuous timescale; the host owns the value and clock. UI time is unscaled.
+    double value = snap.timescale;
+    if (pendingTimescale_ == value || f.now - timescaleSentAt_ > 1.0) pendingTimescale_ = 0;
+    if (pendingTimescale_ > 0) value = pendingTimescale_;
+    const float controlY = o.y + (height - ImGui::GetFrameHeight()) * 0.5f;
+    ImGui::SetCursorScreenPos(ImVec2(x, controlY));
     ImGui::BeginDisabled(!canTransport);
-    bool changed = ImGui::Combo("##speed", &selected, kSpeedLabels.data(), (int)kSpeedLabels.size());
-    if (canTransport && ImGui::IsItemHovered())
+    ImGui::TextUnformatted("Timescale");
+    ImGui::SameLine(0, Px(6,s));
+    const float sliderWidth = std::clamp(w - (x-o.x) - Px(400,s), Px(45,s), Px(160,s));
+    const ImVec2 sliderMin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##timescale_slider", ImVec2(sliderWidth, ImGui::GetFrameHeight()));
+    const bool sliderHovered = ImGui::IsItemHovered(), sliderActive = ImGui::IsItemActive();
+    const double previousValue = value;
+    bool changed = false;
+    auto& io = ImGui::GetIO();
+    const double precision = io.KeyCtrl ? 0.002 : io.KeyShift ? 0.02 : 1.0;
+    if (canTransport && sliderActive)
+    {
+        if (ImGui::IsItemActivated() && !io.KeyShift && !io.KeyCtrl)
+            value = theater_timescale::from_normalized((io.MousePos.x-sliderMin.x)/sliderWidth);
+        else if (io.MouseDelta.x != 0)
+            value = theater_timescale::adjust(value, io.MouseDelta.x/sliderWidth * precision);
+        changed = true;
+    }
+    const float cy = sliderMin.y + ImGui::GetFrameHeight()*0.5f;
+    dl->AddLine(ImVec2(sliderMin.x,cy), ImVec2(sliderMin.x+sliderWidth,cy), Color::TextMuted.U32(), Px(3,s));
+    const float normalX = sliderMin.x + sliderWidth * (float)theater_timescale::normalized(1.0);
+    dl->AddLine(ImVec2(normalX,cy-Px(6,s)),ImVec2(normalX,cy+Px(6,s)),Color::AccentAmber.U32(),Px(1,s));
+    const float knobX=sliderMin.x+sliderWidth*(float)theater_timescale::normalized(value);
+    dl->AddCircleFilled(ImVec2(knobX,cy),Px(5,s),Color::AccentBlue.U32());
+    if (sliderHovered) ImGui::SetTooltip("Logarithmic timescale. Shift: 2%% precision; Ctrl: 0.2%%. Wheel adjusts; right/middle click resets to 1.000x. Tick = native speed.");
+    ImGui::SameLine(0,Px(6,s));
+    if (timescaleInput_[0]==0) theater_timescale::format(value,timescaleInput_,sizeof(timescaleInput_));
+    ImGui::SetNextItemWidth(Px(98,s));
+    if (ImGui::InputText("##timescale_exact",timescaleInput_,sizeof(timescaleInput_),ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        double parsed=0;
+        timescaleInputInvalid_=!theater_timescale::parse(timescaleInput_,parsed);
+        if (!timescaleInputInvalid_) {value=parsed;changed=true;}
+    }
+    const bool inputHovered=ImGui::IsItemHovered(), inputActive=ImGui::IsItemActive();
+    if (timescaleInputInvalid_ && inputHovered) ImGui::SetTooltip("Enter a finite positive value, optionally ending in x. Range: 0.001x to 10.000x.");
+    if (canTransport && (sliderHovered||inputHovered))
     {
         ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
-        const float wheel = ImGui::GetIO().MouseWheel;
-        if (wheel != 0)
-        {
-            const int steps = std::max(1, (int)std::ceil(std::fabs(wheel)));
-            const int next = std::clamp(selected + (wheel > 0 ? steps : -steps), 0, (int)kSpeeds.size() - 1);
-            changed = changed || next != selected;
-            selected = next;
-            ImGui::GetIO().MouseWheel = 0; // consumed by this control, not the timeline below it
-        }
+        if (io.MouseWheel!=0) {value=theater_timescale::adjust(value,io.MouseWheel*0.025*precision);changed=true;io.MouseWheel=0;}
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)||ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {value=1.0;changed=true;timescaleInputInvalid_=false;}
     }
-    if (changed) { pendingSpeed_ = selected; speedSentAt_ = f.now; Emit(theater_ui::speed, kSpeeds[selected]); }
+    if (changed && value != previousValue)
+    {
+        pendingTimescale_=value;timescaleSentAt_=f.now;
+        Emit(theater_ui::timescale,theater_timescale::encode(value));
+        theater_timescale::format(value,timescaleInput_,sizeof(timescaleInput_));
+    }
+    else if (!inputActive) theater_timescale::format(value,timescaleInput_,sizeof(timescaleInput_));
     ImGui::EndDisabled();
-    Tooltip(T(Str::Speed));
 
     // Right side: Record, then Hide UI.
     const bool rec = IsRecording(snap);

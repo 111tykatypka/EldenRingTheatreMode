@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <cmath>
 #include <cstring>
-#include "PlaybackSpeeds.h"
+#include "TheaterTimescale.h"
 namespace theater_ui {
 inline constexpr wchar_t pipe[]=L"\\\\.\\pipe\\EldenRingTheaterMode_1_17_Editor";
 inline constexpr std::uint32_t magic=0x37495554;
@@ -16,8 +16,9 @@ inline constexpr std::uint32_t magic=0x37495554;
 // Version 6: atomic host-side timeline toggle (bone replay does not use the legacy phase).
 // Version 7: explicit unload via the normal replay ownership path.
 // Version 8: shared expanded speed preset contract.
-inline constexpr std::uint32_t version=8;
-enum Command : std::uint32_t { poll, play, pause, stop, restart, seek, previous, next, speed, select, page, record_start, record_stop, replay_page, replay_open,
+// Version 9: continuous timescale, request value = IEEE-754 binary64 bits, no centi-speed quantization.
+inline constexpr std::uint32_t version=9;
+enum Command : std::uint32_t { poll, play, pause, stop, restart, seek, previous, next, timescale, select, page, record_start, record_stop, replay_page, replay_open,
  record_named,    // text = display name; starts recording with that name
  replay_sort,     // value = key*2 + descending; key: 0 date, 1 size, 2 name, 3 duration
  replay_rename,   // value = library index, text = new display name
@@ -38,7 +39,7 @@ struct Replay {char name[96]{};std::uint64_t duration_ns{},bytes{},modified_unix
  std::uint64_t recorded_unix{};char file[96]{};char game_version[16]{};char area[48]{};};
 // Bounded page sizes are transport resource bounds, not actor or replay count limits.
 struct Snapshot {std::uint32_t magic_value{magic},version{theater_ui::version},loaded{},active{},phase{},count{},offset{},total{};
- std::uint64_t sequence{},time_ns{},duration_ns{},selected{};double playback_speed{1};
+ std::uint64_t sequence{},time_ns{},duration_ns{},selected{};double timescale{1};
  float live_position[3]{};std::uint32_t connected{},player_found{};char diagnostic[256]{};Actor actors[16]{};
  std::uint32_t recording_state{record_idle},recording_reserved{};std::uint64_t recording_ns{},recording_samples{};
  std::uint32_t replay_count{},replay_offset{},replay_total{},replay_reserved{};Replay replays[replay_page_size]{};
@@ -61,7 +62,7 @@ inline bool has_text(const Request&r){return r.text[0]!=0&&memchr(r.text,0,text_
 inline bool valid(const Request&r,std::uint64_t last){
  if(r.magic_value!=magic||r.version!=version||r.reserved||!r.sequence||r.sequence<=last||r.command>=command_count)return false;
  if(!memchr(r.text,0,text_size))return false; // always NUL-terminated
- if(r.command==speed)return theater_speed::valid(r.value);
+ if(r.command==timescale)return theater_timescale::valid(theater_timescale::decode(r.value));
  if(r.command==record_named)return r.value==0&&has_text(r);
  if(r.command==replay_rename)return has_text(r);
  if(r.command==replay_sort)return r.value<sort_key_count*2;

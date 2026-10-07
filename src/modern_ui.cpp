@@ -120,21 +120,12 @@ void draw_timeline(const PlaybackView &p, const game_control::State &remote) {
   button("sample >", [] { step_replay(1); });
   ImGui::SameLine();
   button("Stop / F6", emergency_stop);
-  int speed = 3;
-  constexpr double rates[]{.1, .25, .5, 1., 2., 4.};
-  for (int i = 0; i < 6; ++i)
-    if (p.state.speed == rates[i])
-      speed = i;
-  const char *speeds[]{"0.1x", "0.25x", "0.5x", "1.0x", "2.0x", "4.0x"};
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80);
-  if (ImGui::Combo("##speed", &speed, speeds, 6)) {
-    const double value = std::array{.1, .25, .5, 1., 2., 4.}[speed];
-    commands.push_back([value] {
-      std::lock_guard lock(app.replay_mutex);
-      if (app.replay_player)
-        app.replay_player->set_speed(value);
-    });
+  // Retained alternate UI uses the same continuous contract; no preset selector.
+  double timescale=p.state.timescale;
+  const double minimum=.001,maximum=10.;
+  ImGui::SameLine();ImGui::SetNextItemWidth(160);
+  if(ImGui::SliderScalar("Timescale",ImGuiDataType_Double,&timescale,&minimum,&maximum,"%.6fx",ImGuiSliderFlags_Logarithmic)) {
+    commands.push_back([timescale] {std::lock_guard lock(app.replay_mutex);if(app.replay_player)app.replay_player->set_timescale(timescale);});
   }
   const double duration = p.summary.duration_ns / 1e9;
   if (ImGui::Button("Fit"))

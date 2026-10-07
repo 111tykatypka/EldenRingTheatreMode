@@ -88,13 +88,13 @@ pub fn update(active:bool,speed:f64,now:u64) {
     let delta=read::<f32>(root+DELTA);
     let second=now/1_000_000_000;
     if root!=s.observed_root || (active&&second!=s.last_log_second) {
-        crate::log_game(&format!("TIMESCALE_OBSERVE root=0x{root:X} scale={scale:.6} delta={delta:?} requested={speed:.2} active={active} write_enabled={}",enabled()));
+        crate::log_game(&format!("TIMESCALE_OBSERVE root=0x{root:X} scale={scale:.6} delta={delta:?} requested={speed:.6} active={active} write_enabled={}",enabled()));
         s.observed_root=root;s.last_log_second=second;
     }
     if !enabled(){return;}
     if !active {restore(&mut s,root,"paused/stopped/unloaded/disconnected/player lost");s.inhibited=false;return;}
-    // Every UI preset is supported. High speeds remain experimental until observed in-game.
-    if !speed.is_finite()||!(0.1..=4.0).contains(&speed) {
+    // Continuous UI range, not a claim of runtime stability at either extreme.
+    if !speed.is_finite()||!(0.001..=10.0).contains(&speed) {
         restore(&mut s,root,"invalid requested speed");s.inhibited=true;return;
     }
     if s.saved.is_some() && (s.root!=root || Some(scale)!=s.last_written) {
@@ -114,6 +114,6 @@ pub fn update(active:bool,speed:f64,now:u64) {
     if s.last_written!=Some(requested) {
         unsafe{std::ptr::write_volatile(address as *mut f32,requested)};
         s.last_written=Some(requested);
-        crate::log_game(&format!("TIMESCALE_APPLY value={requested:.4} phase=ChrIns_PostPhysics"));
+        crate::log_game(&format!("TIMESCALE_APPLY value={requested:.6} phase=ChrIns_PostPhysics"));
     }
 }

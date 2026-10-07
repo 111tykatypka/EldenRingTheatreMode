@@ -47,7 +47,7 @@ const FRAME_BYTES:usize=8+48+64+POSE_BYTES*2;
 const RECORD_RECORDING:u32=1;
 const RECORD_PAUSED:u32=2;
 
-#[repr(C)]struct Link{linked:u32,recording:u32,loaded:u32,playing:u32,overlay_shown:u32,reserved:u32,speed:f64,play_source_ns:u64,received_ns:u64,recording_path:[c_char;260],loaded_path:[c_char;260]}
+#[repr(C)]struct Link{linked:u32,recording:u32,loaded:u32,playing:u32,overlay_shown:u32,reserved:u32,timescale:f64,play_source_ns:u64,received_ns:u64,recording_path:[c_char;260],loaded_path:[c_char;260]}
 unsafe extern "C"{fn tm_render_native_status(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
@@ -58,9 +58,9 @@ struct Loaded{path:String,frames:Arc<Vec<Frame>>}
 struct State{
  recording:Option<(String,Vec<Frame>)>,record_paused:bool,last_second:u64,
  loaded:Option<Loaded>,loading:Loading,
- owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,accuracy:Accuracy,
+ owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,evaluated_root:Option<Transform>,accuracy:Accuracy,
 }
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0}});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0}});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -141,7 +141,7 @@ fn follow_loaded(s:&mut State,l:&Link){
  let path=if l.loaded!=0{text(&l.loaded_path)}else{String::new()};
  let known=match &s.loading{Loading::Busy(p)|Loading::Missing(p)|Loading::Failed(p)=>Some(p.clone()),Loading::None=>s.loaded.as_ref().map(|x|x.path.clone())};
  if known.as_deref()==Some(path.as_str())||(path.is_empty()&&known.is_none()){return;}
- s.loaded=None;s.loading=Loading::None;s.written=None;
+ s.loaded=None;s.loading=Loading::None;s.written=None;s.evaluated_root=None;
  if path.is_empty(){LOADED.lock().unwrap().take();crate::log_game("BONE_REPLAY: unloaded pose data; pending loads invalidated");return;}
  let file=bones_path(&path);
  if !file.is_file(){crate::log_game(&format!("BONE_REPLAY: {path} has no bone data (recorded before bone replays)"));status("BONE REPLAY: this replay has no bone data. Record a new one with F5");s.loading=Loading::Missing(path);return;}
@@ -153,7 +153,7 @@ fn follow_loaded(s:&mut State,l:&Link){
 fn timeline(l:&Link,now:u64)->u64{
  if l.playing==0||l.received_ns==0{return l.play_source_ns;}
  let since=now.saturating_sub(l.received_ns).min(250_000_000) as f64;
- l.play_source_ns+(since*l.speed.clamp(0.0,8.0)) as u64}
+ l.play_source_ns+(since*l.timescale.clamp(0.001,10.0)) as u64}
 
 fn release(s:&mut State,chr:usize,reason:&str){
  if !s.owning{return;}s.owning=false;s.restore_left=RESTORE_FRAMES;
@@ -169,7 +169,7 @@ pub fn tick(group:usize,now:u64){
   let l=link();
   // Player loss cannot leave the keyboard lock or a return transform armed for a new player.
   if chr.is_none()&&(s.owning||s.restore_left>0){
-   s.owning=false;s.restore_left=0;s.saved=None;s.gravity_saved=None;s.written=None;
+   s.owning=false;s.restore_left=0;s.saved=None;s.gravity_saved=None;s.written=None;s.evaluated_root=None;
    unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: player unavailable; ownership and input lock released");}
   // Recording follows the host recorder.
   let recording=l.linked!=0&&(l.recording==RECORD_RECORDING||l.recording==RECORD_PAUSED);
@@ -191,14 +191,20 @@ pub fn tick(group:usize,now:u64){
    if !s.owning&&s.restore_left>0{
     if let Some(t)=s.saved{write_transform(chr,&t);}set_flag(proxy_flag(chr),true);
     s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
-   if s.owning{if let Some(i)=s.written{if let Some(l)=&s.loaded{write_transform(chr,&l.frames[i].transform);}}}
   }
   if s.owning{
    // Pick this game frame's sample once, from the timeline.
    let t=timeline(&l,now);
-   if let Some(loaded)=&s.loaded{let frames=&loaded.frames;s.written=Some(frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1));}}
+   if let Some(loaded)=&s.loaded{
+    let frames=&loaded.frames;let i=frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1);
+    let a=&frames[i];let b=&frames[(i+1).min(frames.len()-1)];let span=b.time.saturating_sub(a.time);
+    let alpha=if span==0{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
+    s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,alpha);
+    if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}
+    else if let Some(chr)=chr{release(s,chr,"invalid root interpolation");}
+   }}
   let fresh=l.linked!=0&&l.received_ns!=0&&now.saturating_sub(l.received_ns)<500_000_000;
-  crate::timescale::update(fresh&&l.playing!=0&&s.owning&&chr.is_some()&&s.loaded.is_some()&&s.recording.is_none(),l.speed,now);
+  crate::timescale::update(fresh&&l.playing!=0&&s.owning&&chr.is_some()&&s.loaded.is_some()&&s.recording.is_none(),l.timescale,now);
   return;}
  let Some(chr)=chr else {return;};
  if group==DRAW_GROUP&&!s.record_paused&&s.last_second!=u64::MAX{
@@ -211,7 +217,7 @@ pub fn tick(group:usize,now:u64){
   WRITE_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};
    unsafe{std::ptr::copy_nonoverlapping(f.local.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(f.model.as_ptr(),model as *mut u8,POSE_BYTES);}
-   write_transform(chr,&f.transform);set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);}
+   if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);}
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
    let a=&mut s.accuracy;a.frames+=1;if pose(local)==&f.local[..]&&pose(model)==&f.model[..]{a.exact_bones+=1;}

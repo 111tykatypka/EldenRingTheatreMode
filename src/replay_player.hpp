@@ -12,7 +12,7 @@ struct State {
     std::uint64_t sample_index{};
     erplay::Vec3 position{};
     erplay::Quaternion orientation{};
-    double speed{1.0};
+    double timescale{1.0};
     erplay::ActionState current_action;bool has_action{},dense_action{};
     Status status{Status::stopped};
 };
@@ -27,7 +27,7 @@ public:
     void pause(Clock::time_point now=Clock::now());
     void stop();
     void restart(Clock::time_point now=Clock::now());
-    void set_speed(double speed,Clock::time_point now=Clock::now());
+    void set_timescale(double value,Clock::time_point now=Clock::now());
     void seek(std::uint64_t timestamp_ns);
     void step(int direction);
     void advance(Clock::time_point now=Clock::now());
@@ -35,6 +35,7 @@ private:
     std::unique_ptr<erplay::Reader> reader_;
     State state_{};
     std::uint64_t clock_ns_{};
+    long double fractional_ns_{}; // retain sub-nanosecond remainder at very low timescale
     Clock::time_point anchor_{};std::size_t action_cursor_{};bool action_cursor_valid_{};std::uint64_t previous_action_clock_{};
     void update_state();
 };

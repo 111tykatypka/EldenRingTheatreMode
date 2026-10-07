@@ -99,8 +99,10 @@ namespace TheaterUI
         // Timeline interaction.
         std::uint64_t lastDuration_ = 0;
         std::string lastReplayPath_;
-        int pendingSpeed_ = -1;
-        double speedSentAt_ = 0;
+        double pendingTimescale_ = 0; // UI request awaiting host acknowledgement, not a playback clock
+        double timescaleSentAt_ = 0;
+        char timescaleInput_[32]{};
+        bool timescaleInputInvalid_ = false;
         bool   scrubbing_ = false;
         double lastScrubSent_ = 0.0, scrubTime_ = 0.0;
         bool   draggingNavigator_ = false;

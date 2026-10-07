@@ -28,7 +28,7 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  case theater_ui::toggle_playback:toggle_replay();break;
  case theater_ui::replay_unload:unload_replay();break;
  case theater_ui::seek:seek_replay(r.value);break;case theater_ui::previous:step_replay(-1);break;case theater_ui::next:step_replay(1);break;
- case theater_ui::speed:{std::lock_guard lock(app.replay_mutex);if(app.replay_player)app.replay_player->set_speed(double(r.value)/100.);break;}
+ case theater_ui::timescale:{std::lock_guard lock(app.replay_mutex);if(app.replay_player)app.replay_player->set_timescale(theater_timescale::decode(r.value));break;}
  case theater_ui::select:if(!app.game_replay->active())app.selected_replay_actor=r.value;break;
  case theater_ui::page:offset=static_cast<std::uint32_t>(std::min<std::uint64_t>(r.value,UINT32_MAX));break;
  // Same recorder path as F5 and the host Start button; post_command refuses while a replay is active.
@@ -58,7 +58,7 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
   message(!result.ok,result.message);refresh_library();break;}
  default:break;}}
  const auto view=playback_view();const auto remote=app.control.state();theater_ui::Snapshot s;
- s.loaded=view.loaded;s.active=view.active;s.phase=static_cast<std::uint32_t>(view.phase);s.time_ns=view.state.timestamp_ns;s.duration_ns=view.summary.duration_ns;s.playback_speed=view.state.speed;
+ s.loaded=view.loaded;s.active=view.active;s.phase=static_cast<std::uint32_t>(view.phase);s.time_ns=view.state.timestamp_ns;s.duration_ns=view.summary.duration_ns;s.timescale=view.state.timescale;
  s.selected=app.selected_replay_actor;s.connected=remote.connected;s.player_found=remote.ready;std::copy(remote.live.position.begin(),remote.live.position.end(),s.live_position);
  auto diagnostic=game_launcher::utf8(view.diagnostic);memcpy(s.diagnostic,diagnostic.data(),std::min(diagnostic.size(),sizeof(s.diagnostic)-1));
  s.total=static_cast<std::uint32_t>(app.character_views.size());s.offset=std::min(offset,s.total);s.count=std::min(16u,s.total-s.offset);
