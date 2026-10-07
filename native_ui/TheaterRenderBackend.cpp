@@ -350,9 +350,9 @@ extern "C" int tm_render_test_ui(){
 }
 // The hotkey table for the Rust side (shared/TheaterHotkeys.h). Unknown action: 0 (unbound).
 // Bone replay link for adapter/src/bone_replay.rs: the host's recording and timeline state.
-struct TmBoneLink{std::uint32_t linked,recording,loaded,playing,overlay_shown,reserved;double timescale;std::uint64_t play_source_ns,received_ns;char recording_path[260];char loaded_path[260];};
+struct TmBoneLink{std::uint32_t linked,recording,loaded,playing,overlay_shown,options;double timescale;std::uint64_t play_source_ns,received_ns;char recording_path[260];char loaded_path[260];};
 static_assert(sizeof(TmBoneLink)==24+8+16+520);
-extern "C" void tm_overlay_bone_link(TmBoneLink*out){auto&b=backend();*out={};out->linked=b.host_linked.load();out->overlay_shown=b.mode.load()==2;
+extern "C" void tm_overlay_bone_link(TmBoneLink*out){auto&b=backend();*out={};out->linked=b.host_linked.load();out->overlay_shown=b.mode.load()==2;out->options=TheaterUI::gReplayOptions.load();
  std::lock_guard lock(b.ipc);const auto&s=b.snapshot;out->recording=s.recording_state;out->loaded=s.loaded;out->playing=s.host_playing;out->timescale=s.timescale;
  out->play_source_ns=s.play_source_ns;out->received_ns=b.snapshot_ns.load();memcpy(out->recording_path,s.recording_path,sizeof(out->recording_path));memcpy(out->loaded_path,s.loaded_path,sizeof(out->loaded_path));
  out->recording_path[259]=0;out->loaded_path[259]=0;}

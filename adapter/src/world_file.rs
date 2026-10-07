@@ -25,12 +25,37 @@ const CHUNK_HEADER:usize=4*4+8*2+4*3;
 const CHUNK_NS:u64=1_000_000_000;
 pub const TRACK_PLAYER:u32=1;
 pub const KIND_PLAYER:u32=1;
+pub const TRACK_WORLD:u32=2;
+pub const KIND_WORLD:u32=2;       // clock samples (Phase 2.1)
+pub const TRACK_FLAGS:u32=3;
+pub const KIND_FLAGS_FULL:u32=3;  // all event flag groups at the start of the recording
+pub const KIND_FLAG_EVENTS:u32=4; // flag changes
 
 /// One recorded frame of the player (see bone_replay.rs for the meaning of each field).
 #[derive(Clone)]
 pub struct PlayerFrame{pub time:u64,pub transform:[[f32;4];3],pub matrix:[f32;16],pub local:Vec<u8>,pub model:Vec<u8>,pub place:crate::arrival::Place,pub equip:crate::equipment::Equip}
 
+/// World state sampled once a second (see world_state.rs).
+#[derive(Clone,Copy,Debug,Default,PartialEq)]
+pub struct WorldSample{pub time:u64,pub clock:crate::world_state::Clock}
+#[derive(Clone,Copy,Debug,PartialEq)]
+pub struct FlagEvent{pub time:u64,pub flag:u32,pub state:bool}
+pub type FlagGroups=Vec<(u32,[u8;crate::world_state::FLAG_BLOCK])>;
+
 // ---------------------------------------------------------------------------------------- encoding
+fn encode_world(v:&[WorldSample])->Vec<u8>{let mut o=Vec::new();let (mut t,mut a,mut b,mut m)=(0u64,0u64,0u64,0u32);
+ for s in v{codec::put_varint(&mut o,s.time.wrapping_sub(t));t=s.time;codec::put_varint(&mut o,s.clock.time64^a);a=s.clock.time64;codec::put_varint(&mut o,s.clock.date^b);b=s.clock.date;let mb=s.clock.multiplier.to_bits();codec::put_varint(&mut o,(mb^m) as u64);m=mb;}o}
+fn decode_world(r:&[u8],count:usize)->Option<Vec<WorldSample>>{let mut at=0;let (mut t,mut a,mut b,mut m)=(0u64,0u64,0u64,0u32);let mut out=Vec::with_capacity(count);
+ for _ in 0..count{t=t.wrapping_add(codec::get_varint(r,&mut at)?);a^=codec::get_varint(r,&mut at)?;b^=codec::get_varint(r,&mut at)?;m^=codec::get_varint(r,&mut at)? as u32;
+  out.push(WorldSample{time:t,clock:crate::world_state::Clock{time64:a,date:b,multiplier:f32::from_bits(m)}});}(at==r.len()).then_some(out)}
+fn encode_flags(groups:&FlagGroups)->Vec<u8>{let mut o=Vec::new();codec::put_varint(&mut o,groups.len() as u64);let mut g=0u32;
+ for (id,b) in groups{codec::put_varint(&mut o,id.wrapping_sub(g) as u64);g=*id;o.extend_from_slice(b);}o}
+fn decode_flags(r:&[u8])->Option<FlagGroups>{let mut at=0;let n=codec::get_varint(r,&mut at)? as usize;let mut g=0u32;let mut out=Vec::with_capacity(n);
+ for _ in 0..n{g=g.wrapping_add(codec::get_varint(r,&mut at)? as u32);let b:[u8;crate::world_state::FLAG_BLOCK]=r.get(at..at+crate::world_state::FLAG_BLOCK)?.try_into().ok()?;at+=crate::world_state::FLAG_BLOCK;out.push((g,b));}
+ (at==r.len()).then_some(out)}
+fn encode_events(v:&[FlagEvent])->Vec<u8>{let mut o=Vec::new();let mut t=0u64;for e in v{codec::put_varint(&mut o,e.time.wrapping_sub(t));t=e.time;codec::put_varint(&mut o,e.flag as u64);o.push(e.state as u8);}o}
+fn decode_events(r:&[u8],count:usize)->Option<Vec<FlagEvent>>{let mut at=0;let mut t=0u64;let mut out=Vec::with_capacity(count);
+ for _ in 0..count{t=t.wrapping_add(codec::get_varint(r,&mut at)?);let flag=codec::get_varint(r,&mut at)? as u32;let s=*r.get(at)?;at+=1;out.push(FlagEvent{time:t,flag,state:s!=0});}(at==r.len()).then_some(out)}
 #[derive(Default)]struct PlayerEncoder{bones:Vec<QBone>,model:Vec<QBone>,floats:Vec<u32>,ints:Vec<u32>,time:u64}
 fn equip_ints(e:&crate::equipment::Equip)->Vec<u32>{let mut v=vec![e.arm_style];v.extend(e.slots);v.extend(e.handles);v.extend(e.params.iter().map(|p|*p as u32));v}
 impl PlayerEncoder{
@@ -67,7 +92,7 @@ fn write_chunk(w:&mut impl Write,track:u32,kind:u32,count:u32,first:u64,last:u64
  w.write_all(&h)?;w.write_all(&packed)?;Ok((h.len()+packed.len()) as u64)}
 
 // ------------------------------------------------------------------------------------------ writer
-pub enum Message{Player(PlayerFrame),Finish}
+pub enum Message{Player(PlayerFrame),World(WorldSample),Flags(u64,FlagGroups),FlagEvents(Vec<FlagEvent>),Finish}
 /// Starts a writer thread for `final_path`; returns the sender the game thread uses.
 pub fn start_writer(final_path:PathBuf)->std::io::Result<SyncSender<Message>>{
  let tmp=PathBuf::from(format!("{}.tmp",final_path.display()));
@@ -79,19 +104,30 @@ pub fn start_writer(final_path:PathBuf)->std::io::Result<SyncSender<Message>>{
  Ok(tx)}
 fn writer(rx:Receiver<Message>,mut file:std::io::BufWriter<std::fs::File>,tmp:PathBuf,final_path:PathBuf){
  let mut player:Vec<PlayerFrame>=Vec::new();let mut bytes=16u64;let mut frames=0u64;let mut failed=None;
+ let (mut world,mut events):(Vec<WorldSample>,Vec<FlagEvent>)=(Vec::new(),Vec::new());let mut flag_changes=0u64;
  let flush=|frames_buf:&mut Vec<PlayerFrame>,file:&mut std::io::BufWriter<std::fs::File>|->std::io::Result<u64>{
   if frames_buf.is_empty(){return Ok(0);}
   let mut enc=PlayerEncoder::default();let mut raw=Vec::new();for f in frames_buf.iter(){enc.encode(f,&mut raw);}
   let n=write_chunk(file,TRACK_PLAYER,KIND_PLAYER,frames_buf.len() as u32,frames_buf[0].time,frames_buf.last().unwrap().time,&raw)?;frames_buf.clear();Ok(n)};
+ // Small tracks (world samples, flag changes) are written in chunks of up to a minute.
+ let flush_small=|world:&mut Vec<WorldSample>,events:&mut Vec<FlagEvent>,file:&mut std::io::BufWriter<std::fs::File>|->std::io::Result<u64>{
+  let mut n=0;
+  if !world.is_empty(){n+=write_chunk(file,TRACK_WORLD,KIND_WORLD,world.len() as u32,world[0].time,world.last().unwrap().time,&encode_world(world))?;world.clear();}
+  if !events.is_empty(){n+=write_chunk(file,TRACK_FLAGS,KIND_FLAG_EVENTS,events.len() as u32,events[0].time,events.last().unwrap().time,&encode_events(events))?;events.clear();}
+  Ok(n)};
  for m in rx{
-  match m{
-   Message::Player(f)=>{frames+=1;if player.first().is_some_and(|p|f.time.saturating_sub(p.time)>=CHUNK_NS){match flush(&mut player,&mut file){Ok(n)=>bytes+=n,Err(e)=>{failed.get_or_insert(e.to_string());}}}player.push(f);}
-   Message::Finish=>break}}
- if failed.is_none(){match flush(&mut player,&mut file).and_then(|n|{bytes+=n;file.flush()?;file.get_ref().sync_all()?;Ok(())}){Ok(())=>{},Err(e)=>failed=Some(e.to_string())}}
+  let r=match m{
+   Message::Player(f)=>{frames+=1;let r=if player.first().is_some_and(|p|f.time.saturating_sub(p.time)>=CHUNK_NS){flush(&mut player,&mut file)}else{Ok(0)};player.push(f);r}
+   Message::World(w)=>{world.push(w);if world.len()>=60{flush_small(&mut world,&mut events,&mut file)}else{Ok(0)}}
+   Message::Flags(t,g)=>write_chunk(&mut file,TRACK_FLAGS,KIND_FLAGS_FULL,g.len() as u32,t,t,&encode_flags(&g)),
+   Message::FlagEvents(e)=>{flag_changes+=e.len() as u64;events.extend(e);if events.len()>=4096{flush_small(&mut world,&mut events,&mut file)}else{Ok(0)}}
+   Message::Finish=>break};
+  match r{Ok(n)=>bytes+=n,Err(e)=>{failed.get_or_insert(e.to_string());}}}
+ if failed.is_none(){match flush(&mut player,&mut file).and_then(|n|{bytes+=n;bytes+=flush_small(&mut world,&mut events,&mut file)?;file.flush()?;file.get_ref().sync_all()?;Ok(())}){Ok(())=>{},Err(e)=>failed=Some(e.to_string())}}
  drop(file);
  match failed{
   None=>match std::fs::rename(&tmp,&final_path){
-   Ok(())=>{crate::log_game(&format!("WORLD_FILE: saved {} ({frames} player frames, {:.1} MB, {:.0} bytes per frame)",final_path.display(),bytes as f64/1_048_576.0,bytes as f64/(frames.max(1)) as f64));crate::bone_replay::status("BONE REPLAY: recording saved");}
+   Ok(())=>{crate::log_game(&format!("WORLD_FILE: saved {} ({frames} player frames, {flag_changes} flag changes, {:.1} MB, {:.0} bytes per frame)",final_path.display(),bytes as f64/1_048_576.0,bytes as f64/(frames.max(1)) as f64));crate::bone_replay::status("BONE REPLAY: recording saved");}
    Err(e)=>{crate::log_game(&format!("WORLD_FILE_ERROR: could not rename {}: {e}",tmp.display()));crate::bone_replay::status("BONE REPLAY ERROR: could not save the recording (see log)");}},
   Some(e)=>{crate::log_game(&format!("WORLD_FILE_ERROR: writing {} failed: {e}; the partial file stays as .tmp",tmp.display()));crate::bone_replay::status("BONE REPLAY ERROR: could not save the recording (see log)");}}}
 
@@ -111,12 +147,15 @@ impl PlayerTrack{
    if self.cache.len()>=4{self.cache.remove(0);}self.cache.push((c,frames));}
   let (_,frames)=self.cache.iter().find(|(k,_)|*k==c)?;frames.get(i-self.chunks[c].first_index)}
 }
+/// Everything in a world file. Player frames stay compressed (chunk cache); small tracks are decoded.
+pub struct WorldFile{pub player:PlayerTrack,pub world:Vec<WorldSample>,pub flags_start:Option<(u64,FlagGroups)>,pub flag_events:Vec<FlagEvent>}
 /// Opens a world file and indexes its chunks (every chunk's integrity is checked once here).
-pub fn open(path:&Path)->Result<PlayerTrack,String>{
+pub fn open(path:&Path)->Result<WorldFile,String>{
  let data=std::fs::read(path).map_err(|e|e.to_string())?;
  if data.len()<16||&data[0..8]!=MAGIC{return Err("not a Theater Mode world file".into());}
  let version=u32::from_le_bytes(data[8..12].try_into().unwrap());if version!=VERSION{return Err(format!("unsupported world file version {version}"));}
  let (mut at,mut chunks,mut times,mut skipped)=(16usize,Vec::new(),Vec::new(),HashMap::<u32,usize>::new());
+ let (mut world,mut flags_start,mut flag_events)=(Vec::new(),None,Vec::new());
  let u32_at=|i:usize|u32::from_le_bytes(data[i..i+4].try_into().unwrap());
  while at+CHUNK_HEADER<=data.len(){
   if u32_at(at)!=CHUNK{return Err(format!("damaged chunk header at byte {at}"));}
@@ -129,12 +168,18 @@ pub fn open(path:&Path)->Result<PlayerTrack,String>{
    // Times are needed for seeking; decode just the time column cheaply by decoding the chunk once.
    let frames=codec::unpack_zeros(&data[body..body+packed]).and_then(|r|decode_player(&r,count)).ok_or(format!("chunk at byte {at} does not decode"))?;
    times.extend(frames.iter().map(|f|f.time));}
+  else if matches!((track,kind),(TRACK_WORLD,KIND_WORLD)|(TRACK_FLAGS,KIND_FLAGS_FULL)|(TRACK_FLAGS,KIND_FLAG_EVENTS)){
+   let raw=codec::unpack_zeros(&data[body..body+packed]).ok_or(format!("chunk at byte {at} does not unpack"))?;
+   let bad=||format!("chunk at byte {at} does not decode");
+   match kind{KIND_WORLD=>world.extend(decode_world(&raw,count).ok_or_else(bad)?),
+    KIND_FLAGS_FULL=>{if flags_start.is_none(){flags_start=Some((u64::from_le_bytes(data[at+16..at+24].try_into().unwrap()),decode_flags(&raw).ok_or_else(bad)?));}}
+    _=>flag_events.extend(decode_events(&raw,count).ok_or_else(bad)?)}}
   else{*skipped.entry(track).or_default()+=1;}
   at=body+packed;}
  if times.is_empty(){return Err("the world file has no player frames".into());}
  if times.windows(2).any(|w|w[1]<w[0]){return Err("frame times go backwards".into());}
  if !skipped.is_empty(){crate::log_game(&format!("WORLD_FILE: tracks this build does not use yet: {skipped:?}"));}
- Ok(PlayerTrack{data,chunks,times,cache:Vec::new()})}
+ Ok(WorldFile{player:PlayerTrack{data,chunks,times,cache:Vec::new()},world,flags_start,flag_events})}
 
 #[cfg(test)]mod tests{
  use super::*;
@@ -146,9 +191,14 @@ pub fn open(path:&Path)->Result<PlayerTrack,String>{
  #[test]fn write_then_read(){
   let dir=std::env::temp_dir().join(format!("tm_world_test_{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
   let path=dir.join("a.erplay.world");
-  let tx=start_writer(path.clone()).unwrap();for i in 0..200{tx.send(Message::Player(frame(i))).unwrap();}tx.send(Message::Finish).unwrap();drop(tx);
+  let tx=start_writer(path.clone()).unwrap();
+  let mut g=[0u8;125];g[3]=0x10;tx.send(Message::Flags(5,vec![(7,g),(4000,[0;125])])).unwrap();
+  for i in 0..200{tx.send(Message::Player(frame(i))).unwrap();if i%60==0{tx.send(Message::World(WorldSample{time:i,clock:crate::world_state::Clock{time64:1000+i,date:77,multiplier:1.0}})).unwrap();tx.send(Message::FlagEvents(vec![FlagEvent{time:i,flag:7024+i as u32,state:i%2==0}])).unwrap();}}
+  tx.send(Message::Finish).unwrap();drop(tx);
   for _ in 0..200{if path.exists(){break;}std::thread::sleep(std::time::Duration::from_millis(10));}
-  let mut t=open(&path).unwrap();assert_eq!(t.len(),200);assert!(t.chunks.len()>=3);
+  let w=open(&path).unwrap();assert_eq!(w.world.len(),4);assert_eq!(w.world[2].clock.time64,1120);assert_eq!(w.flag_events.len(),4);assert_eq!(w.flag_events[1].flag,7084);
+  let (ft,fg)=w.flags_start.clone().unwrap();assert_eq!(ft,5);assert_eq!(fg[0].0,7);assert_eq!(fg[0].1[3],0x10);assert_eq!(fg[1].0,4000);
+  let mut t=w.player;assert_eq!(t.len(),200);assert!(t.chunks.len()>=3);
   for i in [0usize,59,60,61,150,199]{let f=t.get(i).unwrap().clone();let e=frame(i as u64);
    assert_eq!(f.time,e.time);assert_eq!(f.transform,e.transform);assert_eq!(f.place,e.place);assert_eq!(f.equip,e.equip);
    for (a,b) in f.local.chunks_exact(4).zip(e.local.chunks_exact(4)){let (a,b)=(f32::from_le_bytes(a.try_into().unwrap()),f32::from_le_bytes(b.try_into().unwrap()));assert!((a-b).abs()<2e-5);}}

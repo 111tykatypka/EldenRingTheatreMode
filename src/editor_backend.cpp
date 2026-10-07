@@ -355,9 +355,9 @@ void launch_game() {
                 L"Game launch failed", MB_ICONERROR | MB_OK);
   }
 }
-// A replay recorded with bone data has "<file>.bones" beside it. The game DLL plays those bones on
+// A replay recorded with bone data has "<file>.world" (or the older "<file>.bones") beside it. The game DLL plays those bones on
 // the player itself, following this host timeline, so the old position-only in-game replay is skipped.
-bool has_bones(const fs::path& replay){if(replay.empty())return false;auto p=replay;p+=L".bones";std::error_code ec;return fs::is_regular_file(p,ec);}
+bool has_bones(const fs::path& replay){if(replay.empty())return false;std::error_code ec;for(const wchar_t* ext:{L".world",L".bones"}){auto p=replay;p+=ext;if(fs::is_regular_file(p,ec))return true;}return false;}
 void play_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)

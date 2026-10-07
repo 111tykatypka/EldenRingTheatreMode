@@ -37,6 +37,7 @@ namespace TheaterUI
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
         UiSounds, UiSoundsOn,
+        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote,
         Count
     };
 
@@ -101,6 +102,9 @@ namespace TheaterUI
         { "Click to copy this line", "Нажмите, чтобы скопировать строку" },
         { "Unload Replay", "Выгрузить запись" },
         { "UI sounds", "Звуки интерфейса" }, { "Play sounds for overlay actions", "Звуки действий оверлея" },
+        { "Replay world", "Мир при воспроизведении" }, { "Restore doors, fog walls and bosses as recorded", "Восстанавливать двери, туманные стены и боссов как в записи" },
+        { "Changes event flags (save state) while a replay plays; your own flags are put back when it ends. Time of day is always replayed.",
+          "Меняет флаги событий (состояние сохранения) во время воспроизведения; ваши флаги возвращаются после. Время суток воспроизводится всегда." },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

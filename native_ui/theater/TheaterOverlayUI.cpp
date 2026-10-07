@@ -134,6 +134,7 @@ void Overlay::LoadSettings()
         else if (key == "show_timeline") showTimeline_ = value != 0;
         else if (key == "sound_enabled") Sound::SetEnabled(value != 0);
         else if (key == "sound_volume") Sound::SetVolume(std::clamp(value, 0.0f, 1.0f));
+        else if (key == "replay_options") gReplayOptions = (std::uint32_t)value;
     }
 }
 
@@ -150,7 +151,8 @@ void Overlay::SaveSettings() const
         << "show_tools " << (showTools_ ? 1 : 0) << "\n"
         << "show_timeline " << (showTimeline_ ? 1 : 0) << "\n"
         << "sound_enabled " << (Sound::Enabled() ? 1 : 0) << "\n"
-        << "sound_volume " << Sound::Volume() << "\n";
+        << "sound_volume " << Sound::Volume() << "\n"
+        << "replay_options " << gReplayOptions.load() << "\n";
 }
 
 void Overlay::Emit(std::uint32_t command, std::uint64_t value, const char* text)
@@ -571,6 +573,18 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             if (ImGui::SliderFloat("##volume", &volume, 0.0f, 100.0f, "%.0f%%")) Sound::SetVolume(volume / 100.0f);
             if (ImGui::IsItemDeactivatedAfterEdit()) { Sound::Play(Sound::Cue::Focus); SaveSettings(); }
             ImGui::EndDisabled();
+        }
+        section(T(Str::ReplayWorld));
+        {
+            bool flags = (gReplayOptions.load() & 1) != 0;
+            if (ImGui::Checkbox(T(Str::ReplayWorldFlags), &flags)) { gReplayOptions = flags ? (gReplayOptions | 1u) : (gReplayOptions & ~1u); SaveSettings(); }
+            PushFont(Font::Meta);
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(T(Str::ReplayWorldFlagsNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
         }
         section(T(Str::HotkeysTitle));
         PushFont(Font::Meta);

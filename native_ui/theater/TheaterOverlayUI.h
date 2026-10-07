@@ -1,5 +1,7 @@
 #pragma once
 #include "TheaterSounds.h"
+#include <atomic>
+#include <cstdint>
 // In-game Theater overlay, v3 Phase 1: theme, layout solver, tool rail, side
 // panel with event log, sequencer with transport, F4 hide/show and the REC pill.
 //
@@ -15,6 +17,9 @@
 
 namespace TheaterUI
 {
+    // Replay options set in the Settings panel and read by the game side (tm_overlay_bone_link).
+    // Bit 0: restore world event flags (doors, fog walls, bosses) while a replay plays.
+    inline std::atomic<std::uint32_t> gReplayOptions{0};
     using EmitFn = void (*)(void* user, std::uint32_t command, std::uint64_t value, const char* text);
     // Not a pipe command: asks the backend to toggle F4 visibility (rail and toolbar buttons).
     inline constexpr std::uint32_t kCommandToggleUi = 0xFFFFFFFFu;
