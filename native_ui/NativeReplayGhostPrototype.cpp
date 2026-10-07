@@ -521,8 +521,9 @@ void animSpike5(U player){
  if(!character||rttiName(character)!="hkbCharacter"){log("SPIKE5: hkbCharacter missing");return;}
  const U fn=findBehaviorEventFunction();
  if(!fn){tm_render_native_status("ANIM TEST 5 (F9): event function not found uniquely, nothing called");return;}
- static const char name[]="W_BackStep";
- const auto result=reinterpret_cast<uint32_t(*)(U,const char*)>(fn)(character,name);
+ // The public tool writes the name as UTF-16 (writeString(..., true)); the narrow string returned -1.
+ static const wchar_t name[]=L"W_BackStep";
+ const auto result=reinterpret_cast<uint32_t(*)(U,const wchar_t*)>(fn)(character,name);
  log("SPIKE5: W_BackStep returned 0x%X",result);
  char line[900];int len=snprintf(line,sizeof(line),"SPIKE5: time_act after event id/time:");
  for(int i=0;i<20;++i){const uint32_t idx=get<uint32_t>(timeAct+0x20+10*16+4);const U slot=timeAct+0x20+(idx%10)*16;
