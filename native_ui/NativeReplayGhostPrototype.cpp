@@ -554,7 +554,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))animSpike5(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
+     (void)w;(void)player;(void)recorder;log("ANIM_PROBE: F9 test retired (spike 5b crashed the game)");tm_render_native_status("F9 test is switched off");
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
