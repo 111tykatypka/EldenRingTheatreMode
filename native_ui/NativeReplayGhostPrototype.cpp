@@ -453,6 +453,46 @@ void animProbe6(U player){
  log("ANIM_PROBE6: %zu clips; setup=0x%llX bindingSet=0x%llX(%s) arr=0x%llX size=%d",clips.size(),setup,bindingSet,rttiName(bindingSet).c_str(),get<U>(bindingSet+0x18),get<int32_t>(bindingSet+0x20));
  tm_render_native_status("ANIM PROBE 6 (F9): done.");
 }
+// Spike 4: probe 6b found the active prayer clip "a000_060100" with +0x50 = 0x04021B88 while other
+// clips show 0x0402xxxx; the low 16 bits look like the animation binding index. Verify that with
+// the character's animation name table, then try to make the prayer clip play the roll instead
+// (write the roll's index, hold its local time near 0.3 s for 1.5 s). If the pose turns into a roll,
+// one event clip can play any of the character's animations, which is the general puppet driver.
+// Find the hkArray<hkStringPtr> of animation names: the largest string array in hkbCharacterStringData.
+struct NameTable{U data{};int32_t size{};};
+NameTable findAnimationNames(U character){
+ U setup=get<U>(character+0x90),charData=setup?get<U>(setup+0x48):0,strings=charData?get<U>(charData+0x98):0;
+ NameTable best;if(!strings){log("SPIKE4: hkbCharacterStringData missing");return best;}
+ for(U o=0x10;o<0x100;o+=0x10){U data=get<U>(strings+o);int32_t size=get<int32_t>(strings+o+8);
+  if(!pointerish(data)||size<=0||size>100000)continue;U first=get<U>(data);const auto t=pointerish(first)?asciiAt(first):std::string();
+  log("SPIKE4: string array +%llX size=%d first=%s",o,size,t.c_str());if(size>best.size&&!t.empty())best={data,size};}
+ return best;}
+int32_t findName(const NameTable& names,const char* needle){
+ for(int32_t i=0;i<names.size;++i){U p=get<U>(names.data+size_t(i)*8);if(!pointerish(p))continue;if(asciiAt(p).find(needle)!=std::string::npos)return i;}return -1;}
+void animSpike4(U player){
+ tm_render_native_status("ANIM TEST 4 (F9): praying, then switching the prayer clip to the roll...");
+ U modules=get<U>(player+layout[1]),behavior=get<U>(modules+layout[8]),event=get<U>(modules+layout[10]);
+ U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0,graph=character?get<U>(character+0x98):0;
+ if(!graph||!event){log("SPIKE4: graph/event missing");return;}
+ const auto names=findAnimationNames(character);
+ const int32_t prayIndex=findName(names,"060100"),rollIndex=findName(names,"022100");
+ log("SPIKE4: name table size=%d; a000_060100 index=%d (0x%X); a000_022100 index=%d (0x%X)",names.size,prayIndex,prayIndex,rollIndex,rollIndex);
+ const int32_t id=60100;SIZE_T w{};WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(event+layout[11]),&id,4,&w);
+ Sleep(400);
+ U prayer=0;for(U c:collectClips(graph))if(clipTitle(c).find("060100")!=std::string::npos){prayer=c;break;}
+ if(!prayer){log("SPIKE4: prayer clip not found");tm_render_native_status("ANIM TEST 4 (F9): prayer clip not found");return;}
+ const uint16_t was=get<uint16_t>(prayer+0x50);
+ log("SPIKE4: prayer clip @0x%llX +50 low16=0x%X (matches name table: %s)",prayer,was,was==uint16_t(prayIndex)?"YES":"no");
+ if(rollIndex<0||was!=uint16_t(prayIndex)){log("SPIKE4: index hypothesis not confirmed; no swap attempted");tm_render_native_status("ANIM TEST 4 (F9): index not confirmed, no swap (see log)");return;}
+ const uint16_t roll=uint16_t(rollIndex);SIZE_T n{};
+ WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x50),&roll,2,&n);
+ log("SPIKE4: wrote roll index 0x%X into the prayer clip; holding local time 0.3 s for 1.5 s",roll);
+ const float t=0.3f;const ULONGLONG until=GetTickCount64()+1500;
+ while(GetTickCount64()<until){WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x140),&t,4,&n);Sleep(0);}
+ WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(prayer+0x50),&was,2,&n); // restore
+ log("SPIKE4: restored the prayer index");
+ tm_render_native_status("ANIM TEST 4 (F9): done. Did the prayer turn into a frozen roll pose?");
+}
 std::atomic<bool> probeRunning{};
 void keys() {
  bool lastCreate=false,lastRemove=false;
@@ -476,7 +516,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))animProbe6(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
+     if(ready(w,player,recorder))animSpike4(player);else {log("ANIM_PROBE: player not ready");tm_render_native_status("ANIM PROBE (F9): player not ready, load in first");}
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
