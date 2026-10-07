@@ -293,6 +293,7 @@ void draw_launcher() {
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK launcher_proc(HWND w, UINT m, WPARAM a, LPARAM b) {
+  if(m==WM_TIMER&&a==0x544D){theater::refresh_bindings();return 0;}
   if (m == WM_APP + 77) { theater::ingame_editor::poll(); return 0; }
   if (m == WM_HOTKEY) {
     // RegisterHotKey is application-wide; F5/F6 work while the game has focus.

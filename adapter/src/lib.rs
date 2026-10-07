@@ -141,7 +141,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     let base=unsafe{GetModuleHandleW(std::ptr::null())} as usize;
                     let pe=unsafe{PeView::module(base as *const u8)};let mut found=[0u32;1];
                     let pattern=pelite::pattern!("4C 8B 49 18 4C 8B D1 8B 42 50 41 89 41 50 8B 42");
-                    if pe.scanner().finds_code(pattern,&mut found)&&found[0]==0x681970 {
+                    if pe.scanner().finds_code(pattern,&mut found)&&found[0] as usize==game_profile::VAL_CAMERA_COPY_RVA {
                         let result=unsafe{tm_camera_runtime_start((base+found[0] as usize) as *mut c_void)};
                         log_game(&format!("CAMERA_COPY_HOOK={} RVA=0x681970 exact_profile=2.7.0.0 writes=OFF runtime=UNVERIFIED",result));
                     } else {log_game("CAMERA_COPY_HOOK=UNAVAILABLE missing/ambiguous/unexpected signature; camera writes disabled");}
@@ -182,6 +182,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     camera_probe::tick(now);
                     characters.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}
+                    bone_replay::world_timing_tick(now);
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {
                         if !world_ready.swap(true,Ordering::AcqRel){log_game(&format!("WorldChrMan READY; instance={:p}",world));set_state(WORLDCHR_READY,"WORLDCHR_READY");set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}
                         if let Some(player)=world.main_player.as_ref() {

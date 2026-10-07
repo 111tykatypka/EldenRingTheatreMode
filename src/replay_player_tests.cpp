@@ -21,14 +21,14 @@ int run_tests(int argc,char**argv){
     p.stop();assert(p.state().status==replay::Status::stopped&&p.state().timestamp_ns==0);p.restart(t0+5s);assert(p.state().status==replay::Status::playing);p.advance(t0+5s+50ms);assert(p.state().timestamp_ns==25'000'000);
     auto q=replay::slerp({0,0,0,1},{0,1,0,0},0.5);const double norm=std::sqrt(double(q.x)*q.x+double(q.y)*q.y+double(q.z)*q.z+double(q.w)*q.w);assert(std::abs(norm-1.0)<1e-5);
     // Continuous timescale, exact IPC representation, logarithmic math and strict input.
-    for(double scale:{.01,.0105,.015,.037,1.,2.5,4.}){
+    for(double scale:{.001,.00105,.005,.01,.0105,.015,.037,1.,2.5,4.,10.}){
         assert(theater_timescale::valid(scale));
         assert(theater_timescale::decode(theater_timescale::encode(scale))==scale);
         assert(std::abs(theater_timescale::from_normalized(theater_timescale::normalized(scale))-scale)<1e-12);
     }
     double parsed=0;assert(theater_timescale::parse(" 0.0105x ",parsed)&&parsed==.0105);
-    assert(theater_timescale::parse("20",parsed)&&parsed==4.);
-    assert(theater_timescale::parse("0.00001",parsed)&&parsed==.01);
+    assert(theater_timescale::parse("20",parsed)&&parsed==10.);
+    assert(theater_timescale::parse("0.00001",parsed)&&parsed==.001);
     for(auto text:{"0","-1","NaN","Infinity","junk","1xjunk"})assert(!theater_timescale::parse(text,parsed));
     replay::Player slow(file);slow.set_timescale(.01,t0);slow.play(t0);
     for(int i=1;i<=11;++i)slow.advance(t0+std::chrono::nanoseconds(i*10));

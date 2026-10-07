@@ -10,12 +10,13 @@ struct Telemetry { timestamp_ns:u64, mask:u32, available:u32, slots:[Slot;4] }
 const _:()=assert!(std::mem::size_of::<Telemetry>()==352);
 const _:()=assert!(std::mem::offset_of!(CSCam,fov)==std::mem::offset_of!(CSCam,matrix)+64);
 const _:()=assert!(std::mem::offset_of!(CSCam,far_plane)==std::mem::offset_of!(CSCam,matrix)+76);
-unsafe extern "C" { fn tm_camera_publish(snapshot:*const Telemetry); fn tm_camera_probe_enabled()->bool;fn tm_camera_runtime_diagnostic(out:*mut i8,size:usize)->i32; }
+unsafe extern "C" { fn tm_camera_publish(snapshot:*const Telemetry); fn tm_camera_probe_enabled()->bool;fn tm_camera_runtime_diagnostic(out:*mut i8,size:usize)->i32;fn tm_world_timing_diagnostic(out:*mut i8,size:usize)->i32; }
 pub fn tick(now:u64) {
  static LAST_RUNTIME_LOG:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
  if now.saturating_sub(LAST_RUNTIME_LOG.load(std::sync::atomic::Ordering::Relaxed))>=2_000_000_000 {
   LAST_RUNTIME_LOG.store(now,std::sync::atomic::Ordering::Relaxed);let mut text=[0i8;512];
   if unsafe{tm_camera_runtime_diagnostic(text.as_mut_ptr(),text.len())}!=0{crate::log_game(&unsafe{std::ffi::CStr::from_ptr(text.as_ptr())}.to_string_lossy());}
+  if unsafe{tm_world_timing_diagnostic(text.as_mut_ptr(),text.len())}!=0{crate::log_game(&unsafe{std::ffi::CStr::from_ptr(text.as_ptr())}.to_string_lossy());}
  }
  if !unsafe{tm_camera_probe_enabled()}{return;}
  let mut out=Telemetry { timestamp_ns:now,..Default::default() };

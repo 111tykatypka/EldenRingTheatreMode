@@ -83,6 +83,9 @@ namespace TheaterUI
         UIState ui_;
         unsigned cameraSelection_ = 0; // selection, not native ownership
         bool clearDollyDialog_ = false;
+        int bindingWaiting_ = -1;
+        bool bindingReleased_ = false;
+        std::string bindingError_;
         ImFont* iconFont_ = nullptr;
         float   appliedScale_ = 0.0f;
         EmitFn  emit_ = nullptr;

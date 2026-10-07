@@ -27,6 +27,7 @@ try {
  Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_C3_NATIVE_CAMERA.md') -Destination $out
  Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_C4_CAMERA_EDITOR.md') -Destination $out
  Copy-Item -LiteralPath (Join-Path $repo 'notes\CINEMATIC_RENDERING_RESEARCH_C4.md') -Destination $out
+ foreach($doc in @('CAMERATOOLS_DEEP_ANALYSIS.md','TIMESCALE_IMPLEMENTATION.md','CAMERA_SYSTEM.md')){Copy-Item -LiteralPath (Join-Path $repo "research\$doc") -Destination $out}
  $safe="safe.directory=$($repo.Replace('\','/'))"
  $commit=& git -c $safe rev-parse HEAD
  $dirty=& git -c $safe status --porcelain

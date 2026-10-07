@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 project(GameProfile LANGUAGES CXX)
-add_library(GameProfile STATIC GameProfile.cpp)
+add_library(GameProfile STATIC GameProfile.cpp InputBindings.cpp)
 target_compile_features(GameProfile PUBLIC cxx_std_20)
 target_include_directories(GameProfile PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(GameProfile PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)

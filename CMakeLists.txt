@@ -4,6 +4,7 @@ add_subdirectory(shared)
 add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
  native_ui/CinematicCameraRuntime.cpp
+ native_ui/GameTimingAdapter.cpp
 
  native_ui/theater/TheaterOverlayUI.cpp
  native_ui/theater/TheaterSounds.cpp
@@ -12,6 +13,7 @@ add_library(TheaterRenderBackend STATIC
  third_party/minhook_vendor/src/buffer.c third_party/minhook_vendor/src/hook.c third_party/minhook_vendor/src/trampoline.c third_party/minhook_vendor/src/hde/hde64.c)
 target_include_directories(TheaterRenderBackend PRIVATE shared native_ui native_ui/theater third_party/imgui third_party/imgui/backends third_party/minhook_vendor/include)
 target_compile_features(TheaterRenderBackend PRIVATE cxx_std_20)
+target_link_libraries(TheaterRenderBackend PUBLIC GameProfile)
 target_compile_definitions(TheaterRenderBackend PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 if(MSVC)
  target_compile_options(TheaterRenderBackend PRIVATE /utf-8 /EHsc)

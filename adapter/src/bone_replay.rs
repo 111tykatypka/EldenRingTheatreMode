@@ -68,6 +68,13 @@ const RECORD_PAUSED:u32=2;
 unsafe extern "C"{fn tm_render_event(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
+pub fn world_timing_tick(now:u64){
+ unsafe extern "C"{fn tm_world_timing_tick(active:i32,speed:f64);}
+ let (active,rate)=match STATE.try_lock(){Ok(s)=>(s.owning&&s.host.0&&!s.replay_blocked,s.host.1),Err(_)=>(false,1.0)};
+ let mut link:Link=unsafe{std::mem::zeroed()};unsafe{tm_overlay_bone_link(&mut link)};
+ let fresh=link.linked!=0&&link.loaded!=0&&link.recording!=RECORD_RECORDING&&link.recording!=RECORD_PAUSED&&now>=link.received_ns&&now-link.received_ns<250_000_000;
+ unsafe{tm_world_timing_tick((active&&fresh&&crate::offline_allowed()&&player_chr().is_some()) as i32,rate);}
+}
 // place.block == -1: recorded before map data existed (bones file version 1); positions are used as recorded.
 type Frame=world_file::PlayerFrame;
 // Player frames of the loaded replay: the old .bones format is read whole, .world is decoded a chunk at

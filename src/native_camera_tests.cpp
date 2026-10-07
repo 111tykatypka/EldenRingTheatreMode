@@ -1,8 +1,12 @@
 #include "../native_ui/CinematicCameraRuntime.h"
+#include "../native_ui/GameTimingAdapter.h"
 #include <stdexcept>
 #include <iostream>
 void check(bool ok){if(!ok)throw std::runtime_error("native camera check failed");}
 int main(){
+ game_timing::enable(false);tm_world_timing_tick(0,1);check(!game_timing::enabled());
+ game_timing::enable(true);tm_world_timing_tick(1,.5);check(game_timing::status()=="Timing binding unavailable/rejected");
+ game_timing::enable(false);tm_world_timing_tick(0,1);check(game_timing::status()=="World timing OFF");
  theater_camera::Slot c;c.fov=1;c.aspect=1.777f;c.near_plane=.1f;c.far_plane=1000;
  for(double angle:{0.,.01,1.,3.14,4.,6.27}){
   cinematic::State s{{4,5,6},{0,std::sin(angle/2),0,std::cos(angle/2)},57.295779513};

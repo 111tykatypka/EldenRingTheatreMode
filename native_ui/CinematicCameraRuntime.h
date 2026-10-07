@@ -1,6 +1,7 @@
 #pragma once
 #include "CinematicCamera.h"
 #include "CameraTelemetry.h"
+#include "CameraCutTrack.h"
 #include <string>
 namespace camera_runtime {
 struct View {
@@ -12,6 +13,7 @@ struct View {
  int bone_index=-1;bool bone_available=false;cinematic::Vec bone_offset{0,0,-1};
  std::uint64_t project_generation=0;
  double shake_position=0,shake_rotation=0,shake_frequency=1;
+ bool cuts_enabled=false;std::vector<cinematic::CameraCut> cuts;
 };
 View view();
 void mode(unsigned value);
@@ -34,6 +36,7 @@ void overlay_visible(bool visible);
 void window(void* hwnd);
 void mouse_delta(long x,long y);
 void fov(double degrees);
+void cuts(bool enabled,std::vector<cinematic::CameraCut> values);
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot& slot);
 void encode_pose(const cinematic::State& pose,float* matrix);
 }

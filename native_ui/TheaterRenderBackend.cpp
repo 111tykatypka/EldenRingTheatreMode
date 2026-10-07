@@ -1,6 +1,7 @@
 // Independent DX12 backend. Design references: FreecamMod and dx12-imgui-overlay.
 // No game offsets or character writes are implemented in this translation unit.
 #include <windows.h>
+#include "GameTimingAdapter.h"
 #include <realtimeapiset.h>
 #pragma comment(lib,"mincore.lib")
 #define DIRECTINPUT_VERSION 0x0800
@@ -93,7 +94,7 @@ public:
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
  void command(std::uint32_t kind,std::uint64_t value=0,const char*text=nullptr){if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
   if(kind==TheaterUI::kCommandSetVisibility){set_visibility(value==0?TheaterUI::UiVisibility::Shown:TheaterUI::UiVisibility::Hidden);return;}
-  if(kind==theater_ui::stop){camera_runtime::stop();if(emergency)emergency();}std::lock_guard lock(ipc);
+  if(kind==theater_ui::stop){game_timing::enable(false);camera_runtime::stop();if(emergency)emergency();}std::lock_guard lock(ipc);
   // A scrub produces many seeks and the pipe sends one request per round trip, so only the newest pending seek matters.
   if(kind==theater_ui::seek&&!commands.empty()&&commands.back().command==theater_ui::seek){commands.back().value=value;return;}
   if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;if(text)strncpy_s(r.text,text,_TRUNCATE);commands.push_back(r);}}
@@ -108,7 +109,7 @@ public:
   if(next==V::Shown)ClipCursor(nullptr);
   if((current==V::Shown)!=(next==V::Shown))TheaterUI::Sound::Play(next==V::Shown?TheaterUI::Sound::Cue::Open:TheaterUI::Sound::Cue::Close);} // through the hook: confines to the whole window while shown
  bool transfer(HANDLE h,void*p,DWORD n,bool write){auto*c=static_cast<char*>(p);while(n){DWORD got=0;if(!(write?WriteFile(h,c,n,&got,nullptr):ReadFile(h,c,n,&got,nullptr))||!got)return false;c+=got;n-=got;}return true;}
- void ipc_worker(){HANDLE h=INVALID_HANDLE_VALUE;std::uint64_t sequence=0;while(running){
+ void ipc_worker(){HANDLE h=INVALID_HANDLE_VALUE;std::uint64_t sequence=0;while(running){theater_hotkeys::Reload();
   if(h==INVALID_HANDLE_VALUE){h=CreateFileW(theater_ui::pipe,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE){Sleep(100);continue;}}
   theater_ui::Request r;{std::lock_guard lock(ipc);if(!commands.empty()){r=commands.front();commands.pop_front();}}r.sequence=++sequence;theater_ui::Snapshot s;
   if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=theater_ui::version||s.sequence!=r.sequence||s.count>16||!theater_timescale::valid(s.timescale)){
@@ -225,7 +226,7 @@ LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
  // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
  using theater_hotkeys::Action;using theater_hotkeys::Key;
- if((m==WM_KEYDOWN||m==WM_KEYUP)&&!b.text_input.load()){
+ if((m==WM_KEYDOWN||m==WM_KEYUP)&&!b.text_input.load()&&!theater_hotkeys::rebinding){
   for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys})if(w==Key(action)){
    if(m==WM_KEYDOWN&&!(l&(1LL<<30))){
     {std::lock_guard lock(camera_mutex);if(camera_actions.size()<32)camera_actions.push_back(action);}
@@ -233,9 +234,9 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
    }return 0;
   }
  }
- if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==Key(Action::ToggleOverlay)&&!b.text_input.load()){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
+ if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==Key(Action::ToggleOverlay)&&!b.text_input.load()&&!theater_hotkeys::rebinding){b.toggle_ui((GetKeyState(VK_SHIFT)&0x8000)!=0);return 0;}
  if(m==WM_KEYDOWN&&w==Key(Action::StopRecording)){b.command(theater_ui::stop);return 0;}
- if((m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR)&&w==Key(Action::TogglePlayback)&&b.owns_playback_key()&&!b.text_input.load()){
+ if((m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR)&&w==Key(Action::TogglePlayback)&&b.owns_playback_key()&&!b.text_input.load()&&!theater_hotkeys::rebinding){
   if(m==WM_KEYDOWN&&!(l&(1LL<<30)))b.toggle_playback();return 0;}
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
  if(m==WM_MOUSEMOVE)b.os_mouse_tick=GetTickCount64();

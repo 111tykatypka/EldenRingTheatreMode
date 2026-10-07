@@ -1,0 +1,161 @@
+[
+  {
+    "path": "EldenRingCameraTools.dll",
+    "bytes": 2871008,
+    "sha256": "1a1da1fdbeb9f3eb85ef29469ff9ee2a1322108d47f107c11f137d4e13a077eb",
+    "pe": {
+      "machine": "0x8664",
+      "pe_magic": "0x20b",
+      "image_base": "0x180000000",
+      "managed_clr": false,
+      "clr_flags": null,
+      "imports": [
+        "XINPUT9_1_0.dll",
+        "KERNEL32.dll",
+        "USER32.dll",
+        "GDI32.dll",
+        "ADVAPI32.dll",
+        "OLEAUT32.dll",
+        "IMM32.dll",
+        "D3DCOMPILER_47.dll",
+        "dwmapi.dll",
+        "dxgi.dll",
+        "d3d12.dll",
+        "d3d11.dll"
+      ],
+      "sections": [
+        ".text",
+        ".rdata",
+        ".data",
+        ".pdata",
+        ".rsrc",
+        ".reloc"
+      ]
+    }
+  },
+  {
+    "path": "EldenRingCameraTools.dll.log",
+    "bytes": 4811,
+    "sha256": "793a80fa58f5f32a5c498baecdc1def32ce22555ae90e646487308a1bc994c41"
+  },
+  {
+    "path": "igcs.config",
+    "bytes": 627,
+    "sha256": "23b8e3f34cd9a0ab319c55056e993c4ddfb5b2f67c33a78612a135b816bb02ef"
+  },
+  {
+    "path": "IGCSClient.exe",
+    "bytes": 640224,
+    "sha256": "e991dd88a66a3d98b91ade146c1eb33561b060b3499679ec4d9641758d0767cf",
+    "pe": {
+      "machine": "0x14c",
+      "pe_magic": "0x10b",
+      "image_base": "0x400000",
+      "managed_clr": true,
+      "clr_flags": "0x1",
+      "imports": [
+        "mscoree.dll"
+      ],
+      "sections": [
+        ".text",
+        ".rsrc",
+        ".reloc"
+      ]
+    }
+  },
+  {
+    "path": "IGCSClientSettings.ini",
+    "bytes": 3325,
+    "sha256": "b48de86fa0c74746d8eea1afd2b5264b64ca3c8ad5e0dbbc98d6cad8d7703943"
+  },
+  {
+    "path": "ModernWpf.Controls.dll",
+    "bytes": 382464,
+    "sha256": "3456dad94463e71e1ee300219871172439a49c9cf9ff3f67109aeb755b5c35e1",
+    "pe": {
+      "machine": "0x14c",
+      "pe_magic": "0x10b",
+      "image_base": "0x10000000",
+      "managed_clr": true,
+      "clr_flags": "0x1",
+      "imports": [
+        "mscoree.dll"
+      ],
+      "sections": [
+        ".text",
+        ".rsrc",
+        ".reloc"
+      ]
+    }
+  },
+  {
+    "path": "ModernWpf.dll",
+    "bytes": 1008640,
+    "sha256": "9c5f0b80fd4b47c4d6ee4b17558c234fa1bfc3a3dea05260ac9a41a9dbbba9d7",
+    "pe": {
+      "machine": "0x14c",
+      "pe_magic": "0x10b",
+      "image_base": "0x10000000",
+      "managed_clr": true,
+      "clr_flags": "0x1",
+      "imports": [
+        "mscoree.dll"
+      ],
+      "sections": [
+        ".text",
+        ".rsrc",
+        ".reloc"
+      ]
+    }
+  },
+  {
+    "path": "Readme.txt",
+    "bytes": 9803,
+    "sha256": "366eadc1906ec3a0f78d43f6a22183b531cc9a3a56adc2e95d37e07f051aa789"
+  },
+  {
+    "path": "steam_appid.txt",
+    "bytes": 7,
+    "sha256": "fe16bb1876de8709bc47cad716c50c8b4b4e62a1a4c159c72fee466986678047"
+  },
+  {
+    "path": "System.ValueTuple.dll",
+    "bytes": 78992,
+    "sha256": "d6fb0dcfee1490a8168117ed1b55758f11db38475417b3668d19f89dcb55cbdd",
+    "pe": {
+      "machine": "0x14c",
+      "pe_magic": "0x10b",
+      "image_base": "0x10000000",
+      "managed_clr": true,
+      "clr_flags": "0x9",
+      "imports": [
+        "mscoree.dll"
+      ],
+      "sections": [
+        ".text",
+        ".rsrc",
+        ".reloc"
+      ]
+    }
+  },
+  {
+    "path": "ToastNotifications.dll",
+    "bytes": 109568,
+    "sha256": "ed1297117c8dba2b3880246721af5b74c6ae16d745bea176adbeefc1ee75f2fb",
+    "pe": {
+      "machine": "0x14c",
+      "pe_magic": "0x10b",
+      "image_base": "0x10000000",
+      "managed_clr": true,
+      "clr_flags": "0x9",
+      "imports": [
+        "mscoree.dll"
+      ],
+      "sections": [
+        ".text",
+        ".rsrc",
+        ".reloc"
+      ]
+    }
+  }
+]

@@ -2,6 +2,7 @@
 #include "TheaterSounds.h"
 #include "imgui_internal.h"
 #include "../CinematicCameraRuntime.h"
+#include "../GameTimingAdapter.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -250,6 +251,10 @@ void Overlay::Observe(const OverlayFrame& f)
 const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
 {
     emit_ = emit; emitUser_ = user;
+    if (f.visibility != UiVisibility::Shown || !ui_.layout.panelOpen || ui_.activeTool != Tool::Settings) {
+        bindingWaiting_ = -1;
+        theater_hotkeys::rebinding = false;
+    }
     const std::string replayPath = f.snapshot.loaded
         ? std::string(f.snapshot.loaded_path, strnlen(f.snapshot.loaded_path, sizeof(f.snapshot.loaded_path))) : std::string{};
     if (replayPath != lastReplayPath_)
@@ -582,7 +587,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::TextWrapped("K captures a key at ReplayTime. L deletes all keys after confirmation. Save/Load uses a .ercam sidecar beside the replay.");
         if(ImGui::Button("Save camera path"))camera_runtime::save_path();ImGui::SameLine();if(ImGui::Button("Load camera path"))camera_runtime::load_path();
         ImGui::Text("Dolly keys: %zu",runtime.keys.size());
+        ImGui::SeparatorText("CAMERA CUT TRACK (session only)");
+        bool cutsEnabled=runtime.cuts_enabled;if(ImGui::Checkbox("Evaluate Player / Dolly cuts at ReplayTime",&cutsEnabled))camera_runtime::cuts(cutsEnabled,runtime.cuts);
+        static double cutStart=0,cutEnd=5;static int cutMode=1;
+        ImGui::InputDouble("Cut start (s)",&cutStart,.1,1);ImGui::InputDouble("Cut end (s)",&cutEnd,.1,1);ImGui::Combo("Cut camera",&cutMode,"Player\0Current Dolly path\0");
+        if(ImGui::Button("Add hard cut segment")&&std::isfinite(cutStart)&&std::isfinite(cutEnd)&&cutStart>=0&&cutEnd>cutStart&&cutEnd<double(UINT64_MAX)/1e9){auto cuts=runtime.cuts;std::uint64_t id=1;for(auto&c:cuts)id=std::max(id,c.id+1);cuts.push_back({id,static_cast<std::uint64_t>(cutStart*1e9),static_cast<std::uint64_t>(cutEnd*1e9),cutMode?cinematic::CutMode::Dolly:cinematic::CutMode::Player});camera_runtime::cuts(runtime.cuts_enabled,std::move(cuts));}
+        for(auto cut:runtime.cuts){ImGui::PushID(static_cast<int>(cut.id));ImGui::Text("%.3f - %.3f: %s",double(cut.start_ns)/1e9,double(cut.end_ns)/1e9,cut.mode==cinematic::CutMode::Player?"Player":"Dolly");ImGui::SameLine();if(ImGui::Button("Remove cut")){auto cuts=runtime.cuts;std::erase_if(cuts,[&](auto&c){return c.id==cut.id;});camera_runtime::cuts(runtime.cuts_enabled,std::move(cuts));}ImGui::PopID();}
+        ImGui::TextDisabled("Gaps use Player camera; one Dolly path. Arm writes separately.");
         ImGui::TextWrapped("%s",runtime.status.c_str());
+        bool worldTiming=game_timing::enabled();if(ImGui::Checkbox("Apply timescale to live world during replay (experimental)",&worldTiming))game_timing::enable(worldTiming);
+        ImGui::TextWrapped("%s",game_timing::status().c_str());
         for(auto key:runtime.keys){ImGui::PushID(static_cast<int>(key.id));
             if(ImGui::TreeNode("edit","Key %llu at %.3fs",static_cast<unsigned long long>(key.id),double(key.time_ns)/1e9)){
                 // Edits apply explicitly; live camera continues until Apply is clicked.
@@ -679,6 +693,19 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopFont();
         }
         section(T(Str::HotkeysTitle));
+        {
+            auto& waiting=bindingWaiting_;auto& released=bindingReleased_;auto& bindError=bindingError_;
+            if(waiting>=0){ImGui::TextWrapped("Press a keyboard key; Escape cancels.");bool any=false;for(int vk=8;vk<256;++vk)if(GetAsyncKeyState(vk)&0x8000)any=true;
+                if(!any)released=true;
+                if(released)for(int vk=8;vk<256;++vk)if(GetAsyncKeyState(vk)&0x8000){if(vk!=VK_ESCAPE)theater_hotkeys::Rebind(static_cast<theater_hotkeys::Action>(waiting),vk,bindError);waiting=-1;theater_hotkeys::rebinding=false;break;}
+            }
+            for(auto&binding:theater_hotkeys::kDefaults){if(theater_hotkeys::retired(binding.action))continue;ImGui::PushID(static_cast<int>(binding.action));
+                unsigned vk=theater_hotkeys::Key(binding.action);char label[220],name[120]{};wchar_t wide[60]{};LONG scan=MapVirtualKeyW(vk,MAPVK_VK_TO_VSC)<<16;
+                if(vk>=VK_PRIOR&&vk<=VK_DOWN)scan|=1<<24;GetKeyNameTextW(scan,wide,60);WideCharToMultiByte(CP_UTF8,0,wide,-1,name,sizeof(name),nullptr,nullptr);snprintf(label,sizeof(label),"%s [%s / %u]",binding.label,name[0]?name:"key",vk);
+                if(ImGui::Button(label)){waiting=static_cast<int>(binding.action);released=false;bindError.clear();theater_hotkeys::rebinding=true;}ImGui::PopID();}
+            if(!bindError.empty())ImGui::TextWrapped("%s",bindError.c_str());
+            ImGui::TextDisabled("Saved in LOCALAPPDATA/EldenRingTheaterMode/keybinds.ini.");
+        }
         PushFont(Font::Meta);
         ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
         ImGui::TextUnformatted(T(Str::HotkeysBody));
@@ -1167,10 +1194,6 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
             value = theater_timescale::from_normalized((io.MousePos.x-sliderMin.x)/sliderWidth);
         else if (io.MouseDelta.x != 0)
             value = theater_timescale::adjust(value, io.MouseDelta.x/sliderWidth * precision);
-        // Quick-set marks are magnetic within a few pixels (hold Shift or Ctrl to place freely).
-        if (!io.KeyShift && !io.KeyCtrl)
-            for (double m : theater_timescale::marks)
-                if (std::abs((theater_timescale::normalized(value) - theater_timescale::normalized(m)) * sliderWidth) < Px(4, s)) value = m;
         changed = true;
     }
     // Double-click the slider: back to 1x.
@@ -1185,7 +1208,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     }
     const float knobX=sliderMin.x+sliderWidth*(float)theater_timescale::normalized(value);
     dl->AddCircleFilled(ImVec2(knobX,cy),Px(5,s),Color::AccentBlue.U32());
-    if (sliderHovered) ImGui::SetTooltip("Replay speed 0.01x to 4x. Marks: 0.1, 0.25, 0.5, 1 (amber), 2 (they snap; Shift/Ctrl for fine control).\nDouble-click or right-click: back to 1x. Mouse wheel adjusts. The game itself keeps full speed.");
+    if (sliderHovered) ImGui::SetTooltip("Timescale 0.001x to 10x, continuous. Shift: fine; Ctrl: ultra-fine.\nRight/middle/double click resets rate only. World control is an explicit Camera-panel option.");
     ImGui::SameLine(0,Px(6,s));
     if (timescaleInput_[0]==0) theater_timescale::format(value,timescaleInput_,sizeof(timescaleInput_));
     ImGui::SetNextItemWidth(Px(98,s));
@@ -1196,7 +1219,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
         if (!timescaleInputInvalid_) {value=parsed;changed=true;}
     }
     const bool inputHovered=ImGui::IsItemHovered(), inputActive=ImGui::IsItemActive();
-    if (timescaleInputInvalid_ && inputHovered) ImGui::SetTooltip("Enter a finite positive value, optionally ending in x. Range: 0.01x to 4x.");
+    if (timescaleInputInvalid_ && inputHovered) ImGui::SetTooltip("Enter a finite positive value, optionally ending in x. Range: 0.001x to 10x.");
     if (canTransport && (sliderHovered||inputHovered))
     {
         ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);

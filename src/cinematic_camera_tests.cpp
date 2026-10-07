@@ -1,12 +1,20 @@
 #include "../shared/CinematicCamera.h"
 #include "../shared/CameraTelemetry.h"
 #include "../shared/CameraProject.h"
+#include "../shared/CameraCutTrack.h"
+#include "../shared/TheaterHotkeys.h"
 #include "../shared/CubeLut.h"
 #include <iostream>
 #include <stdexcept>
 #include <limits>
 void check(bool ok){if(!ok)throw std::runtime_error("cinematic check failed");}
 int main(){using namespace cinematic;
+ {using namespace theater_hotkeys;std::array<std::uint32_t,static_cast<std::size_t>(Action::Count)> keys{};
+  std::istringstream ok("THEATER_KEYBINDS_V1\ncycle_camera=119\n");check(DecodeBindings(ok,keys));check(keys[static_cast<std::size_t>(Action::CycleCamera)]==119);
+  for(auto text:{"BAD\n","THEATER_KEYBINDS_V1\ncycle_camera=87\n","THEATER_KEYBINDS_V1\ncycle_camera=0\n","THEATER_KEYBINDS_V1\ncycle_camera=256\n","THEATER_KEYBINDS_V1\ncycle_camera=119xx\n","THEATER_KEYBINDS_V1\ncycle_camera=119\ncycle_camera=118\n","THEATER_KEYBINDS_V1\nunknown=119\n"}){auto saved=keys;std::istringstream bad(text);check(!DecodeBindings(bad,keys));check(keys==saved);}}
+
+ CameraCutTrack cuts;check(cuts.replace({{1,0,5,CutMode::Player},{2,5,14,CutMode::Dolly}},20));check(cuts.evaluate(4)==CutMode::Player);check(cuts.evaluate(5)==CutMode::Dolly);check(cuts.evaluate(13)==CutMode::Dolly);check(cuts.evaluate(14)==CutMode::Player);check(cuts.evaluate(0)==CutMode::Player);
+ check(!cuts.replace({{1,0,6,CutMode::Player},{2,5,14,CutMode::Dolly}},20));check(!cuts.replace({{1,0,6,CutMode::Player},{1,6,14,CutMode::Dolly}},20));check(!cuts.replace({{1,0,21,CutMode::Dolly}},20));check(cuts.evaluate(5)==CutMode::Dolly);
  Track track;Key a,b,c;a.id=1;b.id=2;c.id=3;b.time_ns=1000000000;c.time_ns=2000000000;b.state.position={2,0,0};c.state.position={3,1,0};
  check(!track.evaluate(0));check(track.replace({a,b,c}));check(track.evaluate(b.time_ns)->position==b.state.position);
  check(track.evaluate(0)->position==a.state.position);check(track.evaluate(3000000000)->position==c.state.position);
