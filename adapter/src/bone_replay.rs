@@ -22,6 +22,9 @@
 // Test 2 (Step1b) crashed the game right after F10 (access violation in eldenring.exe+0x41B050,
 // no diagnostics flushed). Step1c isolates it: model_matrix is only READ and logged (never written),
 // damage immunity and gravity stay; the first playback frames log each step before it happens.
+// Step1c found it: "debug_flags" read 0x8A2E8FD0, the low half of a pointer, so the SDK's
+// ChrIns::debug_flags offset is wrong for game 2.7.0.0 and OR-ing bit 3 corrupted that pointer.
+// Damage immunity through debug flags is removed; only gravity_disabled (physics module) is set.
 // Offsets stay in this file until Step 2 moves them into GameProfile.
 use std::ffi::{c_char,c_void,CString};
 use std::sync::Mutex;
@@ -68,15 +71,15 @@ fn ctrl(chr:usize)->usize{unsafe{&*(*(chr as *const ChrIns)).chr_ctrl as *const 
 fn matrix_address(chr:usize)->usize{let c=ctrl(chr) as *const eldenring::cs::ChrCtrl;unsafe{&raw const (*c).model_matrix as usize}}
 fn physics_matrix_address(chr:usize)->usize{let c=ctrl(chr) as *const eldenring::cs::ChrCtrl;unsafe{&raw const (*c).physics_model_matrix as usize}}
 fn read_matrix(a:usize)->[f32;16]{unsafe{std::ptr::read_volatile(a as *const [f32;16])}}
-// ChrDebugFlags bit 3 = disabled_hit (ignore all incoming damage); CSChrPhysicsModule.gravity_disabled.
-fn flags_address(chr:usize)->usize{let c=chr as *const ChrIns;unsafe{&raw const (*c).debug_flags as usize}}
+// CSChrPhysicsModule.gravity_disabled. (ChrIns::debug_flags is NOT used: wrong offset in this SDK pin.)
 fn gravity_address(chr:usize)->Option<usize>{let p=physics(chr)? as *const CSChrPhysicsModule;Some(unsafe{&raw const (*p).gravity_disabled as usize})}
 fn protect(chr:usize)->Option<(u32,bool)>{
- let (f,g)=(flags_address(chr),gravity_address(chr)?);
- let saved=unsafe{(std::ptr::read_volatile(f as *const u32),std::ptr::read_volatile(g as *const bool))};
- unsafe{std::ptr::write_volatile(f as *mut u32,saved.0|1<<3);std::ptr::write_volatile(g as *mut bool,true);}Some(saved)}
-fn keep_protected(chr:usize){let f=flags_address(chr);unsafe{std::ptr::write_volatile(f as *mut u32,std::ptr::read_volatile(f as *const u32)|1<<3);}if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut bool,true)}}}
-fn unprotect(chr:usize,saved:(u32,bool)){let f=flags_address(chr);unsafe{let now=std::ptr::read_volatile(f as *const u32);std::ptr::write_volatile(f as *mut u32,(now&!(1<<3))|(saved.0&1<<3));}if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut bool,saved.1)}}}
+ // Only touch the byte if it looks like a bool, so a wrong offset can never corrupt a pointer.
+ let g=gravity_address(chr)?;let byte=unsafe{std::ptr::read_volatile(g as *const u8)};
+ if byte>1{crate::log_game(&format!("BONE_REPLAY_ERROR: gravity_disabled reads {byte}, not a bool; offset untrusted, gravity left alone"));return None;}
+ unsafe{std::ptr::write_volatile(g as *mut u8,1);}Some((0,byte==1))}
+fn keep_protected(chr:usize,on:bool){if !on{return;}if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut u8,1)}}}
+fn unprotect(chr:usize,saved:(u32,bool)){if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut u8,saved.1 as u8)}}}
 fn pose_arrays(chr:usize)->Option<(usize,usize)>{
  let importer=read_ptr(chr+POSE_IMPORTER);if !object(importer){return None;}
  let (local,model)=(read_ptr(importer+LOCAL_POSE),read_ptr(importer+MODEL_POSE));
@@ -102,9 +105,9 @@ fn start_playback(s:&mut State,now:u64){
  let Some(chr)=player_chr() else {status("BONE REPLAY: player not ready");return;};
  s.saved=read_transform(chr);if s.saved.is_none(){status("BONE REPLAY: player not ready");return;}
  let m=read_matrix(matrix_address(chr));
- crate::log_game(&format!("BONE_REPLAY_STEP: before protect: debug_flags=0x{:X} model_matrix t=({:.2},{:.2},{:.2}) physics_pos=({:.2},{:.2},{:.2})",unsafe{std::ptr::read_volatile(flags_address(chr) as *const u32)},m[12],m[13],m[14],s.saved.unwrap()[2][0],s.saved.unwrap()[2][1],s.saved.unwrap()[2][2]));
+ crate::log_game(&format!("BONE_REPLAY_STEP: before protect: model_matrix t=({:.2},{:.2},{:.2}) physics_pos=({:.2},{:.2},{:.2})",m[12],m[13],m[14],s.saved.unwrap()[2][0],s.saved.unwrap()[2][1],s.saved.unwrap()[2][2]));
  s.saved_flags=protect(chr);s.diag_second=u64::MAX;
- crate::log_game("BONE_REPLAY_STEP: protection set (no damage, no gravity)");
+ crate::log_game("BONE_REPLAY_STEP: gravity off for playback");
  s.mode=Mode::Playing;s.start=now;s.written=None;s.writes=0;s.accuracy=Accuracy::default();
  unsafe{tm_render_lock_game_input(1)};
  crate::log_game(&format!("BONE_REPLAY: playback started; {} frames, {:.2} s; controls locked; return transform saved",s.frames.len(),duration(s)));
@@ -147,7 +150,7 @@ pub fn tick(group:usize,now:u64){
     if s.writes<3{crate::log_game(&format!("BONE_REPLAY_STEP: write {} frame {index}: bones written, writing transform",s.writes));}
     write_transform(chr,&f.transform);
     if s.writes<3{crate::log_game("BONE_REPLAY_STEP: transform written, refreshing protection");}
-    keep_protected(chr);s.writes+=1;}
+    keep_protected(chr,s.saved_flags.is_some());s.writes+=1;}
    else if group==KEYS_GROUP{if let Some(i)=s.written{write_transform(chr,&s.frames[i].transform);}}
    else if group==DRAW_GROUP{
     let Some(i)=s.written else {return;};let f=&s.frames[i];
