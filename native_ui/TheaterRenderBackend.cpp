@@ -1,6 +1,8 @@
 // Independent DX12 backend. Design references: FreecamMod and dx12-imgui-overlay.
 // No game offsets or character writes are implemented in this translation unit.
 #include <windows.h>
+#include <realtimeapiset.h>
+#pragma comment(lib,"mincore.lib")
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <d3d12.h>
@@ -51,6 +53,8 @@ public:
  // Set by bone replay playback: the player character is the replay body, so the game gets no
  // keyboard and no mouse buttons (mouse movement still turns the camera). Gamepads are not blocked yet.
  std::atomic_bool game_input_locked{};
+ // When the latest host snapshot arrived, in the game's monotonic clock (QueryInterruptTimePrecise, ns).
+ std::atomic<std::uint64_t> snapshot_ns{};
  // Replay state from the latest host snapshot, for keys that only act while a replay is loaded.
  std::atomic_bool replay_loaded{},replay_playing{};
  // TogglePlayback (Space) belongs to Theater Mode only while the overlay is open (game input is
@@ -103,7 +107,7 @@ public:
   theater_ui::Request r;{std::lock_guard lock(ipc);if(!commands.empty()){r=commands.front();commands.pop_front();}}r.sequence=++sequence;theater_ui::Snapshot s;
   if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=theater_ui::version||s.sequence!=r.sequence||s.count>16||!std::isfinite(s.playback_speed)){
    CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;replay_loaded=false;replay_playing=false;{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
-  {std::lock_guard lock(ipc);snapshot=s;}host_linked=true;replay_loaded=s.loaded!=0;replay_playing=s.phase==2;Sleep(50);
+  {std::lock_guard lock(ipc);snapshot=s;}{ULONGLONG t=0;QueryInterruptTimePrecise(&t);snapshot_ns=std::uint64_t(t)*100;}host_linked=true;replay_loaded=s.loaded!=0;replay_playing=s.phase==2;Sleep(50);
  }if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
  void adopt(IDXGISwapChain*sc,IUnknown*unknown){ComPtr<ID3D12CommandQueue> q;ComPtr<IDXGISwapChain3> c;
   if(FAILED(unknown->QueryInterface(IID_PPV_ARGS(&q)))||q->GetDesc().Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||FAILED(sc->QueryInterface(IID_PPV_ARGS(&c))))return;
@@ -358,5 +362,12 @@ extern "C" int tm_render_test_ui(){
  b.host_linked=false;b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;ImGui::DestroyContext(c);return valid?1:0;
 }
 // The hotkey table for the Rust side (shared/TheaterHotkeys.h). Unknown action: 0 (unbound).
+// Bone replay link for adapter/src/bone_replay.rs: the host's recording and timeline state.
+struct TmBoneLink{std::uint32_t linked,recording,loaded,playing,overlay_shown,reserved;double speed;std::uint64_t play_source_ns,received_ns;char recording_path[260];char loaded_path[260];};
+static_assert(sizeof(TmBoneLink)==24+8+16+520);
+extern "C" void tm_overlay_bone_link(TmBoneLink*out){auto&b=backend();*out={};out->linked=b.host_linked.load();out->overlay_shown=b.mode.load()==2;
+ std::lock_guard lock(b.ipc);const auto&s=b.snapshot;out->recording=s.recording_state;out->loaded=s.loaded;out->playing=s.host_playing;out->speed=s.playback_speed;
+ out->play_source_ns=s.play_source_ns;out->received_ns=b.snapshot_ns.load();memcpy(out->recording_path,s.recording_path,sizeof(out->recording_path));memcpy(out->loaded_path,s.loaded_path,sizeof(out->loaded_path));
+ out->recording_path[259]=0;out->loaded_path[259]=0;}
 extern "C" void tm_render_lock_game_input(int locked){backend().game_input_locked=locked!=0;}
 extern "C" unsigned tm_hotkey_vk(unsigned action){return action<unsigned(theater_hotkeys::Action::Count)?theater_hotkeys::Key(theater_hotkeys::Action(action)):0u;}

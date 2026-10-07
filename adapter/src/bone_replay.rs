@@ -1,39 +1,32 @@
-// Replay system Step 1: record the player's bone transforms and replay them exactly on the player
-// character, in memory (no file yet). User decisions (2026-10-07): record only bone transforms,
-// local and world space, no animation data (the game's animation is not deterministic); the native
-// ghost is retired; the replay body is the player character, with controls locked during playback.
+// Replay system: record the player's bone transforms and replay them exactly on the player
+// character. User decisions (2026-10-07): record only bone transforms, local and world space, no
+// animation data (the game's animation is not deterministic); the native ghost is retired; the
+// replay body is the player character, with controls locked while the replay owns it.
+//
+// One record system: F5 (the host recorder) records. While the host records, this module samples
+// the bones every drawn frame and, when the recording stops, writes "<replay>.erplay.bones" beside
+// the host's file (the library already moves/recycles "<file>.<anything>" sidecars with it). When a
+// replay with bones is loaded, the body follows the host timeline: play, pause and scrubbing.
+// The host and overlay state arrives through tm_overlay_bone_link (theater_ui snapshot v5).
 //
 // Where the pose lives (skeleton probe K1, write tests K2-K4): ChrIns+0x398 is the
 // CSFD4LocationHkaPoseImporter; +0x50 -> 150 local-space hkQsTransforms, +0x60 -> 150 model-space
 // hkQsTransforms (48 bytes each). Writes in ChrIns_PrePhysicsSafe survive until Draw_Pre and are what
 // is drawn; writes in ChrIns_BehaviorSafe are overwritten; writes after the importer show nothing.
-// World placement comes from CSChrPhysicsModule orientation, interpolated_orientation, position.
+// World placement comes from CSChrPhysicsModule orientation, interpolated_orientation, position; the
+// proxy-move request keeps the physics step from pulling the body back to last frame's spot.
+// Crash history: ChrIns::debug_flags has the wrong offset in this SDK pin for game 2.7.0.0 (writing it
+// corrupted a pointer). Every byte flag written here is checked to read as a bool first.
 //
 // Frame flow (task groups registered in lib.rs):
-//   0 ChrIns_PostPhysics: hotkeys and state changes; during playback rewrites the transform after physics
-//   2 ChrIns_PrePhysicsSafe: during playback writes bones and transform
-//   4 Draw_Pre: recording samples what is about to be drawn; playback measures what is about to be
-//     drawn against the recorded frame (the accuracy numbers in the log)
-// Test 1 (2026-10-07): moves matched and bones were exact on 99.9% of frames, physics position error
-// 0 cm, but the body was drawn high in the sky and could take damage and die. So playback now also
-// records and writes ChrIns.model_matrix (the final matrix the renderer uses, after easing and the
-// vertical offset), logs drawn vs recorded matrices once a second, and makes the player immune to
-// damage with gravity off while the replay owns the body.
-// Test 2 (Step1b) crashed the game right after F10 (access violation in eldenring.exe+0x41B050,
-// no diagnostics flushed). Step1c isolates it: model_matrix is only READ and logged (never written),
-// damage immunity and gravity stay; the first playback frames log each step before it happens.
-// Step1c found it: "debug_flags" read 0x8A2E8FD0, the low half of a pointer, so the SDK's
-// ChrIns::debug_flags offset is wrong for game 2.7.0.0 and OR-ing bit 3 corrupted that pointer.
-// Damage immunity through debug flags is removed; only gravity_disabled (physics module) is set.
-// Test 3 (Step1d) worked: bones 100% exact, physics position 0 cm, no crash. But the drawn model
-// matrix lagged one frame on moving frames (up to ~8 cm): the physics step put the position back to
-// the character proxy's old spot and the matrix was built from that before our PostPhysics rewrite.
-// Step1e asks the game to move the proxy to the written position (chr_proxy_pos_update_requested)
-// and reports the drawn-position error (model matrix at Draw_Pre vs recording) in the summary.
-// Offsets stay in this file until Step 2 moves them into GameProfile.
-use std::ffi::{c_char,c_void,CString};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64,Ordering};
+//   0 ChrIns_PostPhysics: link state, ownership changes; while owning, rewrites the transform after physics
+//   2 ChrIns_PrePhysicsSafe: while owning, writes bones and transform
+//   4 Draw_Pre: while recording, samples what is about to be drawn; while owning, measures accuracy
+// Offsets stay in this file until they move into GameProfile.
+use std::ffi::{c_char,CStr,CString};
+use std::io::{Read,Write};
+use std::path::PathBuf;
+use std::sync::{Arc,Mutex};
 use eldenring::cs::{WorldChrMan,ChrIns,CSChrPhysicsModule};
 use fromsoftware_shared::FromStatic;
 
@@ -42,28 +35,38 @@ const LOCAL_POSE:usize=0x50;
 const MODEL_POSE:usize=0x60;
 const BONES:usize=150;
 const POSE_BYTES:usize=BONES*48;
-const MAX_SECONDS:u64=120; // about 1.7 MB per second uncompressed; Step 2 adds the file format and compression
+const MAX_SECONDS:u64=600; // about 52 MB per minute uncompressed
 const KEYS_GROUP:usize=0;
 const WRITE_GROUP:usize=2;
 const DRAW_GROUP:usize=4;
 const RESTORE_FRAMES:u32=10;
-// shared/TheaterHotkeys.h: AnimProbe (F9) = record start/stop, GhostCreateTest (F10) = play/stop.
-const RECORD_ACTION:u32=6;
-const PLAY_ACTION:u32=4;
+const MAGIC:&[u8;8]=b"ERBONES1";
+const FILE_VERSION:u32=1;
+const FRAME_BYTES:usize=8+48+64+POSE_BYTES*2;
+// theater_ui::RecordingState
+const RECORD_RECORDING:u32=1;
+const RECORD_PAUSED:u32=2;
 
-#[link(name="user32")]unsafe extern "system"{fn GetAsyncKeyState(key:i32)->i16;fn GetForegroundWindow()->*mut c_void;fn GetWindowThreadProcessId(window:*mut c_void,pid:*mut u32)->u32;}
-#[link(name="kernel32")]unsafe extern "system"{fn GetCurrentProcessId()->u32;}
-unsafe extern "C"{fn tm_hotkey_vk(action:u32)->u32;fn tm_render_native_status(text:*const c_char);fn tm_render_lock_game_input(locked:i32);}
+#[repr(C)]struct Link{linked:u32,recording:u32,loaded:u32,playing:u32,overlay_shown:u32,reserved:u32,speed:f64,play_source_ns:u64,received_ns:u64,recording_path:[c_char;260],loaded_path:[c_char;260]}
+unsafe extern "C"{fn tm_render_native_status(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
-struct Frame{time:u64,local:Vec<u8>,model:Vec<u8>,transform:Transform,matrix:[f32;16]}
-#[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_bone_error:f32,max_position_cm:f32,sum_position_cm:f64,max_drawn_cm:f32,sum_drawn_cm:f64}
-#[derive(PartialEq,Clone,Copy)]enum Mode{Idle,Recording,Playing,Restoring}
-struct State{mode:Mode,start:u64,frames:Vec<Frame>,last_second:u64,written:Option<usize>,writes:u64,saved:Option<Transform>,restore_left:u32,accuracy:Accuracy,saved_flags:Option<(u32,bool)>,diag_second:u64}
-static STATE:Mutex<State>=Mutex::new(State{mode:Mode::Idle,start:0,frames:Vec::new(),last_second:0,written:None,writes:0,saved:None,restore_left:0,accuracy:Accuracy{frames:0,exact_bones:0,max_bone_error:0.0,max_position_cm:0.0,sum_position_cm:0.0,max_drawn_cm:0.0,sum_drawn_cm:0.0},saved_flags:None,diag_second:0});
-static KEYS:AtomicU64=AtomicU64::new(0);
+struct Frame{time:u64,transform:Transform,matrix:[f32;16],local:Vec<u8>,model:Vec<u8>}
+#[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_drawn_cm:f32,sum_drawn_cm:f64}
+struct Loaded{path:String,frames:Arc<Vec<Frame>>}
+#[derive(PartialEq)]enum Loading{None,Busy(String),Missing(String),Failed(String)}
+struct State{
+ recording:Option<(String,Vec<Frame>)>,record_paused:bool,last_second:u64,
+ loaded:Option<Loaded>,loading:Loading,
+ owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,accuracy:Accuracy,
+}
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0}});
+// Background load results land here and are adopted on the next tick.
+static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
 fn status(text:&str){if let Ok(c)=CString::new(text){unsafe{tm_render_native_status(c.as_ptr())}}}
+fn text(c:&[c_char;260])->String{unsafe{CStr::from_ptr(c.as_ptr())}.to_string_lossy().into_owned()}
+fn link()->Link{let mut l:Link=unsafe{std::mem::zeroed()};unsafe{tm_overlay_bone_link(&mut l)};l}
 fn read_ptr(address:usize)->usize{if address<0x10000{return 0;}unsafe{std::ptr::read_volatile(address as *const usize)}}
 fn array(p:usize)->bool{(0x10000000000..0x800000000000).contains(&p)&&p%16==0}
 fn object(p:usize)->bool{(0x10000000000..0x800000000000).contains(&p)&&p%8==0}
@@ -74,111 +77,137 @@ fn read_transform(chr:usize)->Option<Transform>{let p=physics(chr)?;Some(transfo
 fn write_transform(chr:usize,t:&Transform){if let Some(p)=physics(chr){for(a,v)in transform_fields(p).iter().zip(t){unsafe{std::ptr::write_volatile(*a as *mut [f32;4],*v)}}}}
 fn ctrl(chr:usize)->usize{unsafe{&*(*(chr as *const ChrIns)).chr_ctrl as *const eldenring::cs::ChrCtrl as usize}}
 fn matrix_address(chr:usize)->usize{let c=ctrl(chr) as *const eldenring::cs::ChrCtrl;unsafe{&raw const (*c).model_matrix as usize}}
-fn physics_matrix_address(chr:usize)->usize{let c=ctrl(chr) as *const eldenring::cs::ChrCtrl;unsafe{&raw const (*c).physics_model_matrix as usize}}
 fn read_matrix(a:usize)->[f32;16]{unsafe{std::ptr::read_volatile(a as *const [f32;16])}}
-// CSChrPhysicsModule.gravity_disabled. (ChrIns::debug_flags is NOT used: wrong offset in this SDK pin.)
-fn gravity_address(chr:usize)->Option<usize>{let p=physics(chr)? as *const CSChrPhysicsModule;Some(unsafe{&raw const (*p).gravity_disabled as usize})}
-fn protect(chr:usize)->Option<(u32,bool)>{
- // Only touch the byte if it looks like a bool, so a wrong offset can never corrupt a pointer.
- let g=gravity_address(chr)?;let byte=unsafe{std::ptr::read_volatile(g as *const u8)};
- if byte>1{crate::log_game(&format!("BONE_REPLAY_ERROR: gravity_disabled reads {byte}, not a bool; offset untrusted, gravity left alone"));return None;}
- unsafe{std::ptr::write_volatile(g as *mut u8,1);}Some((0,byte==1))}
-fn keep_protected(chr:usize,on:bool){if !on{return;}if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut u8,1)}}}
-fn unprotect(chr:usize,saved:(u32,bool)){if let Some(g)=gravity_address(chr){unsafe{std::ptr::write_volatile(g as *mut u8,saved.1 as u8)}}}
-// Ask the physics module to move the character proxy to the written position, so the physics step
-// keeps it instead of restoring last frame's spot. Only written if the byte looks like a bool.
-fn request_proxy_move(chr:usize)->bool{
- let Some(p)=physics(chr) else {return false;};let m=p as *const CSChrPhysicsModule;let a=unsafe{&raw const (*m).chr_proxy_pos_update_requested as usize};
- let byte=unsafe{std::ptr::read_volatile(a as *const u8)};if byte>1{return false;}unsafe{std::ptr::write_volatile(a as *mut u8,1)};true}
+// Byte flags in CSChrPhysicsModule, only written when they read as a bool (0 or 1).
+fn bool_flag(chr:usize,pick:fn(*const CSChrPhysicsModule)->usize)->Option<usize>{let p=physics(chr)?;let a=pick(p as *const CSChrPhysicsModule);(unsafe{std::ptr::read_volatile(a as *const u8)}<=1).then_some(a)}
+fn gravity_flag(chr:usize)->Option<usize>{bool_flag(chr,|m|unsafe{&raw const (*m).gravity_disabled as usize})}
+fn proxy_flag(chr:usize)->Option<usize>{bool_flag(chr,|m|unsafe{&raw const (*m).chr_proxy_pos_update_requested as usize})}
+fn set_flag(a:Option<usize>,on:bool){if let Some(a)=a{unsafe{std::ptr::write_volatile(a as *mut u8,on as u8)}}}
 fn pose_arrays(chr:usize)->Option<(usize,usize)>{
  let importer=read_ptr(chr+POSE_IMPORTER);if !object(importer){return None;}
  let (local,model)=(read_ptr(importer+LOCAL_POSE),read_ptr(importer+MODEL_POSE));
  (array(local)&&array(model)).then_some((local,model))}
 fn pose(p:usize)->&'static [u8]{unsafe{std::slice::from_raw_parts(p as *const u8,POSE_BYTES)}}
-fn max_float_error(a:&[u8],b:&[u8])->f32{a.chunks_exact(4).zip(b.chunks_exact(4)).map(|(x,y)|(f32::from_le_bytes(x.try_into().unwrap())-f32::from_le_bytes(y.try_into().unwrap())).abs()).fold(0.0,f32::max)}
+fn bones_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.bones"))}
 
-// Rising edges of [record, play] while the game window is focused.
-fn pressed()->[bool;2]{
- let mut pid=0;unsafe{GetWindowThreadProcessId(GetForegroundWindow(),&mut pid);}let focused=pid==unsafe{GetCurrentProcessId()};
- let down=[RECORD_ACTION,PLAY_ACTION].map(|a|{let k=unsafe{tm_hotkey_vk(a)} as i32;focused&&k!=0&&unsafe{GetAsyncKeyState(k)}<0});
- let now=(down[0] as u64)|((down[1] as u64)<<1);let was=KEYS.swap(now,Ordering::Relaxed);
- [down[0]&&was&1==0,down[1]&&was&2==0]}
+// File: "ERBONES1", u32 version, u32 bone count, u32 frame bytes, u32 reserved, u64 frame count,
+// then per frame: u64 source time (game monotonic ns), 12 f32 transform, 16 f32 model matrix,
+// local pose, model pose. Written to .tmp and renamed, so a crash never leaves a half file.
+fn save(path:PathBuf,frames:Vec<Frame>)->std::io::Result<u64>{
+ let tmp=path.with_extension("bones.tmp");
+ {let mut f=std::io::BufWriter::new(std::fs::File::create(&tmp)?);
+  f.write_all(MAGIC)?;for v in [FILE_VERSION,BONES as u32,FRAME_BYTES as u32,0]{f.write_all(&v.to_le_bytes())?;}f.write_all(&(frames.len() as u64).to_le_bytes())?;
+  for fr in &frames{f.write_all(&fr.time.to_le_bytes())?;for v in fr.transform.iter().flatten().chain(fr.matrix.iter()){f.write_all(&v.to_le_bytes())?;}f.write_all(&fr.local)?;f.write_all(&fr.model)?;}
+  f.flush()?;f.get_ref().sync_all()?;}
+ std::fs::rename(&tmp,&path)?;Ok(std::fs::metadata(&path)?.len())}
+fn load(path:&PathBuf)->Result<Vec<Frame>,String>{
+ let mut data=Vec::new();std::fs::File::open(path).and_then(|mut f|f.read_to_end(&mut data)).map_err(|e|e.to_string())?;
+ if data.len()<32||&data[0..8]!=MAGIC{return Err("not a bone replay file".into());}
+ let u32_at=|i:usize|u32::from_le_bytes(data[i..i+4].try_into().unwrap());
+ if u32_at(8)!=FILE_VERSION||u32_at(12)!=BONES as u32||u32_at(16)!=FRAME_BYTES as u32{return Err(format!("unsupported version {} / bones {} / frame size {}",u32_at(8),u32_at(12),u32_at(16)));}
+ let count=u64::from_le_bytes(data[24..32].try_into().unwrap()) as usize;
+ if count==0||data.len()!=32+count*FRAME_BYTES{return Err(format!("size {} does not match {count} frames",data.len()));}
+ let f32_at=|i:usize|f32::from_le_bytes(data[i..i+4].try_into().unwrap());
+ let frames=(0..count).map(|k|{let o=32+k*FRAME_BYTES;
+  let transform=std::array::from_fn(|r|std::array::from_fn(|c|f32_at(o+8+(r*4+c)*4)));
+  let matrix=std::array::from_fn(|i|f32_at(o+56+i*4));
+  Frame{time:u64::from_le_bytes(data[o..o+8].try_into().unwrap()),transform,matrix,local:data[o+120..o+120+POSE_BYTES].to_vec(),model:data[o+120+POSE_BYTES..o+FRAME_BYTES].to_vec()}}).collect::<Vec<_>>();
+ if frames.windows(2).any(|w|w[1].time<w[0].time){return Err("frame times go backwards".into());}
+ Ok(frames)}
 
-fn duration(s:&State)->f64{s.frames.last().map(|f|f.time as f64/1e9).unwrap_or(0.0)}
-fn stop_recording(s:&mut State){
- let seconds=duration(s);
- crate::log_game(&format!("BONE_REPLAY: recorded {} frames over {:.2} s ({:.1} fps, {} MB in memory)",s.frames.len(),seconds,s.frames.len() as f64/seconds.max(0.001),s.frames.len()*POSE_BYTES*2/1_048_576));
- s.mode=Mode::Idle;
- if s.frames.len()<2{s.frames.clear();status("BONE REPLAY: nothing recorded");return;}
- status(&format!("BONE REPLAY: recorded {seconds:.1} s. Press F10 to play it on your character"));}
-fn start_playback(s:&mut State,now:u64){
- let Some(chr)=player_chr() else {status("BONE REPLAY: player not ready");return;};
- s.saved=read_transform(chr);if s.saved.is_none(){status("BONE REPLAY: player not ready");return;}
- let m=read_matrix(matrix_address(chr));
- crate::log_game(&format!("BONE_REPLAY_STEP: before protect: model_matrix t=({:.2},{:.2},{:.2}) physics_pos=({:.2},{:.2},{:.2})",m[12],m[13],m[14],s.saved.unwrap()[2][0],s.saved.unwrap()[2][1],s.saved.unwrap()[2][2]));
- s.saved_flags=protect(chr);s.diag_second=u64::MAX;
- crate::log_game("BONE_REPLAY_STEP: gravity off for playback");
- s.mode=Mode::Playing;s.start=now;s.written=None;s.writes=0;s.accuracy=Accuracy::default();
- unsafe{tm_render_lock_game_input(1)};
- crate::log_game(&format!("BONE_REPLAY: playback started; {} frames, {:.2} s; controls locked; return transform saved",s.frames.len(),duration(s)));
- status("BONE REPLAY: playing on your character (controls locked). F10 stops");}
-fn stop_playback(s:&mut State,reason:&str){
+fn finish_recording(s:&mut State){
+ let Some((replay,frames))=s.recording.take() else {return;};
+ let seconds=frames.last().zip(frames.first()).map(|(l,f)|(l.time-f.time) as f64/1e9).unwrap_or(0.0);
+ crate::log_game(&format!("BONE_REPLAY: recording stopped; {} frames over {seconds:.2} s; saving {}",frames.len(),bones_path(&replay).display()));
+ if frames.is_empty(){status("BONE REPLAY: no bones were recorded (load in first)");return;}
+ let _=std::thread::Builder::new().name("TheaterMode.BoneSave".into()).spawn(move||{
+  let path=bones_path(&replay);
+  match save(path.clone(),frames){
+   Ok(bytes)=>{crate::log_game(&format!("BONE_REPLAY: saved {} ({} MB)",path.display(),bytes/1_048_576));status("BONE REPLAY: bones saved with the recording");}
+   Err(e)=>{crate::log_game(&format!("BONE_REPLAY_ERROR: could not save {}: {e}",path.display()));status("BONE REPLAY: could not save the bone data (see log)");}}});}
+
+fn adopt_loaded(s:&mut State){
+ let Some(result)=LOADED.lock().unwrap().take() else {return;};
+ match result{
+  Ok(l)=>{let current=matches!(&s.loading,Loading::Busy(p) if *p==l.path);if !current{return;}
+   let seconds=l.frames.last().zip(l.frames.first()).map(|(a,b)|(a.time-b.time) as f64/1e9).unwrap_or(0.0);
+   crate::log_game(&format!("BONE_REPLAY: loaded {} frames ({seconds:.2} s) for {}",l.frames.len(),l.path));
+   status(&format!("BONE REPLAY: bones loaded ({seconds:.1} s). Play or scrub the timeline"));s.loading=Loading::None;s.loaded=Some(l);}
+  Err((path,e))=>{crate::log_game(&format!("BONE_REPLAY_ERROR: could not load bones for {path}: {e}"));status("BONE REPLAY: this replay's bone data could not be read (see log)");s.loading=Loading::Failed(path);}}}
+
+// Which loaded replay the host has open; starts a background load when it changes.
+fn follow_loaded(s:&mut State,l:&Link){
+ let path=if l.loaded!=0{text(&l.loaded_path)}else{String::new()};
+ let known=match &s.loading{Loading::Busy(p)|Loading::Missing(p)|Loading::Failed(p)=>Some(p.clone()),Loading::None=>s.loaded.as_ref().map(|x|x.path.clone())};
+ if known.as_deref()==Some(path.as_str())||(path.is_empty()&&known.is_none()){return;}
+ s.loaded=None;s.loading=Loading::None;
+ if path.is_empty(){return;}
+ let file=bones_path(&path);
+ if !file.is_file(){crate::log_game(&format!("BONE_REPLAY: {path} has no bone data (recorded before bone replays)"));status("BONE REPLAY: this replay has no bone data. Record a new one with F5");s.loading=Loading::Missing(path);return;}
+ s.loading=Loading::Busy(path.clone());status("BONE REPLAY: loading bones...");
+ let _=std::thread::Builder::new().name("TheaterMode.BoneLoad".into()).spawn(move||{
+  let result=load(&file).map(|frames|Loaded{path:path.clone(),frames:Arc::new(frames)}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
+
+// The timeline position in source time, extrapolated between host snapshots while playing.
+fn timeline(l:&Link,now:u64)->u64{
+ if l.playing==0||l.received_ns==0{return l.play_source_ns;}
+ let since=now.saturating_sub(l.received_ns).min(250_000_000) as f64;
+ l.play_source_ns+(since*l.speed.clamp(0.0,8.0)) as u64}
+
+fn release(s:&mut State,chr:usize,reason:&str){
+ if !s.owning{return;}s.owning=false;s.restore_left=RESTORE_FRAMES;
  let a=&s.accuracy;
- crate::log_game(&format!("BONE_REPLAY: playback {reason}; {} writes; accuracy over {} measured frames: bones exact {} ({:.1}%), max bone float error {:.6}, physics position error max {:.3} cm mean {:.3} cm, drawn position error max {:.3} cm mean {:.3} cm",
-  s.writes,a.frames,a.exact_bones,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_bone_error,a.max_position_cm,a.sum_position_cm/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64)));
- s.mode=Mode::Restoring;s.restore_left=RESTORE_FRAMES;
- status(&format!("BONE REPLAY: playback {reason}. Drawn position error max {:.1} cm (mean {:.2}), bones exact {:.0}% of frames",a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64),100.0*a.exact_bones as f64/(a.frames.max(1) as f64)));}
+ crate::log_game(&format!("BONE_REPLAY: released the body ({reason}); accuracy over {} frames: bones exact {:.1}%, drawn position error max {:.2} cm mean {:.3} cm",
+  a.frames,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64)));
+ if let Some(t)=s.saved{write_transform(chr,&t);}}
 
 pub fn tick(group:usize,now:u64){
  let mut guard=STATE.lock().unwrap();let s=&mut *guard;
+ let chr=player_chr();
  if group==KEYS_GROUP{
-  let [record,play]=pressed();
-  match s.mode{
-   Mode::Idle if record=>{if player_chr().and_then(pose_arrays).is_some(){s.frames=Vec::new();s.mode=Mode::Recording;s.start=now;s.last_second=0;crate::log_game("BONE_REPLAY: recording started");status("BONE REPLAY: recording. Press F9 to stop");}else{status("BONE REPLAY: player not ready, load in first");}}
-   Mode::Idle if play=>{if s.frames.len()>=2{start_playback(s,now);}else{status("BONE REPLAY: nothing recorded yet. Press F9 to record");}}
-   Mode::Recording if record=>stop_recording(s),
-   Mode::Playing if play||record=>stop_playback(s,"stopped"),
-   _=>{}}
-  if s.mode==Mode::Recording{
-   let elapsed=now.saturating_sub(s.start);
-   if elapsed>MAX_SECONDS*1_000_000_000{stop_recording(s);}
-   else{let second=elapsed/1_000_000_000;if second!=s.last_second{s.last_second=second;status(&format!("BONE REPLAY: recording {second} s (max {MAX_SECONDS} s). Press F9 to stop"));}}}
- }
- let Some(chr)=player_chr() else {return;};
- match s.mode{
-  Mode::Recording if group==DRAW_GROUP=>{
-   let (Some((local,model)),Some(transform))=(pose_arrays(chr),read_transform(chr)) else {return;};
-   s.frames.push(Frame{time:now.saturating_sub(s.start),local:pose(local).to_vec(),model:pose(model).to_vec(),transform,matrix:read_matrix(matrix_address(chr))});}
-  Mode::Playing=>{
-   let elapsed=now.saturating_sub(s.start);
-   if group==KEYS_GROUP&&elapsed>s.frames.last().map(|f|f.time).unwrap_or(0){stop_playback(s,"finished");return;}
-   if group==WRITE_GROUP{
-    // Pick the frame for this game frame once, so bones and transform always come from the same sample.
-    let index=s.frames.partition_point(|f|f.time<=elapsed).saturating_sub(1);s.written=Some(index);
-    let Some((local,model))=pose_arrays(chr) else {return;};let f=&s.frames[index];
-    unsafe{std::ptr::copy_nonoverlapping(f.local.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(f.model.as_ptr(),model as *mut u8,POSE_BYTES);}
-    if s.writes<3{crate::log_game(&format!("BONE_REPLAY_STEP: write {} frame {index}: bones written, writing transform",s.writes));}
-    write_transform(chr,&f.transform);
-    let moved=request_proxy_move(chr);if s.writes==0&&!moved{crate::log_game("BONE_REPLAY_ERROR: chr_proxy_pos_update_requested not a bool; proxy move not requested");}
-    if s.writes<3{crate::log_game("BONE_REPLAY_STEP: transform written, refreshing protection");}
-    keep_protected(chr,s.saved_flags.is_some());s.writes+=1;}
-   else if group==KEYS_GROUP{if let Some(i)=s.written{write_transform(chr,&s.frames[i].transform);}}
-   else if group==DRAW_GROUP{
-    let Some(i)=s.written else {return;};let f=&s.frames[i];
-    let (Some((local,model)),Some(t))=(pose_arrays(chr),read_transform(chr)) else {return;};
-    // Once a second: where the game was about to draw the body (before our matrix write) vs the recording.
-    let drawn=read_matrix(matrix_address(chr));let second=elapsed/1_000_000_000;
-    if second!=s.diag_second{s.diag_second=second;let pm=read_matrix(physics_matrix_address(chr));
-     crate::log_game(&format!("BONE_REPLAY_DIAG: t={second}s frame={i} model_matrix drawn=({:.2},{:.2},{:.2}) recorded=({:.2},{:.2},{:.2}) physics_matrix=({:.2},{:.2},{:.2}) physics_pos=({:.2},{:.2},{:.2}) recorded_pos=({:.2},{:.2},{:.2})",
-      drawn[12],drawn[13],drawn[14],f.matrix[12],f.matrix[13],f.matrix[14],pm[12],pm[13],pm[14],t[2][0],t[2][1],t[2][2],f.transform[2][0],f.transform[2][1],f.transform[2][2]));}
-    let (l,m)=(pose(local),pose(model));let a=&mut s.accuracy;a.frames+=1;
-    if l==&f.local[..]&&m==&f.model[..]{a.exact_bones+=1;}else{a.max_bone_error=a.max_bone_error.max(max_float_error(l,&f.local)).max(max_float_error(m,&f.model));}
-    let dd=(12..15).map(|k|(drawn[k]-f.matrix[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(dd);a.sum_drawn_cm+=dd as f64;
-    let d=(0..3).map(|k|(t[2][k]-f.transform[2][k]).powi(2)).sum::<f32>().sqrt()*100.0;
-    a.max_position_cm=a.max_position_cm.max(d);a.sum_position_cm+=d as f64;}
+  let l=link();
+  // Recording follows the host recorder.
+  let recording=l.linked!=0&&(l.recording==RECORD_RECORDING||l.recording==RECORD_PAUSED);
+  if recording&&s.recording.is_none(){let path=text(&l.recording_path);
+   if !path.is_empty(){crate::log_game(&format!("BONE_REPLAY: recording started for {path}"));s.recording=Some((path,Vec::new()));s.last_second=0;}}
+  if !recording&&s.recording.is_some(){finish_recording(s);}
+  s.record_paused=l.recording==RECORD_PAUSED;
+  if let Some((_,frames))=&s.recording{if let (Some(f),Some(last))=(frames.first(),frames.last()){if last.time-f.time>MAX_SECONDS*1_000_000_000&&s.last_second!=u64::MAX{s.last_second=u64::MAX;crate::log_game("BONE_REPLAY: 10 minute bone limit reached; later frames are not recorded");status("BONE REPLAY: 10 minute limit reached, stop the recording (F6)");}}}
+  // Playback follows the loaded replay and the timeline.
+  adopt_loaded(s);follow_loaded(s,&l);
+  let want=s.loaded.is_some()&&s.recording.is_none()&&(l.playing!=0||l.overlay_shown!=0);
+  if let Some(chr)=chr{
+   if want&&!s.owning{
+    s.saved=read_transform(chr);if s.saved.is_some(){
+     s.owning=true;s.written=None;s.accuracy=Accuracy::default();
+     let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
+     unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
+   else if !want&&s.owning{release(s,chr,if s.loaded.is_none(){"replay unloaded"}else{"timeline idle and overlay closed"});}
+   if !s.owning&&s.restore_left>0{
+    if let Some(t)=s.saved{write_transform(chr,&t);}set_flag(proxy_flag(chr),true);
+    s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
+   if s.owning{if let Some(i)=s.written{if let Some(l)=&s.loaded{write_transform(chr,&l.frames[i].transform);}}}
   }
-  Mode::Restoring if group==KEYS_GROUP||group==WRITE_GROUP=>{
-   if let Some(t)=s.saved{write_transform(chr,&t);}
-   if group==KEYS_GROUP{s.restore_left=s.restore_left.saturating_sub(1);if s.restore_left==0{s.mode=Mode::Idle;if let Some(f)=s.saved_flags.take(){unprotect(chr,f);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}}
+  if s.owning{
+   // Pick this game frame's sample once, from the timeline.
+   let t=timeline(&l,now);
+   if let Some(loaded)=&s.loaded{let frames=&loaded.frames;s.written=Some(frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1));}}
+  return;}
+ let Some(chr)=chr else {return;};
+ if group==DRAW_GROUP&&!s.record_paused&&s.last_second!=u64::MAX{
+  if let Some((_,frames))=&mut s.recording{
+   let (Some((local,model)),Some(transform))=(pose_arrays(chr),read_transform(chr)) else {return;};
+   frames.push(Frame{time:now,transform,matrix:read_matrix(matrix_address(chr)),local:pose(local).to_vec(),model:pose(model).to_vec()});}}
+ if !s.owning{return;}
+ let (Some(i),Some(loaded))=(s.written,&s.loaded) else {return;};let f=&loaded.frames[i];
+ match group{
+  WRITE_GROUP=>{
+   let Some((local,model))=pose_arrays(chr) else {return;};
+   unsafe{std::ptr::copy_nonoverlapping(f.local.as_ptr(),local as *mut u8,POSE_BYTES);std::ptr::copy_nonoverlapping(f.model.as_ptr(),model as *mut u8,POSE_BYTES);}
+   write_transform(chr,&f.transform);set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);}
+  DRAW_GROUP=>{
+   let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
+   let a=&mut s.accuracy;a.frames+=1;if pose(local)==&f.local[..]&&pose(model)==&f.model[..]{a.exact_bones+=1;}
+   let d=(12..15).map(|k|(drawn[k]-f.matrix[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(d);a.sum_drawn_cm+=d as f64;}
   _=>{}}
 }

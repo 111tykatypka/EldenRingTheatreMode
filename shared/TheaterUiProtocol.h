@@ -9,8 +9,10 @@ inline constexpr std::uint32_t magic=0x37495554;
 // Version 3: replay library page and open-by-index, since the launcher no longer has a library window.
 // Version 4: named recordings (F5 asks the overlay for a name first), library sort/rename/delete,
 //            richer library rows and a library message line. Request carries a UTF-8 text field.
+// Version 5: bone replay link. The game DLL records bones while a recording runs (recording_path)
+//            and plays a loaded replay's bones following the host timeline (loaded_path, play_source_ns).
 // Host and overlay are built together; a version mismatch disconnects instead of guessing.
-inline constexpr std::uint32_t version=4;
+inline constexpr std::uint32_t version=5;
 enum Command : std::uint32_t { poll, play, pause, stop, restart, seek, previous, next, speed, select, page, record_start, record_stop, replay_page, replay_open,
  record_named,    // text = display name; starts recording with that name
  replay_sort,     // value = key*2 + descending; key: 0 date, 1 size, 2 name, 3 duration
@@ -41,6 +43,12 @@ struct Snapshot {std::uint32_t magic_value{magic},version{theater_ui::version},l
  char default_name[96]{};        // suggested name for the next recording
  char library_message[160]{};    // result of the last rename/delete/open, shown in the Replays panel
  char recording_name[96]{};      // display name of the recording in progress
+ // v5
+ char recording_path[260]{};     // UTF-8 .erplay path of the recording in progress (empty when idle)
+ char loaded_path[260]{};        // UTF-8 .erplay path of the loaded replay (empty when none)
+ std::uint64_t play_source_ns{}; // timeline position in the recorder's source clock (the game's monotonic clock)
+ std::uint32_t host_playing{};   // the host timeline is advancing
+ std::uint32_t v5_reserved{};
 };
 static_assert(sizeof(Request)==32+text_size);
 inline bool has_text(const Request&r){return r.text[0]!=0&&memchr(r.text,0,text_size)!=nullptr;}

@@ -75,7 +75,13 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  auto copy=[](char*dst,size_t n,const std::string&src){memcpy(dst,src.data(),std::min(src.size(),n-1));};
  copy(s.default_name,sizeof(s.default_name),library::default_name());
  {std::lock_guard lock(app.mutex);copy(s.library_message,sizeof(s.library_message),app.library_message);s.library_message_id=app.library_message_id;s.library_message_error=app.library_message_error;}
- {std::lock_guard names(app.names_mutex);if(s.recording_state!=theater_ui::record_idle)copy(s.recording_name,sizeof(s.recording_name),app.recording_name);}
+ {std::lock_guard names(app.names_mutex);if(s.recording_state!=theater_ui::record_idle){copy(s.recording_name,sizeof(s.recording_name),app.recording_name);copy(s.recording_path,sizeof(s.recording_path),app.recording_path);}}
+ // Bone replay link: the loaded file and the timeline position in source-clock time. Each sample keeps
+ // the source time it was recorded at, so pauses during recording map correctly.
+ {std::lock_guard lock(app.replay_mutex);if(app.replay_player&&!app.opened_replay.empty()){
+  copy(s.loaded_path,sizeof(s.loaded_path),game_launcher::utf8(app.opened_replay.wstring()));
+  const auto& st=app.replay_player->state();s.host_playing=st.status==replay::Status::playing;
+  try{const auto sample=app.replay_player->reader().sample(st.sample_index);s.play_source_ns=sample.source_time_ns+(st.timestamp_ns>sample.replay_time_ns?st.timestamp_ns-sample.replay_time_ns:0);}catch(...){s.play_source_ns=0;}}}
  {std::lock_guard lock(mutex);cached=s;}
 }
 }

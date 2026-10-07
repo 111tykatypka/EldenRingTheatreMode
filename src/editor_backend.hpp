@@ -66,6 +66,7 @@ struct App {
   // the next START uses pending_record_name (display name + file name), then clears it.
   std::mutex names_mutex;
   std::string pending_record_name, recording_name;
+  std::string recording_path; // UTF-8 final .erplay path of the recording in progress; the game writes <path>.bones beside it
   std::atomic<std::uint32_t> name_request{};
   // Replay Library sort (persisted in Library.settings) and the last library message for the overlay.
   std::atomic<std::uint32_t> sort_key{0};

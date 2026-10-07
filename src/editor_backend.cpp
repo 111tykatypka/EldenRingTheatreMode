@@ -386,10 +386,14 @@ void launch_game() {
   }
 }
 void return_replay_start(){std::lock_guard lock(app.replay_mutex);if(app.replay_player&&can_start_game_replay())app.game_replay->prepare_start(*app.replay_player);}
+// A replay recorded with bone data has "<file>.bones" beside it. The game DLL plays those bones on
+// the player itself, following this host timeline, so the old position-only in-game replay is skipped.
+bool has_bones(const fs::path& replay){if(replay.empty())return false;auto p=replay;p+=L".bones";std::error_code ec;return fs::is_regular_file(p,ec);}
 void play_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
+  if (has_bones(app.opened_replay)) { app.replay_player->play(); return; }
   if (app.game_pid.load() || app.game_replay->active()) {
     if (can_start_game_replay()) {
       app.game_replay->enable_animation(app.animation&&!app.xz_diagnostic);
@@ -405,6 +409,7 @@ void restart_replay() {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
     return;
+  if (has_bones(app.opened_replay)) { app.replay_player->restart(); return; }
   if (app.game_pid.load() || app.game_replay->active()) {
     if (can_start_game_replay()) {
       app.game_replay->enable_animation(app.animation&&!app.xz_diagnostic);
@@ -501,6 +506,7 @@ void pipe_worker() {
           md.tags = "capture-fidelity-v1,raw-state,read-only";
           md.description = "Raw player tracks schema1. New fields REFERENCE; pose, HKS VM, full effect/queue data UNAVAILABLE. Animation reconstruction not implemented.";
           auto final = library::unique_replay_path(app.replays, library::safe_stem(md.title));
+          {std::lock_guard names(app.names_mutex);app.recording_path=game_launcher::utf8(fs::absolute(final).wstring());}
           writer = std::make_unique<erplay::Writer>(final, std::move(md), 600);
           session = std::make_unique<erplay::RecordingSession>(*writer);
           session->start();
