@@ -221,10 +221,10 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 });
                 let callback=Box::leak(Box::new(callback));
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PostPhysics,callback);}
-                let late_cloth=Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(1,monotonic_ns()));})));
-                unsafe{register_task(task,CSTaskGroupIndex::LocationUpdate_PostCloth_Post,late_cloth);}
-                let draw_pre=Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(2,monotonic_ns()));})));
-                unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,draw_pre);}
+                unsafe{register_task(task,CSTaskGroupIndex::ChrIns_BehaviorSafe,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(1,monotonic_ns()));}))));}
+                unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PrePhysicsSafe,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(2,monotonic_ns()));}))));}
+                unsafe{register_task(task,CSTaskGroupIndex::LocationUpdate_PrePhysics,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(3,monotonic_ns()));}))));}
+                unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(4,monotonic_ns()));}))));}
                 log_game(&format!("Recurring task registered using resolved function eldenring.exe+0x{register_rva:X}; group=ChrIns_PostPhysics; waiting for WORLDCHR_READY and PLAYER_FOUND"));
                 loop { std::thread::sleep(Duration::from_secs(60)); }
             });
