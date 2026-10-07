@@ -23,9 +23,6 @@ impl Equip{
  /// u32::MAX arm style marks "not recorded" (older files).
  pub fn recorded(&self)->bool{self.arm_style!=u32::MAX}
  pub fn plausible(&self)->bool{self.arm_style<=3&&self.slots[..2].iter().all(|s|*s<=2)&&self.slots[2..].iter().all(|s|*s<=1)&&self.params.iter().all(|p|*p>=-1)}
- pub fn encode(&self,out:&mut Vec<u8>){
-  out.extend_from_slice(&self.arm_style.to_le_bytes());for v in self.slots{out.extend_from_slice(&v.to_le_bytes());}
-  for v in self.handles{out.extend_from_slice(&v.to_le_bytes());}for v in self.params{out.extend_from_slice(&v.to_le_bytes());}}
  pub fn decode(b:&[u8])->Self{
   let u=|i:usize|u32::from_le_bytes(b[i*4..i*4+4].try_into().unwrap());
   Self{arm_style:u(0),slots:std::array::from_fn(|k|u(1+k)),handles:std::array::from_fn(|k|u(7+k)),params:std::array::from_fn(|k|u(7+SLOTS+k) as i32)}}

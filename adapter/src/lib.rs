@@ -20,6 +20,8 @@ mod character_capture;
 mod bone_replay;
 mod arrival;
 mod equipment;
+mod codec;
+mod world_file;
 mod replay_interpolation;
 mod visual_capture;
 mod fidelity_capture;
