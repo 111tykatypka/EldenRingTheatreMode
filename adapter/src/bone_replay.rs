@@ -133,15 +133,16 @@ fn adopt_loaded(s:&mut State){
    let seconds=l.frames.last().zip(l.frames.first()).map(|(a,b)|(a.time-b.time) as f64/1e9).unwrap_or(0.0);
    crate::log_game(&format!("BONE_REPLAY: loaded {} frames ({seconds:.2} s) for {}",l.frames.len(),l.path));
    status(&format!("BONE REPLAY: bones loaded ({seconds:.1} s). Play or scrub the timeline"));s.loading=Loading::None;s.loaded=Some(l);}
-  Err((path,e))=>{crate::log_game(&format!("BONE_REPLAY_ERROR: could not load bones for {path}: {e}"));status("BONE REPLAY: this replay's bone data could not be read (see log)");s.loading=Loading::Failed(path);}}}
+  Err((path,e))=>{if !matches!(&s.loading,Loading::Busy(p) if *p==path){return;}
+   crate::log_game(&format!("BONE_REPLAY_ERROR: could not load bones for {path}: {e}"));status("BONE REPLAY: this replay's bone data could not be read (see log)");s.loading=Loading::Failed(path);}}}
 
 // Which loaded replay the host has open; starts a background load when it changes.
 fn follow_loaded(s:&mut State,l:&Link){
  let path=if l.loaded!=0{text(&l.loaded_path)}else{String::new()};
  let known=match &s.loading{Loading::Busy(p)|Loading::Missing(p)|Loading::Failed(p)=>Some(p.clone()),Loading::None=>s.loaded.as_ref().map(|x|x.path.clone())};
  if known.as_deref()==Some(path.as_str())||(path.is_empty()&&known.is_none()){return;}
- s.loaded=None;s.loading=Loading::None;
- if path.is_empty(){return;}
+ s.loaded=None;s.loading=Loading::None;s.written=None;
+ if path.is_empty(){LOADED.lock().unwrap().take();crate::log_game("BONE_REPLAY: unloaded pose data; pending loads invalidated");return;}
  let file=bones_path(&path);
  if !file.is_file(){crate::log_game(&format!("BONE_REPLAY: {path} has no bone data (recorded before bone replays)"));status("BONE REPLAY: this replay has no bone data. Record a new one with F5");s.loading=Loading::Missing(path);return;}
  s.loading=Loading::Busy(path.clone());status("BONE REPLAY: loading bones...");
@@ -166,6 +167,10 @@ pub fn tick(group:usize,now:u64){
  let chr=player_chr();
  if group==KEYS_GROUP{
   let l=link();
+  // Player loss cannot leave the keyboard lock or a return transform armed for a new player.
+  if chr.is_none()&&(s.owning||s.restore_left>0){
+   s.owning=false;s.restore_left=0;s.saved=None;s.gravity_saved=None;s.written=None;
+   unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: player unavailable; ownership and input lock released");}
   // Recording follows the host recorder.
   let recording=l.linked!=0&&(l.recording==RECORD_RECORDING||l.recording==RECORD_PAUSED);
   if recording&&s.recording.is_none(){let path=text(&l.recording_path);
@@ -192,6 +197,8 @@ pub fn tick(group:usize,now:u64){
    // Pick this game frame's sample once, from the timeline.
    let t=timeline(&l,now);
    if let Some(loaded)=&s.loaded{let frames=&loaded.frames;s.written=Some(frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1));}}
+  let fresh=l.linked!=0&&l.received_ns!=0&&now.saturating_sub(l.received_ns)<500_000_000;
+  crate::timescale::update(fresh&&l.playing!=0&&s.owning&&chr.is_some()&&s.loaded.is_some()&&s.recording.is_none(),l.speed,now);
   return;}
  let Some(chr)=chr else {return;};
  if group==DRAW_GROUP&&!s.record_paused&&s.last_second!=u64::MAX{

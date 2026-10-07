@@ -60,7 +60,7 @@ public:
  // TogglePlayback (Space) belongs to Theater Mode only while the overlay is open (game input is
  // blocked then anyway). With the overlay hidden it is always the game's key, replay loaded or not.
  bool owns_playback_key() const {return blocking();}
- void toggle_playback(){if(!replay_loaded.load())return;command(replay_playing.load()?theater_ui::pause:theater_ui::play);}
+ void toggle_playback(){if(replay_loaded.load())command(theater_ui::toggle_playback);}
  // Virtual cursor. Elden Ring can hold the mouse through DirectInput so Windows never moves
  // the cursor or sends WM_MOUSEMOVE. While the UI is shown, the blocked game mouse deltas and
  // buttons drive the ImGui cursor instead, unless real window mouse messages are arriving.
@@ -107,7 +107,7 @@ public:
   theater_ui::Request r;{std::lock_guard lock(ipc);if(!commands.empty()){r=commands.front();commands.pop_front();}}r.sequence=++sequence;theater_ui::Snapshot s;
   if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=theater_ui::version||s.sequence!=r.sequence||s.count>16||!std::isfinite(s.playback_speed)){
    CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;replay_loaded=false;replay_playing=false;{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
-  {std::lock_guard lock(ipc);snapshot=s;}{ULONGLONG t=0;QueryInterruptTimePrecise(&t);snapshot_ns=std::uint64_t(t)*100;}host_linked=true;replay_loaded=s.loaded!=0;replay_playing=s.phase==2;Sleep(50);
+  {std::lock_guard lock(ipc);snapshot=s;}{ULONGLONG t=0;QueryInterruptTimePrecise(&t);snapshot_ns=std::uint64_t(t)*100;}host_linked=true;replay_loaded=s.loaded!=0;replay_playing=s.host_playing!=0;Sleep(50);
  }if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
  void adopt(IDXGISwapChain*sc,IUnknown*unknown){ComPtr<ID3D12CommandQueue> q;ComPtr<IDXGISwapChain3> c;
   if(FAILED(unknown->QueryInterface(IID_PPV_ARGS(&q)))||q->GetDesc().Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||FAILED(sc->QueryInterface(IID_PPV_ARGS(&c))))return;

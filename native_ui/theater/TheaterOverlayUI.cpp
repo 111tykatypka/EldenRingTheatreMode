@@ -23,8 +23,8 @@ namespace
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking |
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 
-    constexpr std::uint64_t kSpeeds[] = { 10, 25, 50, 100, 200, 400 };
-    constexpr const char* kSpeedLabels[] = { "0.10x", "0.25x", "0.50x", "1.00x", "2.00x", "4.00x" };
+    constexpr auto& kSpeeds = theater_speed::presets;
+    constexpr auto& kSpeedLabels = theater_speed::labels;
     constexpr size_t kMaxLog = 400;
 
     void FormatTime(double seconds, char* out, size_t n)
@@ -205,6 +205,23 @@ void Overlay::Observe(const OverlayFrame& f)
 const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
 {
     emit_ = emit; emitUser_ = user;
+    const std::string replayPath = f.snapshot.loaded
+        ? std::string(f.snapshot.loaded_path, strnlen(f.snapshot.loaded_path, sizeof(f.snapshot.loaded_path))) : std::string{};
+    if (replayPath != lastReplayPath_)
+    {
+        lastReplayPath_ = replayPath;
+        ui_.timeline = {};
+        ui_.trackViews.clear();
+        ui_.selection = {};
+        ui_.gizmo = {};
+        lastDuration_ = 0;
+        scrubbing_ = draggingNavigator_ = false;
+        lastScrubSent_ = scrubTime_ = 0;
+        navigatorGrab_ = 0;
+        selectedReplay_ = -1;
+        pendingDialog_ = 0;
+        pendingSpeed_ = -1;
+    }
     ImGuiIO& io = ImGui::GetIO();
     ui_.visibility = f.visibility;
     ui_.hiddenAt = f.hiddenAt;
@@ -653,6 +670,11 @@ void Overlay::DrawLibrary(const OverlayFrame& f)
     }
     ImGui::Dummy(ImVec2(0, Px(Space::SM, s)));
 
+    if (FlatButton("unload_replay", T(Str::UnloadReplay), ImVec2(-1, Px(Metric::TextButtonHeight, s)),
+                   Color::FrameBg, Color::TextPrimary, f.hostLinked && snap.loaded && !rec))
+        Emit(theater_ui::replay_unload);
+    ImGui::Dummy(ImVec2(0, Px(Space::SM, s)));
+
     // Sortable list. Sorting happens on the host so paging stays consistent.
     const unsigned shown = std::min<std::uint32_t>(snap.replay_count, theater_ui::replay_page_size);
     if (!shown)
@@ -973,12 +995,29 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     ImGui::PopFont();
 
     // Speed.
-    int selected = 3;
-    for (int i = 0; i < 6; ++i) if (std::fabs(snap.playback_speed * 100.0 - (double)kSpeeds[i]) < 0.5) selected = i;
+    int selected = 5;
+    for (int i = 0; i < (int)kSpeeds.size(); ++i)
+        if (std::fabs(snap.playback_speed * 100.0 - (double)kSpeeds[i]) < 0.5) selected = i;
+    if (pendingSpeed_ == selected || f.now - speedSentAt_ > 1.0) pendingSpeed_ = -1;
+    if (pendingSpeed_ >= 0) selected = pendingSpeed_;
     ImGui::SetCursorScreenPos(ImVec2(x, o.y + (height - ImGui::GetFrameHeight()) * 0.5f));
     ImGui::SetNextItemWidth(Px(84, s));
     ImGui::BeginDisabled(!canTransport);
-    if (ImGui::Combo("##speed", &selected, kSpeedLabels, 6)) Emit(theater_ui::speed, kSpeeds[selected]);
+    bool changed = ImGui::Combo("##speed", &selected, kSpeedLabels.data(), (int)kSpeedLabels.size());
+    if (canTransport && ImGui::IsItemHovered())
+    {
+        ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (wheel != 0)
+        {
+            const int steps = std::max(1, (int)std::ceil(std::fabs(wheel)));
+            const int next = std::clamp(selected + (wheel > 0 ? steps : -steps), 0, (int)kSpeeds.size() - 1);
+            changed = changed || next != selected;
+            selected = next;
+            ImGui::GetIO().MouseWheel = 0; // consumed by this control, not the timeline below it
+        }
+    }
+    if (changed) { pendingSpeed_ = selected; speedSentAt_ = f.now; Emit(theater_ui::speed, kSpeeds[selected]); }
     ImGui::EndDisabled();
     Tooltip(T(Str::Speed));
 

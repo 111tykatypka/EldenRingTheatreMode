@@ -291,6 +291,18 @@ void pause_replay() {
   else if (app.replay_player)
     app.replay_player->pause();
 }
+void toggle_replay() {
+  // Decide on the authoritative host state, not a delayed overlay snapshot.
+  std::lock_guard playback_lock(app.replay_mutex);
+  if (!app.replay_player) return;
+  if (app.replay_player->state().status == replay::Status::playing)
+    pause_replay();
+  else
+    play_replay();
+  log_line("REPLAY_TOGGLE time_ns=" +
+           std::to_string(app.replay_player->state().timestamp_ns) +
+           " playing=" + std::to_string(app.replay_player->state().status == replay::Status::playing));
+}
 void seek_replay(std::uint64_t t) {
   std::lock_guard playback_lock(app.replay_mutex);
   if (!app.replay_player)
@@ -818,6 +830,7 @@ void open_replay(const fs::path &path) {
   log_line("REPLAY_OPEN " + game_launcher::utf8(path.wstring()));
 }
 void unload_replay() {
+  if (!playback_view().loaded) return;
   emergency_stop();
   std::lock_guard lock(app.replay_mutex);
   app.replay_player.reset();
@@ -825,6 +838,9 @@ void unload_replay() {
   app.preview_path.clear();
   app.character_views.clear();
   app.replay_bookmarks.clear();
+  app.selected_replay_actor = 0;
+  app.selected_actor_only = false;
+  log_line("REPLAY_UNLOAD reader/timeline/actor previews released; files preserved");
 }
 void bookmark_add() {
   std::lock_guard lock(app.replay_mutex);

@@ -25,6 +25,8 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  static std::uint32_t offset=0,replay_offset=0;
  for(const auto&r:batch){switch(r.command){
  case theater_ui::play:play_replay();break;case theater_ui::pause:pause_replay();break;case theater_ui::stop:emergency_stop();break;case theater_ui::restart:restart_replay();break;
+ case theater_ui::toggle_playback:toggle_replay();break;
+ case theater_ui::replay_unload:unload_replay();break;
  case theater_ui::seek:seek_replay(r.value);break;case theater_ui::previous:step_replay(-1);break;case theater_ui::next:step_replay(1);break;
  case theater_ui::speed:{std::lock_guard lock(app.replay_mutex);if(app.replay_player)app.replay_player->set_speed(double(r.value)/100.);break;}
  case theater_ui::select:if(!app.game_replay->active())app.selected_replay_actor=r.value;break;
@@ -81,6 +83,7 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
  {std::lock_guard lock(app.replay_mutex);if(app.replay_player&&!app.opened_replay.empty()){
   copy(s.loaded_path,sizeof(s.loaded_path),game_launcher::utf8(app.opened_replay.wstring()));
   const auto& st=app.replay_player->state();s.host_playing=st.status==replay::Status::playing;
+  if (!s.active) s.phase=s.host_playing?2u:(st.status==replay::Status::paused?3u:0u);
   try{const auto sample=app.replay_player->reader().sample(st.sample_index);s.play_source_ns=sample.source_time_ns+(st.timestamp_ns>sample.replay_time_ns?st.timestamp_ns-sample.replay_time_ns:0);}catch(...){s.play_source_ns=0;}}}
  {std::lock_guard lock(mutex);cached=s;}
 }

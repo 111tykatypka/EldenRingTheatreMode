@@ -35,6 +35,7 @@ namespace TheaterUI
         Load, Rename, Delete, LoadTitle, LoadTeleportNote, RenameTitle, Save, DeleteTitle, DeleteBody,
         LoadedBlocked, NameEmpty, AreaUnknown, GameVersion, FileLabel,
         CopyAll, CopyErrors, Copied, ClickToCopy,
+        UnloadReplay,
         Count
     };
 
@@ -97,6 +98,7 @@ namespace TheaterUI
         { "Not recorded yet (Milestone 3)", "Пока не записывается (этап 3)" }, { "Game version", "Версия игры" }, { "File", "Файл" },
         { "Copy all", "Копировать всё" }, { "Copy errors", "Копировать ошибки" }, { "Copied", "Скопировано" },
         { "Click to copy this line", "Нажмите, чтобы скопировать строку" },
+        { "Unload Replay", "Выгрузить запись" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

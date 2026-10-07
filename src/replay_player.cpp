@@ -1,4 +1,5 @@
 #include "replay_player.hpp"
+#include "../shared/PlaybackSpeeds.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -89,7 +90,7 @@ void Player::pause(Clock::time_point now) { if(state_.status==Status::playing){a
 void Player::stop(){action_cursor_valid_=false;clock_ns_=0;state_.status=Status::stopped;update_state();}
 void Player::restart(Clock::time_point now){action_cursor_valid_=false;clock_ns_=0;anchor_=now;state_.status=Status::playing;update_state();}
 void Player::set_speed(double speed,Clock::time_point now) {
-    if(!(speed==0.1||speed==0.25||speed==0.5||speed==1.0||speed==2.0||speed==4.0))throw std::invalid_argument("unsupported replay speed");
+    if(!theater_speed::valid(speed))throw std::invalid_argument("unsupported replay speed");
     const auto was=state_.status==Status::playing;if(was)advance(now);state_.speed=speed;if(was)anchor_=now;
 }
 void Player::seek(std::uint64_t t) {action_cursor_valid_=false;state_.status=Status::seeking;clock_ns_=std::min(t,summary().duration_ns);update_state();state_.status=Status::paused;}

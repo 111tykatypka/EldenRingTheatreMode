@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cmath>
 #include <cstring>
+#include "PlaybackSpeeds.h"
 namespace theater_ui {
 inline constexpr wchar_t pipe[]=L"\\\\.\\pipe\\EldenRingTheaterMode_1_17_Editor";
 inline constexpr std::uint32_t magic=0x37495554;
@@ -12,12 +13,17 @@ inline constexpr std::uint32_t magic=0x37495554;
 // Version 5: bone replay link. The game DLL records bones while a recording runs (recording_path)
 //            and plays a loaded replay's bones following the host timeline (loaded_path, play_source_ns).
 // Host and overlay are built together; a version mismatch disconnects instead of guessing.
-inline constexpr std::uint32_t version=5;
+// Version 6: atomic host-side timeline toggle (bone replay does not use the legacy phase).
+// Version 7: explicit unload via the normal replay ownership path.
+// Version 8: shared expanded speed preset contract.
+inline constexpr std::uint32_t version=8;
 enum Command : std::uint32_t { poll, play, pause, stop, restart, seek, previous, next, speed, select, page, record_start, record_stop, replay_page, replay_open,
  record_named,    // text = display name; starts recording with that name
  replay_sort,     // value = key*2 + descending; key: 0 date, 1 size, 2 name, 3 duration
  replay_rename,   // value = library index, text = new display name
  replay_delete,   // value = library index; moved to the Recycle Bin with its sidecar files
+ toggle_playback,
+ replay_unload,
  command_count };
 // Mirrors erplay::RecordingState without making the overlay depend on the host headers.
 enum RecordingState : std::uint32_t { record_idle, record_recording, record_paused, record_saving };
@@ -55,7 +61,7 @@ inline bool has_text(const Request&r){return r.text[0]!=0&&memchr(r.text,0,text_
 inline bool valid(const Request&r,std::uint64_t last){
  if(r.magic_value!=magic||r.version!=version||r.reserved||!r.sequence||r.sequence<=last||r.command>=command_count)return false;
  if(!memchr(r.text,0,text_size))return false; // always NUL-terminated
- if(r.command==speed)return r.value==10||r.value==25||r.value==50||r.value==100||r.value==200||r.value==400;
+ if(r.command==speed)return theater_speed::valid(r.value);
  if(r.command==record_named)return r.value==0&&has_text(r);
  if(r.command==replay_rename)return has_text(r);
  if(r.command==replay_sort)return r.value<sort_key_count*2;

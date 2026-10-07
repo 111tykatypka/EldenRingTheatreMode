@@ -98,6 +98,9 @@ namespace TheaterUI
 
         // Timeline interaction.
         std::uint64_t lastDuration_ = 0;
+        std::string lastReplayPath_;
+        int pendingSpeed_ = -1;
+        double speedSentAt_ = 0;
         bool   scrubbing_ = false;
         double lastScrubSent_ = 0.0, scrubTime_ = 0.0;
         bool   draggingNavigator_ = false;
