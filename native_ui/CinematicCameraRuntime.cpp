@@ -9,6 +9,7 @@
 #include "TheaterHotkeys.h"
 #include "CameraProject.h"
 #include "GameProfile.h"
+#include "NativeCameraMemory.h"
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -33,6 +34,7 @@ std::atomic_bool faulted=false;
 std::atomic<HWND> game_window=nullptr;
 std::atomic<long> mouse_x=0,mouse_y=0;
 std::atomic<std::uint64_t> hook_calls=0,lock_skips=0,hook_cost_ns=0;
+std::atomic<std::uint64_t> read_cost_ns=0,write_cost_ns=0,write_calls=0,hook_max_ns=0,interval_calls=0,interval_cost_ns=0;
 std::uint64_t clock_now(){ULONGLONG t=0;QueryInterruptTimePrecise(&t);return t*100;}
 std::uint64_t timeline_ns=0,duration_ns=0,anchor_ns=0,host_heartbeat=0,last_tick=0,probe_until=0,next_id=1;
 bool playing=false,linked=false,reset=true;
@@ -44,7 +46,6 @@ std::atomic<int> selected_bone=-1;
 std::optional<cinematic::State> bone_pose;
 std::uint64_t bone_time=0;
 bool read(std::uintptr_t address,void*out,std::size_t bytes){SIZE_T n=0;return address>=0x10000&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes;}
-bool write(std::uintptr_t address,const void*data,std::size_t bytes){SIZE_T n=0;return WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),data,bytes,&n)&&n==bytes;}
 std::uint64_t time_at(std::uint64_t now){
  auto time=timeline_ns;
  if(playing&&now>=anchor_ns){auto delta=static_cast<long double>(now-anchor_ns)*speed;auto remaining=duration_ns>time?duration_ns-time:0;time+=static_cast<std::uint64_t>(std::min<long double>(delta,remaining));}
@@ -101,7 +102,8 @@ bool update(void* output,void* source){
  std::unique_lock lock(mutex,std::try_to_lock);if(!lock.owns_lock()){++lock_skips;return false;}
  const auto now=clock_now();std::uintptr_t out=reinterpret_cast<std::uintptr_t>(output);
  theater_camera::Slot native;
- if(!read(reinterpret_cast<std::uintptr_t>(source)+TM_OFF_CAMERA_MATRIX,native.matrix,80)){state.observed=false;release("Camera output unavailable; native control restored");return false;}
+ auto read_start=clock_now();bool memory_ok=camera_local_read(source,native.matrix);read_cost_ns.fetch_add(clock_now()-read_start,std::memory_order_relaxed);
+ if(!memory_ok){state.observed=false;release("Camera output unavailable; native control restored");return false;}
  auto pose=decode(native);if(!pose){state.observed=false;release("Invalid matrix/FOV; native control restored");return false;}
  state.observed=true;state.timestamp_ns=now;
  auto effective_mode=state.cuts_enabled?static_cast<unsigned>(cut_track.evaluate(time_at(now))):state.mode;
@@ -138,8 +140,11 @@ bool update(void* output,void* source){
    rendered.position[i]+=wave*state.shake_position;cinematic::Quat q{0,0,0,1};double angle=wave*(state.shake_rotation*(3.141592653589793/180));q[i]=std::sin(angle/2);q[3]=std::cos(angle/2);auto rotation=cinematic::normalized(product(rendered.orientation,q));if(!rotation){release("Invalid shake orientation; native camera restored");return false;}rendered.orientation=*rotation;}
  }
  float matrix[16];encode(rendered,matrix);float fov=static_cast<float>(rendered.fov_degrees*3.141592653589793/180);
- if(!cinematic::valid(state.pose)||!std::all_of(matrix,matrix+16,[](float v){return std::isfinite(v);})||!write(out+TM_OFF_CAMERA_MATRIX,matrix,64)||!write(out+TM_OFF_CAMERA_FOV,&fov,4)){release("Camera write failed; native control restored on next native copy");return false;}
- state.writing=true;input_owned=true;state.status=probe_until?"Two-second offset probe active":"Experimental camera override active (runtime unverified)";
+ if(!cinematic::valid(state.pose)||!std::all_of(matrix,matrix+16,[](float v){return std::isfinite(v);})) {release("Invalid camera output; native control restored");return false;}
+ auto write_start=clock_now();bool written=camera_local_write(output,matrix,fov);write_cost_ns.fetch_add(clock_now()-write_start,std::memory_order_relaxed);++write_calls;
+ if(!written){release("Camera write failed; native control restored on next native copy");return false;}
+ if(!state.writing)state.status=probe_until?"Two-second offset probe active":"Experimental camera override active (runtime unverified)";
+ state.writing=true;input_owned=true;
  return true;
 }
 
@@ -217,7 +222,7 @@ extern "C" int tm_camera_intercept(void* output,void* source){
  using namespace camera_runtime;if(faulted)return 0;
  const auto start=clock_now();++hook_calls;bool applied=false;
  try{applied=update(output,source);}catch(...){faulted=true;input_owned=false;}
- hook_cost_ns.fetch_add(clock_now()-start,std::memory_order_relaxed);return applied?1:0;
+ auto elapsed=clock_now()-start;hook_cost_ns.fetch_add(elapsed,std::memory_order_relaxed);++interval_calls;interval_cost_ns.fetch_add(elapsed,std::memory_order_relaxed);auto high=hook_max_ns.load();while(elapsed>high&&!hook_max_ns.compare_exchange_weak(high,elapsed)){}return applied?1:0;
 }
 extern "C" int tm_camera_runtime_start(void* address){
  using namespace camera_runtime;
@@ -236,5 +241,6 @@ extern "C" int tm_camera_runtime_diagnostic(char*out,std::size_t size){
  std::unique_lock lock(camera_runtime::mutex,std::try_to_lock);if(!lock.owns_lock()||!out||!size)return 0;
  const auto&s=camera_runtime::state;
  const auto calls=camera_runtime::hook_calls.load();
- snprintf(out,size,"CAMERA_RUNTIME hook=%u observed=%u enabled=%u writing=%u mode=%u keys=%zu position=(%.3f,%.3f,%.3f) fov_deg=%.3f callbacks=%llu lock_skips=%llu mean_hook_us=%.2f status=%s",s.hook_ready,s.observed,s.enabled,s.writing,s.mode,camera_runtime::track.keys().size(),s.pose.position[0],s.pose.position[1],s.pose.position[2],s.pose.fov_degrees,static_cast<unsigned long long>(calls),static_cast<unsigned long long>(camera_runtime::lock_skips.load()),calls?double(camera_runtime::hook_cost_ns.load())/calls/1000:0,s.status.c_str());return 1;
+ const auto writes=camera_runtime::write_calls.load(),window_calls=camera_runtime::interval_calls.exchange(0),window_cost=camera_runtime::interval_cost_ns.exchange(0);
+ snprintf(out,size,"CAMERA_RUNTIME backend=C7_local_store hook=%u observed=%u enabled=%u writing=%u mode=%u keys=%zu position=(%.3f,%.3f,%.3f) fov_deg=%.3f callbacks=%llu lock_skips=%llu mean_hook_us=%.2f window_callbacks=%llu window_mean_hook_us=%.2f max_hook_us=%.2f mean_local_read_us=%.2f mean_local_write_us=%.2f status=%s",s.hook_ready,s.observed,s.enabled,s.writing,s.mode,camera_runtime::track.keys().size(),s.pose.position[0],s.pose.position[1],s.pose.position[2],s.pose.fov_degrees,static_cast<unsigned long long>(calls),static_cast<unsigned long long>(camera_runtime::lock_skips.load()),calls?double(camera_runtime::hook_cost_ns.load())/calls/1000:0,static_cast<unsigned long long>(window_calls),window_calls?double(window_cost)/window_calls/1000:0,double(camera_runtime::hook_max_ns.load())/1000,calls?double(camera_runtime::read_cost_ns.load())/calls/1000:0,writes?double(camera_runtime::write_cost_ns.load())/writes/1000:0,s.status.c_str());return 1;
 }

@@ -4,6 +4,7 @@ add_subdirectory(shared)
 add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
  native_ui/CinematicCameraRuntime.cpp
+ native_ui/NativeCameraMemory.cpp
  native_ui/EldenRingCameraIntercept.asm
  native_ui/EldenRingTimingAdapter.cpp
 

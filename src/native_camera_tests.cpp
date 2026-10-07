@@ -1,5 +1,7 @@
 #include "../native_ui/CinematicCameraRuntime.h"
 #include "../native_ui/EldenRingTimingAdapter.h"
+#include "../native_ui/NativeCameraMemory.h"
+#include <windows.h>
 #include <stdexcept>
 #include <iostream>
 #include <cstring>
@@ -11,6 +13,14 @@ int main(){
  game_timing::enable(true);tm_world_timing_tick(1,.5);check(game_timing::status()=="Timing binding unavailable/rejected");
  game_timing::enable(false);tm_world_timing_tick(0,1);check(game_timing::status()=="World timing OFF");
  theater_camera::Slot c;c.fov=1;c.aspect=1.777f;c.near_plane=.1f;c.far_plane=1000;
+ {
+  auto page=VirtualAlloc(nullptr,4096,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);check(page!=nullptr);
+  float matrix[16]{};cinematic::State pose{{4,5,6},{0,0,0,1},60};camera_runtime::encode_pose(pose,matrix);
+  check(camera_local_write(page,matrix,1.f));float result[20]{};check(camera_local_read(page,result));check(std::memcmp(result,matrix,64)==0&&result[16]==1.f);
+  DWORD old=0;check(VirtualProtect(page,4096,PAGE_READONLY,&old)!=0);check(!camera_local_write(page,matrix,2.f));check(camera_local_read(page,result)&&result[16]==1.f);
+  check(VirtualProtect(page,4096,PAGE_NOACCESS,&old)!=0);check(!camera_local_read(page,result));check(!camera_local_write(page,matrix,1.f));check(VirtualFree(page,0,MEM_RELEASE)!=0);
+  check(!camera_local_read(nullptr,result));check(!camera_local_write(nullptr,matrix,1.f));
+ }
  {
   alignas(16) unsigned char source[96]{},destination[96]{};
   cinematic::State pose{{4,5,6},{0,0,0,1},57.295779513};camera_runtime::encode_pose(pose,c.matrix);std::memcpy(source+16,&c,80);

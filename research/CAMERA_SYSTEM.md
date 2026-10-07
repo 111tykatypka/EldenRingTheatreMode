@@ -1,4 +1,4 @@
-# Camera subsystem РІР‚вЂќ C6
+# Camera subsystem Р Р†Р вЂљРІР‚Сњ C6
 
 ## Responsibilities
 
@@ -37,3 +37,7 @@ All new native features remain RUNTIME_VALIDATION_REQUIRED. These instructions a
 ## Native backend replacement
 
 The 0x681970 post-copy hook and its discovery signature are removed from active source. New exact-profile interception RVA0x3BB458, continuation0x3BB48D; all53 original bytes are checked before hook installation. The independent MASM bridge preserves flags, volatile GPRs/XMM0..5 and Win64 stack alignment around the C++ evaluator. Inactive/invalid state jumps to the MinHook original trampoline; successful override retains native aspect/clipping copies and skips only matrix/FOV writes. Normal original copying restores the camera when overrides stop. The frame evaluator remains driven by this copy interception, not an IGCS Present-loop clone; behavior at near-frozen native timing requires live validation. No safe hot-unload is provided.
+
+## C7 performance follow-up
+
+User-observed camera-enable stall is documented in notes/CINEMATIC_C7_CAMERA_PERFORMANCE.md. Per-copy process-memory syscalls were replaced by guarded local accesses; direct failures preserve the original native copy. New interval/read/write diagnostics make the suspected cause testable. Offline suites pass; FPS improvement still unverified. Current comparison package: outputs/Cinematic-C7-camera-performance.
