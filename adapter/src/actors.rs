@@ -17,6 +17,7 @@
 //! be shown this way, and characters that spawn later or died earlier are not hidden yet. Both need
 //! spawned puppets, approach (b).
 use crate::game_profile as profile;
+use crate::actor_lifetime::{self as lifetime,Observation};
 use crate::world_file::{ActorFrame,ActorInfo,ActorTrack,EntityContext,Message,PlayerFrame};
 use eldenring::cs::{ChrIns,CSChrPhysicsModule,WorldChrMan};
 use fromsoftware_shared::FromStatic;
@@ -69,15 +70,15 @@ fn live()->Vec<usize>{live_snapshot(false).0}
 // ------------------------------------------------------------------------------------------ record
 /// Per-recording identities and rate control; lives while the host records.
 struct Identity{info:ActorInfo,announced:bool,category:u32,seen:u64,skeleton:Option<crate::skeleton::Definition>}
-pub struct Recorder{ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64}
+pub struct Recorder{ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64,observations:HashMap<u32,Observation>}
 impl Recorder{
- pub fn new()->Self{Self{ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0}}
+ pub fn new()->Self{Self{ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0,observations:HashMap::new()}}
  /// Samples nearby characters; `player` is the main player's ChrIns, `tx` the world file writer.
  pub fn sample(&mut self,now:u64,player:usize,tx:&SyncSender<Message>){
   self.frame+=1;
   let me=unsafe{&*(player as *const ChrIns)};let origin=me.modules.physics.position;
   let radius=recording_radius(); // 0 means every discovered loaded body; no forced far-actor decimation.
-  let mut batch=Vec::new();let mut infos=Vec::new();let mut context=Vec::new();let mut accepted=Vec::new();let mut skeletons=Vec::new();
+  let mut batch=Vec::new();let mut infos=Vec::new();let mut context=Vec::new();let mut accepted=Vec::new();let mut skeletons=Vec::new();let mut observed=HashMap::new();
   let snapshot=now>=self.next_context;let diagnostic=now>=self.next_diagnostic;
   if diagnostic{self.next_diagnostic=now.saturating_add(1_000_000_000);}
   let (bodies,buddies)=live_snapshot(diagnostic);let mut body_ids=HashMap::new();
@@ -99,6 +100,10 @@ impl Recorder{
    if !self.ids.contains_key(&key){let Some(next)=self.next.checked_add(1) else {crate::log_game("ACTOR_ERROR: recording identity space exhausted");continue;};
     self.ids.insert(key,Identity{info:ActorInfo{id:self.next,handle:key.0,entity:key.1,npc_param:key.2,chr_type:c.chr_type as u32,first_seen:now},announced:false,category:0,seen:now,skeleton:None});self.next=next;}
    let identity=self.ids.get_mut(&key).unwrap();identity.seen=now;let id=identity.info.id;
+   let flags=c.chr_flags1c5;let data=c.modules.data.as_ptr();
+   let (hp,max_hp)=if data.is_null(){(None,None)}else{(crate::companions::dword(unsafe{&raw const (*data).hp as usize}),crate::companions::dword(unsafe{&raw const (*data).max_hp as usize}))};
+   let hp_known=if hp.is_some()&&max_hp.is_some(){lifetime::KNOWN_HP}else{0};
+   observed.insert(id,Observation{time:now,id,character_id:c.character_id,npc_id:c.npc_id,model_id:c.character_id,known:lifetime::KNOWN_BODY|lifetime::KNOWN_FLAGS|hp_known,flags:(flags.death_flag() as u32)*lifetime::DEAD|(flags.enable_render() as u32)*lifetime::RENDER_ENABLED,backread:c.backread_state,cleanup:c.chr_set_cleanup,hp:hp.unwrap_or(0)as i32,max_hp:max_hp.unwrap_or(0)as i32,reason:2,..Default::default()});
    let (Some(n),Some((local,model)),Some(transform))=(bone_count(chr),pose_arrays(chr),read_transform(chr)) else {
     if !self.warned{self.warned=true;crate::log_game("ACTORS: a character's skeleton could not be read (counts disagree); it is skipped");}continue};
    let pose=|a:usize|unsafe{std::slice::from_raw_parts(a as *const u8,n*QS)}.to_vec();
@@ -106,9 +111,11 @@ impl Recorder{
    if snapshot||!identity.announced{identity.category=crate::companions::category(chr,buddies.contains(&chr),ride);}
    let Some(definition)=crate::skeleton::read(chr,id) else{continue;};
    if identity.skeleton.as_ref().is_some_and(|d|d!=&definition){
+    if let Some(o)=observed.get_mut(&id){o.reason=3;}
     if !self.warned{self.warned=true;crate::log_game("ACTOR_CAPTURE_UNAVAILABLE: skeleton changed; incompatible pose samples skipped");}continue;
    }
    if !identity.announced{infos.push(identity.info);accepted.push(key);identity.skeleton=Some(definition.clone());skeletons.push(definition);}
+   if let Some(o)=observed.get_mut(&id){o.known|=lifetime::KNOWN_POSE;o.reason=0;}
    body_ids.insert(key.0,id);
    if snapshot||!identity.announced{let r=ride.unwrap_or_default();context.push(EntityContext{time:now,id,category:identity.category,ride_flags:r.flags,ride_state:r.state,ride_param:r.param,mount_id:0});}
    let data=&c.modules.data;
@@ -118,10 +125,17 @@ impl Recorder{
    // Current pair-node handle, not last_mounted's stale pointer; only resolve an observed live body.
    let mount_id=if r.flags&crate::companions::MOUNTED!=0{body_ids.get(&r.counter_party).copied().unwrap_or(0)}else{0};
    context.push(EntityContext{time:now,id:0,category:0,ride_flags:r.flags,ride_state:r.state,ride_param:r.param,mount_id});}
+  let current_ids:HashSet<u32>=self.ids.values().map(|i|i.info.id).collect();
+  let catalog:HashSet<u32>=self.ids.values().filter(|i|i.announced).map(|i|i.info.id).chain(infos.iter().map(|i|i.id)).collect();
+  let mut observations:Vec<_>=catalog.into_iter().map(|id|observed.remove(&id).unwrap_or_else(||Observation::unobserved(now,id))).filter(|o|self.observations.get(&o.id).is_none_or(|old|!o.same_state(old)||now.saturating_sub(old.time)>=1_000_000_000)).collect();
+  // Retired generations still get a missing observation; they are never reused as new actors.
+  for (&id,old) in &self.observations{if !current_ids.contains(&id)&&old.availability==0{observations.push(Observation::unobserved(now,id));}}
+  observations.sort_by_key(|o|o.id);let committed=observations.clone();
   let count=batch.len() as u64;
   let companion_context:Vec<_>=context.iter().filter(|c|c.id!=0&&c.category!=0).copied().collect();
-  if !batch.is_empty()||!context.is_empty(){match tx.try_send(Message::ActorBatch{infos,frames:batch,context,skeletons}){
-   Ok(())=>{for key in accepted{if let Some(i)=self.ids.get_mut(&key){i.announced=true;}}
+  if !batch.is_empty()||!context.is_empty()||!observations.is_empty(){match tx.try_send(Message::ActorBatch{infos,frames:batch,context,skeletons,observations}){
+   Ok(())=>{for o in committed{if self.observations.get(&o.id).is_none_or(|old|!o.same_state(old)){crate::log_game(&format!("ACTOR_OBSERVATION: id={} state={:?} available={} death_flag={} hp={} pose={} reason={} time={}",o.id,lifetime::state(&o),o.availability,o.flags&lifetime::DEAD!=0,o.hp,o.known&lifetime::KNOWN_POSE!=0,o.reason,o.time));}self.observations.insert(o.id,o);}
+    for key in accepted{if let Some(i)=self.ids.get_mut(&key){i.announced=true;}}
     if snapshot{self.next_context=now+250_000_000;}
     for c in companion_context{if self.companion_ids.insert(c.id){let msg=format!("COMPANION_RECORDED: id={} category=0x{:X} ride_flags=0x{:X} state={} param={} (buddy-set/mount/summon evidence, not a guessed model id)",c.id,c.category,c.ride_flags,c.ride_state,c.ride_param);crate::log_game(&msg);crate::bone_replay::status(&msg);}}}
    Err(_)=>{self.dropped+=count;}}}}
@@ -132,14 +146,14 @@ impl Recorder{
 
 // ---------------------------------------------------------------------------------------- playback
 struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,transform:Transform}
-pub struct Player{tracks:Vec<(ActorInfo,ActorTrack,Vec<i16>)>,controlled:HashMap<u32,Controlled>,next_match:u64,local:Vec<u8>,model:Vec<u8>,logged:bool,categories:HashMap<u32,u32>,warned:HashSet<u32>,skeletons:HashMap<u32,crate::skeleton::Definition>}
+pub struct Player{tracks:Vec<(ActorInfo,ActorTrack,Vec<i16>)>,controlled:HashMap<u32,Controlled>,next_match:u64,local:Vec<u8>,model:Vec<u8>,logged:bool,categories:HashMap<u32,u32>,warned:HashSet<u32>,skeletons:HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline}
 impl Player{
- pub fn new(actors:Vec<(ActorInfo,ActorTrack)>,context:&[EntityContext],skeletons:&HashMap<u32,crate::skeleton::Definition>)->Self{
+ pub fn new(actors:Vec<(ActorInfo,ActorTrack)>,context:&[EntityContext],skeletons:&HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline)->Self{
   let categories=context.iter().filter(|c|c.id!=0).fold(HashMap::<u32,u32>::new(),|mut m,c|{*m.entry(c.id).or_default()|=c.category;m});
   let tracks=actors.into_iter().map(|(info,mut t)|{
    let n=t.len();let picks:Vec<PlayerFrame>=(0..3).filter_map(|k|t.get(k*(n.saturating_sub(1))/2).map(|f|f.body.clone())).collect();
    let parents=skeletons.get(&info.id).map(|d|d.parents.clone()).unwrap_or_else(||crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..]))));(info,t,parents)}).collect();
-  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone()}}
+  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime}}
  pub fn len(&self)->usize{self.tracks.len()}
  fn find(info:&ActorInfo,taken:&[usize],category:u32,unique_recorded:bool)->Option<usize>{
   let (bodies,buddies)=live_snapshot(false);let mut candidates=Vec::new();
@@ -161,7 +175,7 @@ impl Player{
      let flags=debug_flags(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)});
      let gravity=gravity_flag(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);
      if flags.is_none()||gravity.is_none(){if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} control flags/gravity could not be validated; no pose/root writes",info.id));}continue;}
-     self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags,gravity,transform});taken.push(chr);newly+=1;}}
+     self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags,gravity,transform});taken.push(chr);newly+=1;}else if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_REQUIRED: id={} entity={} npc_param={} absent from current world; isolated puppet unavailable",info.id,info.entity,info.npc_param));}}
    if newly>0||!self.logged{self.logged=true;crate::log_game(&format!("ACTORS: {} of {} recorded characters found in the world and held by the replay",self.controlled.len(),self.tracks.len()));}}
   for (info,track,parents) in &mut self.tracks{
    let Some(ctl)=self.controlled.get(&info.id) else {continue};let chr=ctl.chr;
@@ -171,6 +185,9 @@ impl Player{
    if self.skeletons.get(&info.id).is_some_and(|d|crate::skeleton::read(chr,info.id).as_ref()!=Some(d)){
     if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
     if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} skeleton identity differs; no pose applied",info.id));}continue;
+   }
+   if let Some(o)=self.lifetime.at(info.id,t){let c=unsafe{&*(chr as *const ChrIns)};let live_flags=(c.chr_flags1c5.death_flag() as u32)*lifetime::DEAD|(c.chr_flags1c5.enable_render() as u32)*lifetime::RENDER_ENABLED;
+    if o.availability!=0||o.known&lifetime::KNOWN_POSE==0||live_flags!=o.flags{if let Some(c)=self.controlled.remove(&info.id){restore(&c);}if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_REQUIRED: id={} recorded={:?} live_death={} (isolated puppet unavailable; no revival writes)",info.id,lifetime::state(o),live_flags&lifetime::DEAD!=0));}continue;}
    }
    let n=track.len();if !active_at(&track.times,t){
     if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}

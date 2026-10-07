@@ -24,6 +24,7 @@ mod codec;
 mod world_file;
 mod world_state;
 mod actors;
+mod actor_lifetime;
 mod companions;
 mod skeleton;
 static OFFLINE_ALLOWED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
