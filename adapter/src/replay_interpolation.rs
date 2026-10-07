@@ -19,6 +19,32 @@ pub fn source_time(source:u64,anchor:u64,now:u64,playing:bool,speed:f64)->u64{
 /// Playback in the same measured coordinate frame preserves the physics trajectory.
 /// ChrIns.chunk_position is not a sampled moving root; never replace root XYZ with it.
 /// Different origin translations need a verified conversion, not a guessed sign/offset.
+/// Physics-space translation that carries a position recorded under `recorded_anchor` into the live
+/// physics frame (`live_anchor`).
+///
+/// MEASURED on real recordings (tools/dump_player_root.py): when the game re-bases the physics origin,
+/// the player's physics position jumps by exactly the change of `ChrIns.chunk_position` (physics x
+/// 32.09 -> 0.15 = -31.94 while the anchor went -48 -> -80), and `physics - anchor` stays continuous
+/// (80.09 -> 80.15, one frame of running). So a world point is `physics - anchor`, and
+///   live_physics = recorded_physics + (live_anchor - recorded_anchor).
+/// Different origin ids (or non-finite values) have no known conversion: None.
+pub fn rebase(recorded_origin:i32,recorded_anchor:[f32;4],live_origin:i32,live_anchor:[f32;4])->Option<[f32;3]>{
+ if recorded_origin!=live_origin||!(0..3).all(|i|recorded_anchor[i].is_finite()&&live_anchor[i].is_finite()){return None;}
+ Some(std::array::from_fn(|i|live_anchor[i]-recorded_anchor[i]))}
+/// The player's anchor over the recording (only where it changes). Everything in a recording shares one
+/// physics frame, so enemies and NPCs are rebased with the PLAYER's anchor at their sample time (their own
+/// chunk fields are not a frame anchor: a stationary enemy kept a constant, unrelated value).
+#[derive(Clone,Debug,Default)]
+pub struct AnchorTrack{entries:Vec<(u64,i32,[f32;4])>}
+impl AnchorTrack{
+ pub fn push(&mut self,time:u64,origin:i32,anchor:[f32;4]){if self.entries.last().is_none_or(|l|l.1!=origin||l.2[..3]!=anchor[..3]){self.entries.push((time,origin,anchor));}}
+ pub fn is_empty(&self)->bool{self.entries.is_empty()}
+ pub fn len_changes(&self)->usize{self.entries.len().saturating_sub(1)}
+ /// Anchor in force at `time` (the first entry applies to everything before it).
+ pub fn at(&self,time:u64)->Option<(i32,[f32;4])>{if self.entries.is_empty(){return None;}let i=self.entries.partition_point(|e|e.0<=time).saturating_sub(1);let e=self.entries[i];Some((e.1,e.2))}
+ /// Translation into the live frame for a sample recorded at `time`.
+ pub fn translation(&self,time:u64,live_origin:i32,live_anchor:[f32;4])->Option<[f32;3]>{let (o,a)=self.at(time)?;rebase(o,a,live_origin,live_anchor)}
+}
 pub fn same_root_space(recorded_origin:i32,recorded_chunk:[f32;4],live_origin:i32,live_chunk:[f32;4])->bool{
  recorded_origin==live_origin&&(0..3).all(|i|recorded_chunk[i].is_finite()&&live_chunk[i].is_finite()&&(recorded_chunk[i]-live_chunk[i]).abs()<0.01)
 }
@@ -57,6 +83,15 @@ pub fn evaluate(a:&Transform,b:&Transform,t:f64)->Option<Transform> {
      assert_eq!(source_time(10,200,200,true,1.0),10); // backward seek is exact
      assert_eq!(source_time(10,200,100,true,1.0),10); // no timestamp underflow
     }
+    #[test]fn rebase_matches_the_measured_origin_shift(){
+        // Real frames from 213.erplay.world around an origin re-base: anchor x -48 -> -80, physics x 32.09 -> 0.15.
+        let before=[32.09f32,-5.46,-4.44];let after_anchor=[-80.0,-104.0,-96.0,1.0];let before_anchor=[-48.0,-104.0,-96.0,1.0];
+        let t=rebase(-1,before_anchor,-1,after_anchor).unwrap();
+        assert!((before[0]+t[0]-0.09).abs()<0.01,"rebased x {}",before[0]+t[0]); // next real frame was 0.15: one frame of motion
+        assert_eq!(t,[-32.0,0.0,0.0]);assert!(rebase(-1,before_anchor,7,after_anchor).is_none());assert!(rebase(-1,[f32::NAN;4],-1,after_anchor).is_none());}
+    #[test]fn anchor_track_applies_the_anchor_in_force(){
+        let mut tr=AnchorTrack::default();tr.push(0,-1,[-48.,-104.,-96.,1.]);tr.push(10,-1,[-48.,-104.,-96.,1.]);tr.push(20,-1,[-80.,-104.,-96.,1.]);
+        assert_eq!(tr.entries.len(),2);assert_eq!(tr.translation(5,-1,[-80.,-104.,-96.,1.]),Some([-32.,0.,0.]));assert_eq!(tr.translation(25,-1,[-80.,-104.,-96.,1.]),Some([0.,0.,0.]));}
     #[test]fn endpoints_and_shortest_quaternion(){
         let a=[[0.,0.,0.,1.],[0.,0.,0.,1.],[1.,2.,3.,1.]];
         let b=[[0.,0.,0.,-1.],[0.,1.,0.,0.],[3.,4.,5.,1.]];

@@ -83,7 +83,7 @@ impl Store{
 // The game thread hands frames to the world file writer thread; it never waits for the disk.
 struct Recorder{path:String,tx:SyncSender<Message>,frames:u64,first:u64,last:u64,dropped:u64,next_world:u64,flags:world_file::FlagGroups,actors:crate::actors::Recorder,skeleton:Option<crate::skeleton::Definition>,skeleton_warned:bool}
 #[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_drawn_cm:f32,sum_drawn_cm:f64}
-struct Loaded{path:String,store:Store,parents:Arc<Vec<i16>>,seconds:f64,world:Arc<WorldData>,actors:Option<crate::actors::Player>}
+struct Loaded{path:String,store:Store,parents:Arc<Vec<i16>>,seconds:f64,world:Arc<WorldData>,actors:Option<crate::actors::Player>,anchors:Arc<crate::replay_interpolation::AnchorTrack>}
 #[derive(PartialEq)]enum Loading{None,Busy(String),Missing(String),Failed(String)}
 struct State{
  recording:Option<Recorder>,record_paused:bool,last_second:u64,
@@ -98,7 +98,7 @@ struct State{
  host:(bool,f64,u64,u64),
  // Phase 1.4 arrival: how the body gets to the recorded place before the replay plays, and the
  // shift from recorded physics space to today's physics space for this frame.
- arrival:Arrival,warped:bool,shift:[f32;3],expected_global:Option<[f32;4]>,
+ arrival:Arrival,warped:bool,shift:[f32;3],expected_root:Option<[f32;3]>,
  // Phase 1.5: the player's own equipment assembly while the replay owns the body, and how often the
  // game replaced the written one before drawing (diagnostic).
  equip_saved:Option<Equip>,equip_written:Option<Equip>,equip_lost:u64,equip_frames:u64,
@@ -109,7 +109,7 @@ struct State{
  replay_blocked:bool,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_global:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -206,7 +206,11 @@ fn follow_loaded(s:&mut State,l:&Link){
    let seconds=(store.time(n-1)-store.time(0)) as f64/1e9;
    crate::log_game(&format!("BONE_REPLAY: world track: {} clock samples, {} flag changes on {} flags",world_data.samples.len(),world_data.events.len(),world_data.touched.len()));
    if let Some(a)=&actors{crate::log_game(&format!("BONE_REPLAY: {} recorded characters (enemies, NPCs, bosses)",a.len()));}
-   Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
+   // The player's anchor over the recording, for rebasing positions into the live physics frame.
+   let mut anchors=crate::replay_interpolation::AnchorTrack::default();
+   for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.origin,f.place.global);}}}
+   crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
+   Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors,anchors:Arc::new(anchors)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
 // The replay time for this game frame, in source time. The host sends the timeline about 20 times a
 // second; between updates the replay clock advances by elapsed game time x speed, so motion is
@@ -228,19 +232,22 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
  let (Some(a),Some(b))=(loaded.store.get(i),loaded.store.get((i+1).min(n-1))) else {return false;};
  let span=b.time.saturating_sub(a.time);
  // No blending across a gap in the recording or a teleport (warp, grace travel): hold the earlier frame.
- let jump=(0..3).map(|k|(b.transform[2][k]-a.transform[2][k]).powi(2)).sum::<f32>().sqrt();
- let alpha=if span==0||span>250_000_000||jump>1.5{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
- s.pose_alpha=alpha.clamp(0.0,1.0);s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,s.pose_alpha);
+ s.written=Some(i);
  let (a,b)=&*s.cur.insert((a,b));
- // The recorded chunk field stayed constant during real movement. Treat it as
- // coordinate-frame evidence, not moving XYZ: the physics root contains the motion.
- s.expected_global=None;
- s.shift=[0.0;3];
- if a.place.block!=-1&&b.place.block!=-1&&![a.place,b.place].iter().all(|p|crate::replay_interpolation::same_root_space(p.origin,p.global,live_place.origin,live_place.global)){
+ // The physics origin moves when the game re-bases the world; each recorded position is carried into the
+ // live frame by the change of the anchor (see replay_interpolation::rebase, measured on real recordings).
+ let translate=|p:&Place|->Option<[f32;3]>{if p.block==-1{Some([0.0;3])}else{crate::replay_interpolation::rebase(p.origin,p.global,live_place.origin,live_place.global)}};
+ let (Some(ta),Some(tb))=(translate(&a.place),translate(&b.place)) else {
   s.evaluated_root=None;
-  crate::log_game(&format!("ROOT_SPACE_UNAVAILABLE: replay_origin={} replay_anchor={:?} live_origin={} live_anchor={:?}; no guessed rebase",a.place.origin,a.place.global,live_place.origin,live_place.global));
-  status("REPLAY BLOCKED: coordinate origin changed. Cross-origin root conversion requires validation; no transform written.");return false;
- }
+  crate::log_game(&format!("ROOT_SPACE_UNAVAILABLE: replay origin id {} vs live origin id {} differ (anchors {:?} / {:?}); no conversion is known for different origin ids",a.place.origin,live_place.origin,a.place.global,live_place.global));
+  status("REPLAY BLOCKED: the world origin id differs from the recording (see log). No transform written.");return false;};
+ s.shift=ta;s.now_offset=ta;
+ // Interpolate in the live frame, so an origin re-base between two samples is not a 32 m jump.
+ let (mut ra,mut rb)=(a.transform,b.transform);for k in 0..3{ra[2][k]+=ta[k];rb[2][k]+=tb[k];}
+ let jump=(0..3).map(|k|(rb[2][k]-ra[2][k]).powi(2)).sum::<f32>().sqrt();
+ let alpha=if span==0||span>250_000_000||jump>1.5{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
+ s.pose_alpha=alpha.clamp(0.0,1.0);s.evaluated_root=crate::replay_interpolation::evaluate(&ra,&rb,s.pose_alpha);
+ s.expected_root=s.evaluated_root.map(|r|[r[2][0],r[2][1],r[2][2]]);
  // A seek or the first frames after taking the body teleport it; the draw lags one frame there.
  if t<s.last_t||t-s.last_t>200_000_000{s.settle=s.settle.max(3);}s.last_t=t;
  let (shift,w)=(s.shift,s.pose_alpha as f32);s.expected=std::array::from_fn(|k|a.matrix[12+k]+(b.matrix[12+k]-a.matrix[12+k])*w+shift[k]);
@@ -283,10 +290,11 @@ fn begin_arrival(s:&mut State,chr:usize){
  let Some(loaded)=&mut s.loaded else {return;};
  let t=s.host.2;let i=loaded.store.index_at(t);let Some(target)=loaded.store.get(i).map(|f|f.place) else {return;};
  let here=arrival::place(chr);
- // Do not fast travel based on a chunk anchor mistaken for the player's position.
- if target.block!=-1&&!crate::replay_interpolation::same_root_space(target.origin,target.global,here.origin,here.global){
-  crate::log_game("ARRIVAL_ERROR: different coordinate origin; automatic travel disabled until root conversion is verified");
-  status("REPLAY BLOCKED: different coordinate origin. Automatic travel requires corrected location metadata.");
+ // Positions are rebased by the anchor change (measured), so a different tile anchor is fine; only a
+ // different origin id has no known conversion.
+ if target.block!=-1&&crate::replay_interpolation::rebase(target.origin,target.global,here.origin,here.global).is_none(){
+  crate::log_game(&format!("ARRIVAL_ERROR: origin id differs (replay {} vs live {}), anchors {:?} / {:?}; no known conversion",target.origin,here.origin,target.global,here.global));
+  status("REPLAY BLOCKED: the world origin id differs from the recording (see log).");
   if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}return;
  }
  if target.block==-1{s.arrival=Arrival::Ready;crate::log_game("ARRIVAL: recording has no map data (older file); positions used as recorded");return;}
@@ -309,8 +317,8 @@ fn advance_arrival(s:&mut State,chr:usize,now:u64){
    else if now.saturating_sub(since)>60_000_000_000{crate::log_game("ARRIVAL_ERROR: the map did not finish loading within 60 s");status("BONE REPLAY ERROR: the replay's location did not finish loading (see log)");reject(s,chr,"warp timed out");}
    else{s.arrival=Arrival::Warping{target,since,stable};}}
   Arrival::Placing{tries,frames,good}=>{
-   let Some(expected)=s.expected_global else {s.arrival=Arrival::Ready;return;};
-   let error=arrival::distance(arrival::place(chr).global,expected);
+   let (Some(expected),Some(now_root))=(s.expected_root,read_transform(chr)) else {s.arrival=Arrival::Ready;return;};
+   let error=(0..3).map(|k|(now_root[2][k]-expected[k]).powi(2)).sum::<f32>().sqrt();
    let good=if error<0.5{good+1}else{0};let frames=frames+1;
    if good>=5{crate::log_game(&format!("ARRIVAL: body on the recorded spot (error {:.2} m, try {})",error,tries+1));s.arrival=Arrival::Ready;}
    else if frames>=30{
@@ -449,8 +457,9 @@ pub fn tick(group:usize,now:u64){
    unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,s.local_out.len());std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,s.model_out.len());}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);
    // Recorded enemies/NPCs/bosses at the same replay time (Phase 2.2).
-   let (t,offset)=(s.last_t,s.now_offset);
-   if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.set_options(s.options);a.write(t,now,offset,interpolated_pose_enabled());}}
+   let (t,live)=(s.last_t,(here.origin,here.global));
+   let anchors=s.loaded.as_ref().map(|l|l.anchors.clone());
+   if let (Some(anchors),Some(a))=(anchors,s.loaded.as_mut().and_then(|l|l.actors.as_mut())){a.set_options(s.options);a.write(t,now,live,&anchors,interpolated_pose_enabled());}}
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
    if let Some(e)=s.equip_written{if equipment::read(chr)!=Some(e){s.equip_lost+=1;}}

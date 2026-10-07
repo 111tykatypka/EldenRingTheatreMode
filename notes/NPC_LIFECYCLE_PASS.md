@@ -97,3 +97,16 @@ bone_replay.rs (wiring), native_ui theater settings (puppet checkbox), docs/ERWO
 4. Seek to just after the death, then back before it: expect it alive again, repeatedly.
 5. Send `%TEMP%\TheaterModeGame.log`: the `ACTOR_LIFETIME`, `PUPPET_*`, `ACTOR_DIAG` and `ACTOR_RECONSTRUCTION_UNAVAILABLE`
    lines show exactly what happened. After stopping, tell me if a stand-in enemy is left standing (unload is UNVERIFIED).
+
+## Coordinate origin fix (REPLAY BLOCKED: different coordinate origin)
+Cause: playback demanded that the recording's tile anchor (`ChrIns.chunk_position`) equal the live one to 1 cm, but the anchor
+changes every time the game re-bases the physics origin (every ~32 m of running), so a replay could only play from its exact
+starting tile. Measured on a real recording (`tools/dump_player_root.py`, `213.erplay.world`): at the frame where the player's
+anchor x went -48 -> -80, the player's physics x went 32.09 -> 0.15 (a jump of -31.94 ~ the anchor change), and
+`physics - anchor` stayed continuous (80.09 -> 80.15). Every recorded enemy's physics x jumped by exactly -32.00 at the same frame.
+Therefore: `live_physics = recorded_physics + (live_anchor - recorded_anchor)` (STATIC_VERIFIED on recorded data; tests encode the
+real frame). Playback now rebases player and enemy positions this way (enemies with the PLAYER's anchor at the sample time,
+because their own chunk fields are unrelated per-character values), interpolates in the live frame so a re-base between two
+samples is not a 32 m jump, and verifies arrival by comparing live physics with the converted target. Only a different
+origin id still blocks (no known conversion). Grace travel is now chosen by map area only; anchors are not distances.
+RUNTIME: UNKNOWN until you play a replay from a different tile.

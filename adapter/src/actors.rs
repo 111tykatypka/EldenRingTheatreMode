@@ -268,9 +268,9 @@ impl Player{
   write_bits(last,5,INVINCIBLE,0);write_bits(last,6,DROPPED_ITEM|DROPPED_RUNES,0);
   self.controlled.insert(r.id,Controlled{chr:last,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:true,saved_1c5:0});
   self.request=None;crate::log_game(&format!("PUPPET_ADOPTED: id={} body 0x{last:X}; invincible, rewards pre-marked, AI held",r.id));}
- /// Writes recorded actors at master replay time `t`. `_offset` is kept for the caller; positions are
- /// used in their verified original coordinate frame (see same_root_space).
- pub fn write(&mut self,t:u64,now:u64,_offset:[f32;3],interpolate:bool){
+ /// Writes recorded actors at master replay time `t`. `live` is the player's current (origin id, anchor);
+ /// recorded positions are rebased into the live physics frame (see replay_interpolation::rebase).
+ pub fn write(&mut self,t:u64,now:u64,live_frame:(i32,[f32;4]),anchors:&crate::replay_interpolation::AnchorTrack,interpolate:bool){
   let alive=live();let puppets_on=puppets_allowed(self.options);
   self.poll_request(now);
   // Every actor's existence at T comes from the recording only.
@@ -321,20 +321,21 @@ impl Player{
    let i=track.times.partition_point(|x|*x<=t).saturating_sub(1).min(n-1);
    let (Some(a),Some(b))=(track.get(i).cloned(),track.get((i+1).min(n-1)).cloned()) else {continue};
    let span=b.body.time.saturating_sub(a.body.time);
-   let jump=(0..3).map(|k|(b.body.transform[2][k]-a.body.transform[2][k]).powi(2)).sum::<f32>().sqrt();
+   // Carry both samples into the live physics frame with the player's anchor at their own times.
+   let (ta,tb)=if anchors.is_empty(){(Some([0.0;3]),Some([0.0;3]))}else{(anchors.translation(a.body.time,live_frame.0,live_frame.1),anchors.translation(b.body.time,live_frame.0,live_frame.1))};
+   let (Some(ta),Some(tb))=(ta,tb) else {
+    if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
+    if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} world origin id differs from the recording; no conversion known",info.id));}continue;};
+   let (mut ra,mut rb)=(a.body.transform,b.body.transform);for k in 0..3{ra[2][k]+=ta[k];rb[2][k]+=tb[k];}
+   let jump=(0..3).map(|k|(rb[2][k]-ra[2][k]).powi(2)).sum::<f32>().sqrt();
    let alpha=if !interpolate||span==0||span>500_000_000||jump>1.5{0.0}else{(t-a.body.time) as f64/span as f64};
    if ![&a.body.local,&a.body.model,&b.body.local,&b.body.model].into_iter().all(|v|crate::replay_interpolation::pose_safe_to_apply(v)){
     if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
     if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} invalid pose coordinates/quaternion; released",info.id));}continue;
    }
-   let Some(root)=crate::replay_interpolation::evaluate(&a.body.transform,&b.body.transform,alpha) else {
+   let Some(root)=crate::replay_interpolation::evaluate(&ra,&rb,alpha) else {
     if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;
    };
-   let here=crate::arrival::place(chr);
-   if a.body.place.block!=-1&&![a.body.place,b.body.place].iter().all(|p|crate::replay_interpolation::same_root_space(p.origin,p.global,here.origin,here.global)){
-    if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
-    if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} coordinate origin differs; no guessed root rebase",info.id));}continue;
-   }
    let bones=a.body.local.len()/QS;
    let mut pose_written=false;
    if bone_count(chr)==Some(bones)&&b.body.local.len()==a.body.local.len(){

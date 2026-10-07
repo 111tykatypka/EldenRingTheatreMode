@@ -29,7 +29,9 @@ pub fn distance(a:[f32;4],b:[f32;4])->f32{(0..3).map(|k|(a[k]-b[k]).powi(2)).sum
 /// Same legacy map, or two overworld tiles within streaming range, can be reached directly.
 pub fn needs_warp(current:&Place,target:&Place)->bool{
  if target.block==-1||current.block==-1{return false;} // recordings without map data: same map assumed
- if overworld(current.block)&&overworld(target.block){return area(current.block)!=area(target.block)||distance(current.global,target.global)>400.0;}
+ // Overworld tiles share one physics frame (positions are rebased by the anchor change), so only another
+ // area needs travel. Distance is not judged from the anchors: they are origin markers, not positions.
+ if overworld(current.block)&&overworld(target.block){return area(current.block)!=area(target.block);}
  current.block!=target.block}
 
 /// The grace closest to `target`: same map block first, then same area, nearest by position.
