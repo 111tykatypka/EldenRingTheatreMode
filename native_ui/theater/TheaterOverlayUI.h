@@ -14,6 +14,7 @@
 #include "TheaterUiProtocol.h"
 #include "TheaterLayout.h"
 #include "TheaterStrings.h"
+#include "CameraTelemetry.h"
 
 namespace TheaterUI
 {
@@ -32,6 +33,7 @@ namespace TheaterUI
         bool        hostLinked = false;  // pipe round trip succeeded at least once since the last drop
         std::vector<std::string> events; // new game-side event log lines since the last frame
         double      now = 0.0;           // seconds, monotonic
+        theater_camera::Telemetry camera; // read-only candidates, copied from game task
         UiVisibility visibility = UiVisibility::Hidden;
         double      hiddenAt = -100.0;   // when F4 last hid the UI, for the fading hint
     };

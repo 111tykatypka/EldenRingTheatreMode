@@ -28,6 +28,8 @@
 using Microsoft::WRL::ComPtr;
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LPARAM);
 namespace {
+std::mutex camera_mutex;
+theater_camera::Telemetry camera_snapshot;
 using Present=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT);
 using Resize=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT,UINT,DXGI_FORMAT,UINT);
 using Create=HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*,IUnknown*,DXGI_SWAP_CHAIN_DESC*,IDXGISwapChain**);
@@ -152,6 +154,7 @@ public:
  // Builds the v3 UI frame from a snapshot copy.
  TheaterUI::LayoutRects draw(){
   TheaterUI::OverlayFrame frame;{std::lock_guard lock(ipc);frame.snapshot=snapshot;}
+  {std::lock_guard lock(camera_mutex);frame.camera=camera_snapshot;}
   frame.hostLinked=host_linked.load();frame.visibility=TheaterUI::UiVisibility(visibility.load());
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
   {std::lock_guard lock(events_mutex);frame.events.assign(events.begin(),events.end());events.clear();}
@@ -358,3 +361,10 @@ extern "C" void tm_overlay_bone_link(TmBoneLink*out){auto&b=backend();*out={};ou
  out->recording_path[259]=0;out->loaded_path[259]=0;}
 extern "C" void tm_render_lock_game_input(int locked){backend().game_input_locked=locked!=0;}
 extern "C" unsigned tm_hotkey_vk(unsigned action){return action<unsigned(theater_hotkeys::Action::Count)?theater_hotkeys::Key(theater_hotkeys::Action(action)):0u;}
+extern "C" void tm_camera_publish(const theater_camera::Telemetry* snapshot){
+ if(!snapshot)return;
+ std::unique_lock lock(camera_mutex,std::try_to_lock);if(!lock.owns_lock())return;
+ camera_snapshot=*snapshot;
+ for(auto&slot:camera_snapshot.slots)slot.valid=slot.valid&&theater_camera::valid(slot);
+}
+extern "C" bool tm_camera_probe_enabled(){return theater_camera::probe_enabled.load();}

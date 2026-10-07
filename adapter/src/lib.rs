@@ -14,6 +14,7 @@ use pelite::pe64::{Pe, PeView};
 
 mod game_profile { include!(concat!(env!("OUT_DIR"), "/game_profile.rs")); }
 mod control_protocol;
+mod camera_probe;
 mod control_link;
 mod player_action;
 mod character_capture;
@@ -164,9 +165,11 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
 
                 // Warm reflected singleton resolution outside game callbacks; instance may not yet exist.
                 let _=unsafe{eldenring::cs::CSLuaEventManImp::instance()};
+                let _=eldenring::cs::CSCamera::instance_ptr();
                 let mut last_animation_id=-1i32;
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
+                    camera_probe::tick(now);
                     characters.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {

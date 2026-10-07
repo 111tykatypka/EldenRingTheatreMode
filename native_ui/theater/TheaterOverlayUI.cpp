@@ -533,7 +533,32 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         }
         break;
     }
-    case Tool::Camera: section(T(Str::NotYetAvailable)); note(Str::CameraNotes); break;
+    case Tool::Camera:
+    {
+        section("NATIVE CAMERA DIAGNOSTICS");
+        ImGui::TextWrapped("Read-only SDK candidates. Active camera ownership is not yet verified; Free and Dolly game control are unavailable.");
+        bool probe=theater_camera::probe_enabled.load();
+        if(ImGui::Checkbox("Enable experimental camera reads",&probe))theater_camera::probe_enabled=probe;
+        if(!probe){ImGui::TextDisabled("Camera probe is OFF. No camera values are read.");break;}
+        const auto& c=f.camera;
+        ImGui::Text("CSCamera: %s | mask: 0x%X",c.available?"FOUND":"UNAVAILABLE",c.mask);
+        ImGui::Text("Player camera: native control (no overrides)");
+        if(c.timestamp_ns){
+            // Same QueryInterruptTimePrecise clock as the adapter; GetTickCount64 is a different epoch.
+            ULONGLONG ticks=0;QueryInterruptTimePrecise(&ticks);
+            const auto now=std::uint64_t(ticks)*100;
+            ImGui::Text("Update age: %.1f ms%s",now>=c.timestamp_ns?double(now-c.timestamp_ns)/1e6:0.,
+                now<c.timestamp_ns||now-c.timestamp_ns>2000000000ULL?" (STALE)":"");
+        }
+        for(int i=0;i<4;++i){const auto&slot=c.slots[i];ImGui::PushID(i);
+            if(ImGui::TreeNode("slot","Camera slot %d: %s",i+1,slot.valid?"PLAUSIBLE":"UNAVAILABLE / INVALID")){
+                if(slot.valid){ImGui::Text("Position: %.3f %.3f %.3f",slot.matrix[12],slot.matrix[13],slot.matrix[14]);
+                    ImGui::Text("FOV raw: %.5f (units unverified)",slot.fov);ImGui::Text("Aspect: %.4f | clip: %.4f / %.1f",slot.aspect,slot.near_plane,slot.far_plane);
+                    for(int r=0;r<4;++r)ImGui::Text("%.4f %.4f %.4f %.4f",slot.matrix[r*4],slot.matrix[r*4+1],slot.matrix[r*4+2],slot.matrix[r*4+3]);}
+                ImGui::TreePop();}ImGui::PopID();
+        }
+        break;
+    }
     case Tool::Look: section(T(Str::NotYetAvailable)); note(Str::LookNotes); break;
     case Tool::Export: section(T(Str::NotYetAvailable)); note(Str::ExportNotes); break;
     case Tool::Replays:
