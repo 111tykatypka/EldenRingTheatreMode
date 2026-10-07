@@ -32,6 +32,7 @@ mod research_readonly;
 mod native_bloodstain;
 mod native_ghost_prototype;
 mod ghost_appearance;
+mod pose_spike;
 mod actor_replay;
 mod visual_capture;
 mod fidelity_capture;
@@ -186,6 +187,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     world_observation.tick(now);
                     research.tick(now);
                     native_replay.tick(now);
+                    {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||pose_spike::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("POSE_SPIKE_ERROR: tick panicked");}}
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(ghost_appearance::tick).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("GHOST_APPEARANCE_ERROR: tick panicked; ghosts may keep the default look");}}
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(||trace.tick(now))).is_err(){locomotion_trace::stop();}
                     if !cfg!(feature="native-bloodstain-readonly") {
@@ -219,6 +221,10 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 });
                 let callback=Box::leak(Box::new(callback));
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PostPhysics,callback);}
+                let late_cloth=Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(1,monotonic_ns()));})));
+                unsafe{register_task(task,CSTaskGroupIndex::LocationUpdate_PostCloth_Post,late_cloth);}
+                let draw_pre=Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||pose_spike::tick(2,monotonic_ns()));})));
+                unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,draw_pre);}
                 log_game(&format!("Recurring task registered using resolved function eldenring.exe+0x{register_rva:X}; group=ChrIns_PostPhysics; waiting for WORLDCHR_READY and PLAYER_FOUND"));
                 loop { std::thread::sleep(Duration::from_secs(60)); }
             });

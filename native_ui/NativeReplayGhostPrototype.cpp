@@ -614,7 +614,7 @@ void keys() {
   {static bool lastProbe=false;const bool probe=foreground&&(GetAsyncKeyState(int(theater_hotkeys::Key(theater_hotkeys::Action::AnimProbe)))&0x8000);
    if(probe&&!lastProbe&&!probeRunning.exchange(true)){
     std::thread([]{U w=world(),player{},recorder{};
-     if(ready(w,player,recorder))skeletonProbe(player);else {log("SKELETON: player not ready");tm_render_native_status("SKELETON PROBE (F9): player not ready, load in first");}
+     (void)w;(void)player;(void)recorder; // F9 is owned by the Rust pose write spike (adapter/src/pose_spike.rs) for now
      probeRunning=false;}).detach();}
    lastProbe=probe;}
   if(r&&!lastRemove) {
