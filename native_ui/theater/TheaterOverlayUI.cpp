@@ -1,4 +1,6 @@
 #include "TheaterOverlayUI.h"
+#include "TheaterSounds.h"
+#include "imgui_internal.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -130,6 +132,8 @@ void Overlay::LoadSettings()
         else if (key == "tool" && value >= 0 && value <= (float)Tool::Settings) ui_.activeTool = (Tool)(int)value;
         else if (key == "show_tools") showTools_ = value != 0;
         else if (key == "show_timeline") showTimeline_ = value != 0;
+        else if (key == "sound_enabled") Sound::SetEnabled(value != 0);
+        else if (key == "sound_volume") Sound::SetVolume(std::clamp(value, 0.0f, 1.0f));
     }
 }
 
@@ -144,12 +148,38 @@ void Overlay::SaveSettings() const
         << "panel_open " << (ui_.layout.panelOpen ? 1 : 0) << "\n"
         << "tool " << (int)ui_.activeTool << "\n"
         << "show_tools " << (showTools_ ? 1 : 0) << "\n"
-        << "show_timeline " << (showTimeline_ ? 1 : 0) << "\n";
+        << "show_timeline " << (showTimeline_ ? 1 : 0) << "\n"
+        << "sound_enabled " << (Sound::Enabled() ? 1 : 0) << "\n"
+        << "sound_volume " << Sound::Volume() << "\n";
 }
 
 void Overlay::Emit(std::uint32_t command, std::uint64_t value, const char* text)
 {
     if (emit_) emit_(emitUser_, command, value, text);
+    // UI sound for the action (overlay show/hide plays from the backend; recording start/stop from the
+    // snapshot, so F5/F6 sound the same as the buttons). Seek and timescale are continuous drags: silent.
+    using S = Sound::Cue;
+    switch (command)
+    {
+    case theater_ui::play: case theater_ui::restart: case theater_ui::replay_open: case theater_ui::toggle_playback: Cue(S::Ok); break;
+    case theater_ui::pause: case theater_ui::stop: case theater_ui::replay_unload: case theater_ui::replay_delete: Cue(S::Cancel); break;
+    case theater_ui::previous: case theater_ui::next: case theater_ui::page: case theater_ui::replay_page: Cue(S::PrevNext); break;
+    case theater_ui::replay_sort: case theater_ui::select: case theater_ui::replay_rename: Cue(S::Bracket); break;
+    default: break;
+    }
+}
+
+void Overlay::Cue(Sound::Cue cue) { Sound::Play(cue); cuedThisFrame_ = true; }
+
+// Hover and plain clicks on any control that did not already make a sound (menus, dialogs, tabs).
+void Overlay::UiSoundsAfterFrame()
+{
+    const ImGuiID hovered = ImGui::GetHoveredID();
+    const double now = ImGui::GetTime();
+    if (hovered && hovered != lastHoverId_ && now - hoverSoundAt_ > 0.08) { Sound::Play(Sound::Cue::Focus); hoverSoundAt_ = now; }
+    lastHoverId_ = hovered;
+    if (!cuedThisFrame_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hovered) Sound::Play(Sound::Cue::Ok);
+    cuedThisFrame_ = false;
 }
 
 void Overlay::PushFont(Font role, float extraScale)
@@ -188,10 +218,13 @@ void Overlay::Observe(const OverlayFrame& f)
     }
     if (s.recording_state != lastRecording_)
     {
+        if (s.recording_state == theater_ui::record_recording) Sound::Play(Sound::Cue::Ok);
+        else if (lastRecording_ == theater_ui::record_recording) Sound::Play(Sound::Cue::Cancel);
         static constexpr Str names[] = { Str::LogRecStopped, Str::LogRecStarted, Str::LogRecPaused, Str::LogRecSaving };
         add(s.recording_state == theater_ui::record_recording ? Tone::Live : Tone::Info, names[std::min<std::uint32_t>(s.recording_state, 3)]);
         lastRecording_ = s.recording_state;
     }
+    if (!f.events.empty() && f.now - messageSoundAt_ > 1.0) { Sound::Play(Sound::Cue::Message); messageSoundAt_ = f.now; }
     for (const auto& e : f.events)
     {
         const bool error = e.find("ERROR") != std::string::npos || e.find("could not") != std::string::npos;
@@ -257,6 +290,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         if (ui_.layout.panelOpen) DrawPanel(f);
         if (showTimeline_) DrawSequencer(f);
         DrawDialogs(f);
+        UiSoundsAfterFrame();
         if (resetLayout_) { resetLayout_ = false; SaveSettings(); }
         if (showTools_ != savedTools_ || showTimeline_ != savedTimeline_ || ui_.layout.panelOpen != savedPanel_)
         { savedTools_ = showTools_; savedTimeline_ = showTimeline_; savedPanel_ = ui_.layout.panelOpen; SaveSettings(); }
@@ -371,6 +405,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
         {
             if (active) ui_.layout.panelOpen = false;           // clicking the active tool closes the panel
             else { ui_.activeTool = it.tool; ui_.layout.panelOpen = true; }
+            Cue(Sound::Cue::Tab);
             SaveSettings();
         }
     };
@@ -526,6 +561,17 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::SetNextItemWidth(-1);
         if (ImGui::SliderFloat("##scale", &ui_.layout.uiScaleUser, 0.75f, 1.5f, "%.2fx")) {}
         if (ImGui::IsItemDeactivatedAfterEdit()) SaveSettings();
+        section(T(Str::UiSounds));
+        {
+            bool on = Sound::Enabled();
+            if (ImGui::Checkbox(T(Str::UiSoundsOn), &on)) { Sound::SetEnabled(on); if (on) Sound::Play(Sound::Cue::Ok); SaveSettings(); }
+            ImGui::BeginDisabled(!on);
+            float volume = Sound::Volume() * 100.0f;
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::SliderFloat("##volume", &volume, 0.0f, 100.0f, "%.0f%%")) Sound::SetVolume(volume / 100.0f);
+            if (ImGui::IsItemDeactivatedAfterEdit()) { Sound::Play(Sound::Cue::Focus); SaveSettings(); }
+            ImGui::EndDisabled();
+        }
         section(T(Str::HotkeysTitle));
         PushFont(Font::Meta);
         ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());

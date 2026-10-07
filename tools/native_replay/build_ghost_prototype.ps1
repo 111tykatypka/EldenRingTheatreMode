@@ -20,6 +20,9 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $buildRoot 'Release/EldenRingTheaterMode.exe') -Destination $OutputDirectory
 Copy-Item -LiteralPath (Join-Path $cargoRoot 'x86_64-pc-windows-msvc/release/TheaterMode.dll') -Destination $OutputDirectory
 Copy-Item -LiteralPath (Join-Path $buildRoot 'probe/Release/EldenRingCompatibilityProbe.exe') -Destination $OutputDirectory
+# UI sounds: the user's own WAV files (not in git). THEATER_UI_SOUNDS overrides the folder.
+$sounds=if($env:THEATER_UI_SOUNDS){$env:THEATER_UI_SOUNDS}else{Join-Path $env:USERPROFILE 'Documents/claude ui/sound/fx/ui'}
+if(Test-Path -LiteralPath $sounds){$target=Join-Path $OutputDirectory 'sounds/ui';New-Item -ItemType Directory -Path $target -Force|Out-Null;Copy-Item -Path (Join-Path $sounds '*') -Destination $target -Recurse -Force}else{Write-Warning "UI sounds folder not found: $sounds (the overlay runs silent)"}
 $gitArgs=@('-c',('safe.directory='+$repoRoot.Replace('\','/')),'-C',$repoRoot)
 $commit=(& git @gitArgs rev-parse HEAD);$branch=(& git @gitArgs branch --show-current)
 $status=(& git @gitArgs status --porcelain)

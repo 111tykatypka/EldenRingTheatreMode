@@ -1,4 +1,5 @@
 #pragma once
+#include "TheaterSounds.h"
 // In-game Theater overlay, v3 Phase 1: theme, layout solver, tool rail, side
 // panel with event log, sequencer with transport, F4 hide/show and the REC pill.
 //
@@ -78,6 +79,12 @@ namespace TheaterUI
         std::deque<LogLine> log_;
         std::string lastDiagnostic_;
         bool  eventError_ = false;            // an event since start mentioned an error (Debug badge)
+        // UI sounds: one cue per action; hover/click fallback for controls without their own cue.
+        void  Cue(Sound::Cue cue);
+        void  UiSoundsAfterFrame();
+        bool  cuedThisFrame_ = false;
+        unsigned lastHoverId_ = 0;
+        double hoverSoundAt_ = 0.0, messageSoundAt_ = -10.0;
         std::uint32_t lastRecording_ = theater_ui::record_idle;
         int  lastLinked_ = -1, lastConnected_ = -1, lastPlayer_ = -1, lastLoaded_ = -1;
 

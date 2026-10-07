@@ -101,7 +101,8 @@ public:
  void toggle_ui(bool clean){using V=TheaterUI::UiVisibility;const auto current=V(visibility.load());V next;
   if(clean)next=current==V::HiddenClean?V::Hidden:V::HiddenClean;else next=current==V::Shown?V::Hidden:V::Shown;
   if(next!=V::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==V::Shown?2:0;
-  if(next==V::Shown)ClipCursor(nullptr);} // through the hook: confines to the whole window while shown
+  if(next==V::Shown)ClipCursor(nullptr);
+  if((current==V::Shown)!=(next==V::Shown))TheaterUI::Sound::Play(next==V::Shown?TheaterUI::Sound::Cue::Open:TheaterUI::Sound::Cue::Close);} // through the hook: confines to the whole window while shown
  bool transfer(HANDLE h,void*p,DWORD n,bool write){auto*c=static_cast<char*>(p);while(n){DWORD got=0;if(!(write?WriteFile(h,c,n,&got,nullptr):ReadFile(h,c,n,&got,nullptr))||!got)return false;c+=got;n-=got;}return true;}
  void ipc_worker(){HANDLE h=INVALID_HANDLE_VALUE;std::uint64_t sequence=0;while(running){
   if(h==INVALID_HANDLE_VALUE){h=CreateFileW(theater_ui::pipe,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE){Sleep(100);continue;}}

@@ -5,6 +5,7 @@ add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
 
  native_ui/theater/TheaterOverlayUI.cpp
+ native_ui/theater/TheaterSounds.cpp
  third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
  third_party/imgui/backends/imgui_impl_win32.cpp third_party/imgui/backends/imgui_impl_dx12.cpp
  third_party/minhook_vendor/src/buffer.c third_party/minhook_vendor/src/hook.c third_party/minhook_vendor/src/trampoline.c third_party/minhook_vendor/src/hde/hde64.c)

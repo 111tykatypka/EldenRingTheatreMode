@@ -36,6 +36,7 @@ namespace TheaterUI
         LoadedBlocked, NameEmpty, AreaUnknown, GameVersion, FileLabel,
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
+        UiSounds, UiSoundsOn,
         Count
     };
 
@@ -88,8 +89,8 @@ namespace TheaterUI
         { "Name", "Название" }, { "Date / Time", "Дата / время" }, { "Duration", "Длительность" }, { "Size", "Размер" }, { "Map / Area", "Карта / область" },
         { "Load", "Загрузить" }, { "Rename", "Переименовать" }, { "Delete", "Удалить" },
         { "Load replay?", "Загрузить запись?" },
-        { "Teleporting to the recording location comes with Milestone 3. For now loading does not move you; the replay plays from your current position.",
-          "Перемещение к месту записи появится в этапе 3. Пока загрузка вас не перемещает; запись воспроизводится с текущей позиции." },
+        { "When the replay plays, you are moved to where it was recorded (by grace travel if it is far away or in another map).",
+          "При воспроизведении вы переместитесь к месту записи (через благодать, если оно далеко или на другой карте)." },
         { "Rename replay", "Переименовать запись" }, { "Save", "Сохранить" }, { "Delete replay?", "Удалить запись?" },
         { "Delete '%s'? It will be moved to the Recycle Bin together with its bookmarks.",
           "Удалить «%s»? Запись и её закладки будут перемещены в корзину." },
@@ -99,6 +100,7 @@ namespace TheaterUI
         { "Copy all", "Копировать всё" }, { "Copy errors", "Копировать ошибки" }, { "Copied", "Скопировано" },
         { "Click to copy this line", "Нажмите, чтобы скопировать строку" },
         { "Unload Replay", "Выгрузить запись" },
+        { "UI sounds", "Звуки интерфейса" }, { "Play sounds for overlay actions", "Звуки действий оверлея" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 
