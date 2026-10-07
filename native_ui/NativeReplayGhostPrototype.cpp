@@ -437,14 +437,15 @@ void animProbe6(U player){
  U modules=get<U>(player+layout[1]),behavior=get<U>(modules+layout[8]),event=get<U>(modules+layout[10]);
  U holder=get<U>(behavior+0x10),character=holder?get<U>(holder+0x30):0,graph=character?get<U>(character+0x98):0;
  if(!graph||!event){log("ANIM_PROBE6: graph/event missing");return;}
+ // The prayer clip did not exist before the request in the first run, so collect AFTER it starts.
+ const int32_t id=60100;SIZE_T w{};WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(event+layout[11]),&id,4,&w);
+ Sleep(500);
  auto clips=collectClips(graph);
  std::vector<float> t0(clips.size());for(size_t i=0;i<clips.size();++i)t0[i]=get<float>(clips[i]+0x140);
- const int32_t id=60100;SIZE_T w{};WriteProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(event+layout[11]),&id,4,&w);
- Sleep(400);
- // clips whose time moved during the prayer and are named like the prayer
+ Sleep(150);
  unsigned shown=0;
- for(size_t i=0;i<clips.size()&&shown<6;++i){const auto name=clipTitle(clips[i]);const float t=get<float>(clips[i]+0x140);
-  if(name.find("060100")!=std::string::npos||(t!=t0[i]&&name.find("0601")!=std::string::npos)){dumpClip(t!=t0[i]?"PRAYER(active)":"PRAYER(idle)",clips[i]);++shown;}}
+ for(size_t i=0;i<clips.size()&&shown<12;++i){const float t=get<float>(clips[i]+0x140);if(t!=t0[i]&&std::isfinite(t)){dumpClip("ACTIVE during prayer",clips[i]);++shown;}}
+ log("ANIM_PROBE6: %u active clips during the prayer",shown);
  shown=0;for(U c:clips){const auto name=clipTitle(c);if(name.find("022100")!=std::string::npos&&shown<3){dumpClip("ROLL",c);++shown;}}
  shown=0;for(U c:clips){const auto name=clipTitle(c);if(name.find("060000")!=std::string::npos&&shown<2){dumpClip("DOOR",c);++shown;}}
  // the binding set: hkbCharacter+0x90 setup -> +0x40 hkbAnimationBindingSet -> +0x18 bindings array
