@@ -1,7 +1,7 @@
 param([string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $repoRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-if(!$OutputDirectory){$OutputDirectory=Join-Path (Split-Path $repoRoot) 'outputs/EldenRingTheaterMode/NativeReplayGhostPrototype'}
+if(!$OutputDirectory){$OutputDirectory=Join-Path $repoRoot 'outputs/P2c-mounts-summons'}
 $buildRoot=Join-Path $repoRoot 'build-native-ghost'
 $cargoRoot=Join-Path $repoRoot 'adapter/target/native-ghost-prototype'
 $cmake='C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
@@ -32,10 +32,14 @@ $hashRows=@($sources|Sort-Object -Unique|ForEach-Object{$h=Get-FileHash -Literal
 $hashRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt') -Encoding utf8
 $binaryRows=@(Get-ChildItem -LiteralPath $OutputDirectory -File|Where-Object Extension -in '.exe','.dll'|ForEach-Object{"$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)  $($_.Name)"})
 @("branch=$branch","source_commit=$commit","build_timestamp_utc=$([DateTime]::UtcNow.ToString('o'))",'feature=bone-replay','configuration=Release x64','runtime=UNVERIFIED','game_sha256=D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134',"source_manifest_sha256=$((Get-FileHash -LiteralPath (Join-Path $OutputDirectory 'SOURCE_SHA256.txt')).Hash)",'worktree_status_at_build:')+$status+$binaryRows|Set-Content -LiteralPath (Join-Path $OutputDirectory 'BUILD_MANIFEST.txt') -Encoding utf8
-$implementationNotes = Join-Path $repoRoot 'notes/REPLAY_STATUS.md'
-$runtimeNotes = Join-Path $repoRoot 'notes/RECOVERY_STARTUP_SLOWDOWN.md'
+$implementationNotes = Join-Path $repoRoot 'notes/PHASE2_3_STATUS.md'
+$runtimeNotes = Join-Path $repoRoot 'notes/PHASE2_3_RUNTIME_TEST.md'
 if (!(Test-Path -LiteralPath $implementationNotes)) { $implementationNotes = Join-Path $repoRoot 'notes/NATIVE_GHOST_PROTOTYPE_IMPLEMENTATION_STATUS.md' }
 if (!(Test-Path -LiteralPath $runtimeNotes)) { $runtimeNotes = Join-Path $repoRoot 'notes/NATIVE_GHOST_PROTOTYPE_RUNTIME_TEST_PLAN.md' }
 Copy-Item -LiteralPath $implementationNotes -Destination (Join-Path $OutputDirectory 'IMPLEMENTATION_STATUS.md')
 Copy-Item -LiteralPath $runtimeNotes -Destination (Join-Path $OutputDirectory 'RUNTIME_TEST_PLAN.md')
+'P2c — mounts/summons existing-body prototype; RUNTIME VALIDATION REQUIRED' | Set-Content -LiteralPath (Join-Path $OutputDirectory 'BUILD_NAME.txt') -Encoding utf8
+Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/PHASES_SUMMARY.md') -Destination (Join-Path $OutputDirectory 'PHASES_SUMMARY.md')
+Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/WORLD_COMPANIONS_FORMAT.md') -Destination $OutputDirectory
+if(Test-Path -LiteralPath (Join-Path $repoRoot 'notes/PHASE2_3_TEST_RESULTS.md')){Copy-Item -LiteralPath (Join-Path $repoRoot 'notes/PHASE2_3_TEST_RESULTS.md') -Destination (Join-Path $OutputDirectory 'TEST_RESULTS.md')}
 Write-Output "Release staged: $OutputDirectory (runtime UNVERIFIED)"

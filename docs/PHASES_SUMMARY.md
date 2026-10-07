@@ -1,3 +1,13 @@
+# Independent continuation — P2c checkpoint
+
+2026-10-07: copied the latest P2b source into `EldenRingTheatreMode-P2b-independent`, branch `codex/p2b-continuation`. Original source and package remain unchanged.
+
+Phase 2.3 now has a **first existing-body prototype**, not a verified complete mount/summon lifecycle system. It adds dedicated buddy-set discovery, pointer-free companion/ride observations, separate pose tracks, mount mismatch blocking and safer actor catalog/matching/release behavior. No spawning or automatic mounting API is implemented.
+
+Build/unit status: adapter 28/28, host/native 12/12, reference utility 1/1. **User runtime validation is still required.** See `notes/PHASE2_3_STATUS.md`, `notes/PHASE2_3_RUNTIME_TEST.md` and `notes/PHASE2_3_TEST_RESULTS.md`. Experimental output: this duplicate's `outputs/P2c-mounts-summons`. Do not proceed to 2.4 or cameras yet.
+
+The original P2b summary follows for provenance; its "next 2.3" resume point is superseded by the experimental checkpoint above, not by a claim of live acceptance.
+
 # Theater Mode: next phase, combined summary and test checklist
 
 One running document for Phases 1 to 3.4 (owner asked for one test pass at the end).

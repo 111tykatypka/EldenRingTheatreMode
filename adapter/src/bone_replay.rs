@@ -75,7 +75,7 @@ type Frame=world_file::PlayerFrame;
 // a time (cached), so memory stays small for long replays.
 enum Store{Memory(Vec<Frame>),Chunked(world_file::PlayerTrack)}
 // World state of the loaded replay (Phase 2.1); empty for older files.
-#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>}
+#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>,context:Vec<world_file::EntityContext>}
 impl Store{
  fn len(&self)->usize{match self{Store::Memory(v)=>v.len(),Store::Chunked(t)=>t.len()}}
  fn time(&self,i:usize)->u64{match self{Store::Memory(v)=>v[i].time,Store::Chunked(t)=>t.times[i]}}
@@ -107,9 +107,10 @@ struct State{
  clock_saved:Option<world_state::Clock>,flags_saved:Option<Vec<(u32,bool)>>,options:u32,
  // Today's (global - physics) offset, measured each frame before the writes (used for actors too).
  now_offset:[f32;3],
+ mount_blocked:bool,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),clock_t:0.0,clock_at:0,clock_valid:false,arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_global:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3]});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),clock_t:0.0,clock_at:0,clock_valid:false,arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_global:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],mount_blocked:false});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -168,6 +169,7 @@ fn finish_recording(s:&mut State){
  let Some(r)=s.recording.take() else {return;};
  let seconds=r.last.saturating_sub(r.first) as f64/1e9;
  crate::log_game(&format!("BONE_REPLAY: recording stopped; {} frames over {seconds:.2} s ({} dropped while the disk was busy), {} characters; finishing {}",r.frames,r.dropped,r.actors.count(),world_path(&r.path).display()));
+ crate::log_game(&format!("COMPANIONS_SUMMARY: {} companion identities, {} dropped actor samples (no lost catalog announcements)",r.actors.companions(),r.actors.drops()));
  if r.frames==0{status("BONE REPLAY: no bones were recorded (load in first)");}
  let _=r.tx.send(Message::Finish);} // the writer saves and reports when done
 
@@ -186,7 +188,7 @@ fn follow_loaded(s:&mut State,l:&Link){
  let known=match &s.loading{Loading::Busy(p)|Loading::Missing(p)|Loading::Failed(p)=>Some(p.clone()),Loading::None=>s.loaded.as_ref().map(|x|x.path.clone())};
  if known.as_deref()==Some(path.as_str())||(path.is_empty()&&known.is_none()){return;}
  if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.release();}
- s.loaded=None;s.loading=Loading::None;s.written=None;s.evaluated_root=None;s.cur=None;
+ s.loaded=None;s.loading=Loading::None;s.written=None;s.evaluated_root=None;s.cur=None;s.mount_blocked=false;
  if path.is_empty(){LOADED.lock().unwrap().take();crate::log_game("BONE_REPLAY: unloaded pose data; pending loads invalidated");return;}
  let (world,file)=(world_path(&path),bones_path(&path));
  if !world.is_file()&&!file.is_file(){crate::log_game(&format!("BONE_REPLAY: {path} has no bone data (recorded before bone replays)"));status("BONE REPLAY: this replay has no bone data. Record a new one with F5");s.loading=Loading::Missing(path);return;}
@@ -194,8 +196,8 @@ fn follow_loaded(s:&mut State,l:&Link){
  let _=std::thread::Builder::new().name("TheaterMode.BoneLoad".into()).spawn(move||{
   let opened=if world.is_file(){world_file::open(&world).map(|w|{
     let mut touched:Vec<u32>=w.flag_events.iter().map(|e|e.flag).collect();touched.sort_unstable();touched.dedup();
-    let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors));
-    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
+    let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context));
+    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
   let result=opened.map(|(mut store,world_data,actors)|{
    // Learn the skeleton hierarchy from a few frames spread over the recording (see replay_interpolation).
    let n=store.len();let picks:Vec<Frame>=(0..5).filter_map(|k|store.get(k*(n-1)/4)).collect();
@@ -351,7 +353,15 @@ pub fn tick(group:usize,now:u64){
   // Playback follows the loaded replay and the timeline.
   adopt_loaded(s);follow_loaded(s,&l);
   let fresh=l.linked!=0&&l.received_ns!=0&&now.saturating_sub(l.received_ns)<500_000_000;
-  let want=fresh&&s.loaded.is_some()&&s.recording.is_none()&&(l.playing!=0||l.overlay_shown!=0);
+  if l.playing!=0&&!s.host.0{s.mount_blocked=false;}
+  let mut want=fresh&&s.loaded.is_some()&&s.recording.is_none()&&(l.playing!=0||l.overlay_shown!=0)&&!s.mount_blocked;
+  // No guessed mounting API: reject a mounted/unmounted mismatch before body ownership/writes.
+  if want{if let Some(chr)=chr{
+   let required=s.loaded.as_ref().and_then(|x|world_file::context_at(&x.world.context,0,l.play_source_ns));
+   if required.is_some_and(|c|!crate::companions::mount_compatible(c.ride_flags,crate::companions::ride(chr))){
+    want=false;s.mount_blocked=true;if s.owning{release(s,chr,"mount state mismatch");}
+    crate::log_game("COMPANION_REPLAY_BLOCKED: recorded/live mount state differs; no automatic mount/dismount API verified");
+    status("REPLAY BLOCKED: mount state differs. Stop, match mounted/on-foot state, then Play. Mount/dismount reconstruction is not implemented.");}}}
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){

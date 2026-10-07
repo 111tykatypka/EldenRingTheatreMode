@@ -77,3 +77,5 @@ extern "C" __declspec(dllexport) uint32_t __cdecl tm_validate_profile(const wcha
 // Recording radius for enemies/NPCs/bosses (metres) and the "near" distance for full-rate sampling.
 #define TM_VAL_ACTOR_RADIUS 100
 #define TM_VAL_ACTOR_NEAR 30
+// Corruption guard for the SDK's companion ChrSet capacity, not a recording actor limit.
+#define TM_VAL_COMPANION_SCAN_GUARD 4096
