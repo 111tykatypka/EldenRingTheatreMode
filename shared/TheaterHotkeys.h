@@ -12,9 +12,9 @@ enum class Action : std::uint32_t {
     StartRecording,      // F5: host global hotkey
     StopRecording,       // F6: host global hotkey; also stops replay playback
     TogglePlayback,      // Space: play/pause the timeline, only while a replay is loaded or the overlay is open
-    GhostCreateTest,     // F10: experimental native ghost create
-    GhostRemoveTest,     // F11: experimental native ghost remove
-    AnimProbe,           // F9: read-only animation probe (replay system research)
+    GhostCreateTest,     // F10: bone replay test: play / stop (the native ghost is retired)
+    GhostRemoveTest,     // F11: unused (was native ghost remove)
+    AnimProbe,           // F9: bone replay test: start / stop recording
     Count
 };
 
@@ -33,9 +33,9 @@ inline constexpr Binding kDefaults[] = {
     { Action::StartRecording,  "start_recording",   "Start recording",               0x74 /*VK_F5*/,    Scope::Global },
     { Action::StopRecording,   "stop_recording",    "Stop recording / playback",     0x75 /*VK_F6*/,    Scope::Global },
     { Action::TogglePlayback,  "toggle_playback",   "Play / pause timeline",         0x20 /*VK_SPACE*/, Scope::ReplayOrOverlay },
-    { Action::GhostCreateTest, "ghost_create_test", "Native ghost: create (test)",   0x79 /*VK_F10*/,   Scope::GameWindow },
-    { Action::GhostRemoveTest, "ghost_remove_test", "Native ghost: remove (test)",   0x7A /*VK_F11*/,   Scope::GameWindow },
-    { Action::AnimProbe,       "anim_probe",        "Animation probe (research)",    0x78 /*VK_F9*/,    Scope::GameWindow },
+    { Action::GhostCreateTest, "ghost_create_test", "Bone replay: play / stop (test)",   0x79 /*VK_F10*/,   Scope::GameWindow },
+    { Action::GhostRemoveTest, "ghost_remove_test", "Unused (was ghost remove)",   0x7A /*VK_F11*/,   Scope::GameWindow },
+    { Action::AnimProbe,       "anim_probe",        "Bone replay: record (test)",    0x78 /*VK_F9*/,    Scope::GameWindow },
 };
 static_assert(sizeof(kDefaults) / sizeof(kDefaults[0]) == static_cast<std::size_t>(Action::Count), "one row per action");
 

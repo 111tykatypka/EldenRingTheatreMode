@@ -597,7 +597,9 @@ void keys() {
  for(;;) {
   DWORD pid{};GetWindowThreadProcessId(GetForegroundWindow(),&pid);bool foreground=pid==GetCurrentProcessId();
   using theater_hotkeys::Action;const int createKey=int(theater_hotkeys::Key(Action::GhostCreateTest)),removeKey=int(theater_hotkeys::Key(Action::GhostRemoveTest));
-  bool c=foreground&&(GetAsyncKeyState(createKey)&0x8000),r=foreground&&(GetAsyncKeyState(removeKey)&0x8000);
+  // The native ghost is retired (user decision 2026-10-07: replay = recorded bone transforms played
+  // on the player character). F10/F11 now belong to adapter/src/bone_replay.rs; never create ghosts.
+  (void)createKey;(void)removeKey;bool c=false,r=false;
   auto live=snapshot();if(live.active&&world()!=live.world)retire(live.actor,"world-changed; observation only, no destruction request");
   {static unsigned long long diffEpoch=~0ull;static ULONGLONG ownedAt=0;
    if(live.active&&live.epoch!=diffEpoch){if(!ownedAt)ownedAt=GetTickCount64();else if(GetTickCount64()-ownedAt>1000){diffEpoch=live.epoch;ownedAt=0;renderDiff(live.actor);}}

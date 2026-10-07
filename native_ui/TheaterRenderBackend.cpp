@@ -48,6 +48,9 @@ public:
  TheaterUI::Overlay overlay;
  // Game input is blocked only while the UI is shown AND actually rendering, so a failed overlay never traps the player.
  bool blocking() const {return mode.load()==2&&ui_ready.load()&&!failed;}
+ // Set by bone replay playback: the player character is the replay body, so the game gets no
+ // keyboard and no mouse buttons (mouse movement still turns the camera). Gamepads are not blocked yet.
+ std::atomic_bool game_input_locked{};
  // Replay state from the latest host snapshot, for keys that only act while a replay is loaded.
  std::atomic_bool replay_loaded{},replay_playing{};
  // TogglePlayback (Space) belongs to Theater Mode only while the overlay is open (game input is
@@ -235,6 +238,7 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  // While the UI is shown the game gets no mouse or keyboard at all; ImGui already has its copy above.
  // WM_SYS* keys still pass, so Alt+F4 and Alt+Tab keep working.
  if(b.blocking()&&((m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR))return 0;
+ if(b.game_input_locked.load()&&(m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR||(m>=WM_LBUTTONDOWN&&m<=WM_MBUTTONDBLCLK)))return 0;
  auto previous=b.forward_proc.load(std::memory_order_acquire);return previous?CallWindowProcW(previous,h,m,w,l):DefWindowProcW(h,m,w,l);
 }
 // Elden Ring reads keyboard and mouse through DirectInput8 (DINPUT8.dll import), not window
@@ -260,11 +264,18 @@ void capture_mouse_data(IDirectInputDevice8W*d,DWORD object_size,const DIDEVICEO
 template<int N> HRESULT STDMETHODCALLTYPE on_device_state(IDirectInputDevice8W*d,DWORD size,LPVOID data){
  const HRESULT hr=original_state[N](d,size,data);if(FAILED(hr)||!data)return hr;auto&b=backend();
  if(b.blocking()){capture_mouse_state(data,size);memset(data,0,size);}
+ else if(b.game_input_locked.load()){if(size==256)memset(data,0,size);else if(size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))memset(static_cast<DIMOUSESTATE*>(data)->rgbButtons,0,size-12);}
  else if(size==256&&b.owns_playback_key()){const DWORD code=playback_scan_code();if(code&&code<256)static_cast<BYTE*>(data)[code]=0;}
  return hr;}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_data(IDirectInputDevice8W*d,DWORD object_size,LPDIDEVICEOBJECTDATA data,LPDWORD count,DWORD flags){
  const HRESULT hr=original_data[N](d,object_size,data,count,flags);if(FAILED(hr)||!count)return hr;auto&b=backend();
  if(b.blocking()){if(!(flags&DIGDD_PEEK))capture_mouse_data(d,object_size,data,*count);*count=0;}
+ else if(b.game_input_locked.load()&&data&&object_size>=sizeof(DIDEVICEOBJECTDATA)){
+  // Keep only mouse movement (camera); drop keys and mouse buttons.
+  const bool mouse=is_mouse(d);auto*bytes=reinterpret_cast<unsigned char*>(data);DWORD kept=0;
+  for(DWORD i=0;i<*count;++i){auto*e=reinterpret_cast<DIDEVICEOBJECTDATA*>(bytes+size_t(i)*object_size);
+   if(!mouse||e->dwOfs>=DIMOFS_BUTTON0)continue;if(kept!=i)memmove(bytes+size_t(kept)*object_size,e,object_size);++kept;}
+  *count=kept;}
  else if(data&&object_size>=sizeof(DIDEVICEOBJECTDATA)&&b.owns_playback_key()&&device_type(d)==DI8DEVTYPE_KEYBOARD){
   // Drop only the playback key's events, keep the rest in order.
   const DWORD code=playback_scan_code();auto*bytes=reinterpret_cast<unsigned char*>(data);DWORD kept=0;
@@ -347,4 +358,5 @@ extern "C" int tm_render_test_ui(){
  b.host_linked=false;b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;ImGui::DestroyContext(c);return valid?1:0;
 }
 // The hotkey table for the Rust side (shared/TheaterHotkeys.h). Unknown action: 0 (unbound).
+extern "C" void tm_render_lock_game_input(int locked){backend().game_input_locked=locked!=0;}
 extern "C" unsigned tm_hotkey_vk(unsigned action){return action<unsigned(theater_hotkeys::Action::Count)?theater_hotkeys::Key(theater_hotkeys::Action(action)):0u;}
