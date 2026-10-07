@@ -14,7 +14,7 @@ int main(){using namespace theater_ui;Request r;r.sequence=1;
  r.command=record_start;r.value=1;if(valid(r,0))return 8;r.value=0;
  r.command=command_count;if(valid(r,0))return 9;
  r.command=replay_open;r.value=7;if(!valid(r,0))return 13;r.command=replay_page;r.value=12;if(!valid(r,0))return 14;r.value=0;
- r.command=timescale;for(auto value:{.001,.00105,.037,1.,10.}){r.value=theater_timescale::encode(value);if(!valid(r,0))return 3;}
+ r.command=timescale;for(auto value:{.01,.0105,.037,1.,4.}){r.value=theater_timescale::encode(value);if(!valid(r,0))return 3;}
  r.value=theater_timescale::encode(0.);if(valid(r,0))return 4;r.value=theater_timescale::encode(1.);r.reserved=1;if(valid(r,0))return 5;
  r.reserved=0;r.version=1;if(valid(r,0))return 10;r.version=version;
  r.magic_value=0;if(valid(r,0))return 6;

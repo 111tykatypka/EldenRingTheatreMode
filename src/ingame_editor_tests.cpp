@@ -11,10 +11,10 @@ int main(){using namespace theater;
  ingame_editor::start(endpoint.c_str());std::atomic_bool done{},ok{true};
  std::thread client([&]{HANDLE h=INVALID_HANDLE_VALUE;for(unsigned i=0;i<100&&h==INVALID_HANDLE_VALUE;++i){h=CreateFileW(endpoint.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);if(h==INVALID_HANDLE_VALUE)Sleep(10);}if(h==INVALID_HANDLE_VALUE){ok=false;done=true;return;}
   std::uint64_t seq=0;auto send=[&](unsigned command,std::uint64_t value){theater_ui::Request r;r.command=command;r.value=value;r.sequence=++seq;theater_ui::Snapshot s;DWORD n=0;if(!WriteFile(h,&r,sizeof(r),&n,nullptr)||n!=sizeof(r)){ok=false;return;}n=0;unsigned offset=0;while(offset<sizeof(s)){if(!ReadFile(h,reinterpret_cast<char*>(&s)+offset,sizeof(s)-offset,&n,nullptr)||!n){ok=false;return;}offset+=n;}if(s.magic_value!=theater_ui::magic||s.sequence!=seq)ok=false;};
-  send(theater_ui::seek,2'000'000'000);send(theater_ui::timescale,theater_timescale::encode(.00105));send(theater_ui::poll,0);CloseHandle(h);done=true;
+  send(theater_ui::seek,2'000'000'000);send(theater_ui::timescale,theater_timescale::encode(.0105));send(theater_ui::poll,0);CloseHandle(h);done=true;
  });
  for(unsigned i=0;i<500&&!done;++i){ingame_editor::poll();Sleep(2);}client.join();ingame_editor::poll();ingame_editor::shutdown();
- if(!ok||app.replay_player->state().timestamp_ns!=2'000'000'000||app.replay_player->state().timescale!=.00105)return 1;
+ if(!ok||app.replay_player->state().timestamp_ns!=2'000'000'000||app.replay_player->state().timescale!=.0105)return 1;
  // Replay Library helpers: safe file names, unique paths, sorting.
  {using namespace theater::library;
   if(safe_stem("  My: run/one?.  ")!=L"My runone"||safe_stem("")!=L"Replay"||safe_stem("CON")!=L"CON_"||safe_stem("<>|")!=L"Replay")return 2;

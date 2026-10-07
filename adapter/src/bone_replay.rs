@@ -68,8 +68,11 @@ struct State{
  owning:bool,restore_left:u32,saved:Option<Transform>,gravity_saved:Option<bool>,written:Option<usize>,evaluated_root:Option<Transform>,pose_alpha:f64,local_out:[u8;POSE_BYTES],model_out:[u8;POSE_BYTES],accuracy:Accuracy,
  // Accuracy: where the body should be drawn this frame, and frames to skip after a start or seek.
  expected:[f32;3],settle:u32,last_t:u64,fallback_bones:u64,
+ // Timeline as last seen from the host (playing, timescale, source time, when it arrived) and the
+ // replay clock that advances smoothly between host updates.
+ host:(bool,f64,u64,u64),clock_t:f64,clock_at:u64,clock_valid:bool,
 }
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:[0;POSE_BYTES],model_out:[0;POSE_BYTES],accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),clock_t:0.0,clock_at:0,clock_valid:false});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -164,11 +167,34 @@ fn follow_loaded(s:&mut State,l:&Link){
    crate::log_game(&format!("BONE_REPLAY: skeleton hierarchy learned for {known} of {} bones; the rest interpolate on their own",parents.len()));
    Loaded{path:path.clone(),frames:Arc::new(frames),parents:Arc::new(parents)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
-// The timeline position in source time, extrapolated between host snapshots while playing.
-fn timeline(l:&Link,now:u64)->u64{
- if l.playing==0||l.received_ns==0{return l.play_source_ns;}
- let since=now.saturating_sub(l.received_ns).min(250_000_000) as f64;
- l.play_source_ns+(since*l.timescale.clamp(0.001,10.0)) as u64}
+// The replay time for this game frame, in source time. The host sends the timeline about 20 times a
+// second; between updates the replay clock advances by elapsed game time x speed, so motion is
+// continuous at any speed. While playing it never steps backwards: small differences to the host
+// are blended in over a few frames, and only a real jump (seek, > 0.1 s) is taken at once.
+// While paused or scrubbing it follows the host exactly.
+fn replay_time(s:&mut State,now:u64)->u64{
+ let (playing,speed,source,received)=s.host;let speed=speed.clamp(0.001,10.0);
+ let host=if playing&&received!=0{source as f64+now.saturating_sub(received).min(250_000_000) as f64*speed}else{source as f64};
+ let t=if !playing||!s.clock_valid{host}else{
+  let predicted=s.clock_t+now.saturating_sub(s.clock_at) as f64*speed;let error=host-predicted;
+  if error.abs()>100_000_000.0{host}else{(predicted+error*0.1).max(s.clock_t)}};
+ s.clock_t=t;s.clock_at=now;s.clock_valid=true;t as u64}
+// Picks the two recorded frames around this frame's replay time and the blend between them, and
+// computes the root transform and where the body should be drawn. Called once per game frame, before
+// the writes, so bones and root always come from the same instant.
+fn select(s:&mut State,now:u64)->bool{
+ let t=replay_time(s,now);
+ let Some(loaded)=&s.loaded else {return false;};
+ let frames=&loaded.frames;let i=frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1);
+ let a=&frames[i];let b=&frames[(i+1).min(frames.len()-1)];let span=b.time.saturating_sub(a.time);
+ // No blending across a gap in the recording or a teleport (warp, grace travel): hold the earlier frame.
+ let jump=(0..3).map(|k|(b.transform[2][k]-a.transform[2][k]).powi(2)).sum::<f32>().sqrt();
+ let alpha=if span==0||span>250_000_000||jump>1.5{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
+ s.pose_alpha=alpha.clamp(0.0,1.0);s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,s.pose_alpha);
+ // A seek or the first frames after taking the body teleport it; the draw lags one frame there.
+ if t<s.last_t||t-s.last_t>200_000_000{s.settle=s.settle.max(3);}s.last_t=t;
+ s.expected=std::array::from_fn(|k|a.matrix[12+k]+(b.matrix[12+k]-a.matrix[12+k])*s.pose_alpha as f32);
+ s.evaluated_root.is_some()}
 
 fn release(s:&mut State,chr:usize,reason:&str){
  if !s.owning{return;}s.owning=false;s.restore_left=RESTORE_FRAMES;
@@ -210,7 +236,7 @@ pub fn tick(group:usize,now:u64){
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){
-     s.owning=true;s.written=None;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;
+     s.owning=true;s.written=None;s.evaluated_root=None;s.clock_valid=false;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;
      let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
    else if !want&&s.owning{release(s,chr,if s.loaded.is_none(){"replay unloaded"}else{"timeline idle and overlay closed"});}
@@ -218,22 +244,9 @@ pub fn tick(group:usize,now:u64){
     if let Some(t)=s.saved{write_transform(chr,&t);}set_flag(proxy_flag(chr),true);
     s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
   }
-  if s.owning{
-   // Pick this game frame's sample once, from the timeline.
-   let t=timeline(&l,now);
-   if let Some(loaded)=&s.loaded{
-    let frames=&loaded.frames;let i=frames.partition_point(|f|f.time<=t).saturating_sub(1).min(frames.len()-1);
-    let a=&frames[i];let b=&frames[(i+1).min(frames.len()-1)];let span=b.time.saturating_sub(a.time);
-    // No blending across a gap in the recording or a teleport (warp, grace travel): hold the earlier frame.
-    let jump=(0..3).map(|k|(b.transform[2][k]-a.transform[2][k]).powi(2)).sum::<f32>().sqrt();
-    let alpha=if span==0||span>250_000_000||jump>1.5{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
-    s.pose_alpha=alpha.clamp(0.0,1.0);s.written=Some(i);s.evaluated_root=crate::replay_interpolation::evaluate(&a.transform,&b.transform,alpha);
-    // A seek or the first frames after taking the body teleport it; the draw lags one frame there.
-    if t<s.last_t||t-s.last_t>200_000_000{s.settle=s.settle.max(3);}s.last_t=t;
-    s.expected=std::array::from_fn(|k|a.matrix[12+k]+(b.matrix[12+k]-a.matrix[12+k])*s.pose_alpha as f32);
-    if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}
-    else if let Some(chr)=chr{release(s,chr,"invalid root interpolation");}
-   }}
+  s.host=(l.playing!=0,l.timescale,l.play_source_ns,l.received_ns);
+  // After physics: put the root back where this frame's replay time says (physics may have moved it).
+  if s.owning{if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}}
   return;}
  let Some(chr)=chr else {return;};
  if group==DRAW_GROUP&&!s.record_paused&&s.last_second!=u64::MAX{
@@ -241,10 +254,11 @@ pub fn tick(group:usize,now:u64){
    let (Some((local,model)),Some(transform))=(pose_arrays(chr),read_transform(chr)) else {return;};
    frames.push(Frame{time:now,transform,matrix:read_matrix(matrix_address(chr)),local:pose(local).to_vec(),model:pose(model).to_vec()});}}
  if !s.owning{return;}
- let (Some(i),Some(loaded))=(s.written,&s.loaded) else {return;};let f=&loaded.frames[i];
  match group{
   WRITE_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};
+   if !select(s,now){release(s,chr,"invalid root interpolation");return;}
+   let (Some(i),Some(loaded))=(s.written,&s.loaded) else {return;};let f=&loaded.frames[i];
    let next=&loaded.frames[(i+1).min(loaded.frames.len()-1)];
    let alpha=if interpolated_pose_enabled(){s.pose_alpha}else{0.0};
    // Bones whose interpolation is invalid keep the earlier recorded frame instead of dropping the replay.

@@ -990,7 +990,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
     const float controlY = o.y + (height - ImGui::GetFrameHeight()) * 0.5f;
     ImGui::SetCursorScreenPos(ImVec2(x, controlY));
     ImGui::BeginDisabled(!canTransport);
-    ImGui::TextUnformatted("Timescale");
+    ImGui::TextUnformatted(T(Str::Speed));
     ImGui::SameLine(0, Px(6,s));
     const float sliderWidth = std::clamp(w - (x-o.x) - Px(400,s), Px(45,s), Px(160,s));
     const ImVec2 sliderMin = ImGui::GetCursorScreenPos();
@@ -1006,15 +1006,25 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
             value = theater_timescale::from_normalized((io.MousePos.x-sliderMin.x)/sliderWidth);
         else if (io.MouseDelta.x != 0)
             value = theater_timescale::adjust(value, io.MouseDelta.x/sliderWidth * precision);
+        // Quick-set marks are magnetic within a few pixels (hold Shift or Ctrl to place freely).
+        if (!io.KeyShift && !io.KeyCtrl)
+            for (double m : theater_timescale::marks)
+                if (std::abs((theater_timescale::normalized(value) - theater_timescale::normalized(m)) * sliderWidth) < Px(4, s)) value = m;
         changed = true;
     }
+    // Double-click the slider: back to 1x.
+    if (canTransport && sliderHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) { value = 1.0; changed = true; timescaleInputInvalid_ = false; }
     const float cy = sliderMin.y + ImGui::GetFrameHeight()*0.5f;
     dl->AddLine(ImVec2(sliderMin.x,cy), ImVec2(sliderMin.x+sliderWidth,cy), Color::TextMuted.U32(), Px(3,s));
-    const float normalX = sliderMin.x + sliderWidth * (float)theater_timescale::normalized(1.0);
-    dl->AddLine(ImVec2(normalX,cy-Px(6,s)),ImVec2(normalX,cy+Px(6,s)),Color::AccentAmber.U32(),Px(1,s));
+    for (double m : theater_timescale::marks)
+    {
+        const float mx = sliderMin.x + sliderWidth * (float)theater_timescale::normalized(m);
+        const bool normal = m == theater_timescale::normal;
+        dl->AddLine(ImVec2(mx, cy - Px(normal ? 6 : 4, s)), ImVec2(mx, cy + Px(normal ? 6 : 4, s)), (normal ? Color::AccentAmber : Color::TextMuted).U32(), Px(1, s));
+    }
     const float knobX=sliderMin.x+sliderWidth*(float)theater_timescale::normalized(value);
     dl->AddCircleFilled(ImVec2(knobX,cy),Px(5,s),Color::AccentBlue.U32());
-    if (sliderHovered) ImGui::SetTooltip("Logarithmic timescale. Shift: 2%% precision; Ctrl: 0.2%%. Wheel adjusts; right/middle click resets to 1.000x. Tick = native speed.");
+    if (sliderHovered) ImGui::SetTooltip("Replay speed 0.01x to 4x. Marks: 0.1, 0.25, 0.5, 1 (amber), 2 (they snap; Shift/Ctrl for fine control).\nDouble-click or right-click: back to 1x. Mouse wheel adjusts. The game itself keeps full speed.");
     ImGui::SameLine(0,Px(6,s));
     if (timescaleInput_[0]==0) theater_timescale::format(value,timescaleInput_,sizeof(timescaleInput_));
     ImGui::SetNextItemWidth(Px(98,s));
@@ -1025,7 +1035,7 @@ void Overlay::DrawToolbar(const OverlayFrame& f, float height)
         if (!timescaleInputInvalid_) {value=parsed;changed=true;}
     }
     const bool inputHovered=ImGui::IsItemHovered(), inputActive=ImGui::IsItemActive();
-    if (timescaleInputInvalid_ && inputHovered) ImGui::SetTooltip("Enter a finite positive value, optionally ending in x. Range: 0.001x to 10.000x.");
+    if (timescaleInputInvalid_ && inputHovered) ImGui::SetTooltip("Enter a finite positive value, optionally ending in x. Range: 0.01x to 4x.");
     if (canTransport && (sliderHovered||inputHovered))
     {
         ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
