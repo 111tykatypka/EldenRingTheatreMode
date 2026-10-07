@@ -358,10 +358,13 @@ pub fn tick(group:usize,now:u64){
   // No guessed mounting API: reject a mounted/unmounted mismatch before body ownership/writes.
   if want{if let Some(chr)=chr{
    let required=s.loaded.as_ref().and_then(|x|world_file::context_at(&x.world.context,0,l.play_source_ns));
-   if required.is_some_and(|c|!crate::companions::mount_compatible(c.ride_flags,crate::companions::ride(chr))){
+   let live_ride=crate::companions::ride(chr);
+   if let Some(required)=required.filter(|c|!crate::companions::mount_compatible(c.ride_flags,live_ride)){
     want=false;s.mount_blocked=true;if s.owning{release(s,chr,"mount state mismatch");}
-    crate::log_game("COMPANION_REPLAY_BLOCKED: recorded/live mount state differs; no automatic mount/dismount API verified");
-    status("REPLAY BLOCKED: mount state differs. Stop, match mounted/on-foot state, then Play. Mount/dismount reconstruction is not implemented.");}}}
+    let recorded=if required.ride_flags&crate::companions::MOUNTED!=0{"mounted"}else{"on foot"};
+    let live=match live_ride{Some(r) if r.flags&crate::companions::MOUNTED!=0=>"mounted",Some(_)=>"on foot",None=>"unavailable"};
+    crate::log_game(&format!("COMPANION_REPLAY_BLOCKED: source_ns={} recorded={recorded} flags=0x{:X} state={} param={} mount_id={} live={live} live_ride={live_ride:?}; mount/dismount reconstruction unavailable",l.play_source_ns,required.ride_flags,required.ride_state,required.ride_param,required.mount_id));
+    status(&format!("REPLAY BLOCKED: recording is {recorded}, live player is {live}. Mount/dismount transitions are not supported. Test a recording made entirely on foot or entirely mounted."));}}}
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){

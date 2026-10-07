@@ -64,22 +64,26 @@ pub fn ride(chr:usize)->Option<Ride>{
 
 /// Active buddy bodies may be missing from the distance-sorted list. Read their public ChrSet.
 /// The upper scan bound is a corruption/resource guard, centralized in GameProfile.
-pub fn buddies(world:&WorldChrMan)->Result<Vec<usize>,&'static str>{
+pub fn buddies(world:&WorldChrMan,diagnostic:bool)->Result<Vec<usize>,&'static str>{
  let set=&raw const world.summon_buddy_chr_set;
  let capacity=dword(unsafe{&raw const (*set).capacity as usize}).ok_or("unreadable capacity")? as usize;
  if capacity>crate::game_profile::VAL_COMPANION_SCAN_GUARD{return Err("capacity exceeds corruption guard");}
- if capacity==0{return Ok(Vec::new());}
+ if capacity==0{if diagnostic{crate::log_game("COMPANION_SCAN: capacity=0");}return Ok(Vec::new());}
  let entries=word(unsafe{&raw const (*set).entries as usize}).ok_or("unreadable entries")?;
  let stride=std::mem::size_of::<ChrSetEntry<ChrIns>>();
  let mut bytes=vec![0;capacity.checked_mul(stride).ok_or("capacity overflow")?];
  if !copy(entries,&mut bytes){return Err("unreadable entry array");}
  let pointer=std::mem::offset_of!(ChrSetEntry<ChrIns>,chr_ins);
  let status=std::mem::offset_of!(ChrSetEntry<ChrIns>,chr_load_status);
- Ok(bytes.chunks_exact(stride).filter_map(|e|{
-  if e[status]!=ChrLoadStatus::Active as u8{return None;}
+ let mut statuses=[0usize;256];let mut active=0;let mut rejected=0;
+ let bodies=bytes.chunks_exact(stride).filter_map(|e|{
+  statuses[e[status] as usize]+=1;
+  if e[status]!=ChrLoadStatus::Active as u8{return None;}active+=1;
   let p=usize::from_le_bytes(e[pointer..pointer+8].try_into().ok()?);
-  (p>=0x10000&&p%8==0&&readable_body(p)).then_some(p)
- }).collect())
+  if p>=0x10000&&p%8==0&&readable_body(p){Some(p)}else{rejected+=1;None}
+ }).collect::<Vec<_>>();
+ if diagnostic{let histogram:Vec<_>=statuses.iter().enumerate().filter(|(_,n)|**n>0).map(|(s,n)|format!("{s}:{n}")).collect();crate::log_game(&format!("COMPANION_SCAN: capacity={capacity} statuses=[{}] active={active} owner_rejected={rejected} accepted={}",histogram.join(","),bodies.len()));}
+ Ok(bodies)
 }
 
 pub fn category(chr:usize,in_buddy_set:bool,r:Option<Ride>)->u32{

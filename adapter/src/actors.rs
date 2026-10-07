@@ -52,31 +52,41 @@ fn debug_flags(chr:usize)->Option<usize>{
  let base=unsafe{crate::GetModuleHandleW(std::ptr::null())} as usize;
  (base!=0&&read_ptr(chr+profile::OFF_CHRINS_DEBUG_CALLBACK)==base+profile::VAL_CHRINS_DEBUG_CALLBACK_RVA).then_some(chr+profile::OFF_CHRINS_DEBUG_FLAGS)}
 fn handle_of(c:&ChrIns)->u64{c.field_ins_handle.selector.0 as u64|((i32::from(c.field_ins_handle.block_id) as u32 as u64)<<32)}
-fn live_snapshot()->(Vec<usize>,HashSet<usize>){
+fn live_snapshot(diagnostic:bool)->(Vec<usize>,HashSet<usize>){
  let Ok(world)=(unsafe{WorldChrMan::instance()}) else {return (Vec::new(),HashSet::new())};
  let player=world.main_player.as_ref().map(|p|&p.chr_ins as *const _ as usize);
- let buddies=match crate::companions::buddies(world){Ok(v)=>v,Err(e)=>{
+ let buddies=match crate::companions::buddies(world,diagnostic){Ok(v)=>v,Err(e)=>{
   static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||{let msg=format!("COMPANIONS_UNAVAILABLE: {e}; distance-list actors still recorded");crate::log_game(&msg);crate::bone_replay::status(&msg);});Vec::new()}};
  let set:HashSet<usize>=buddies.iter().copied().collect();
  let mut bodies:Vec<usize>=world.chr_inses_by_distance.iter().map(|e|e.chr_ins.as_ptr() as usize).chain(buddies).filter(|a|Some(*a)!=player).collect();
  bodies.sort_unstable();bodies.dedup();(bodies,set)}
-fn live()->Vec<usize>{live_snapshot().0}
+fn live()->Vec<usize>{live_snapshot(false).0}
 
 // ------------------------------------------------------------------------------------------ record
 /// Per-recording identities and rate control; lives while the host records.
 struct Identity{info:ActorInfo,announced:bool,category:u32,seen:u64}
-pub struct Recorder{ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>}
+pub struct Recorder{ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64}
 impl Recorder{
- pub fn new()->Self{Self{ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new()}}
+ pub fn new()->Self{Self{ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0}}
  /// Samples nearby characters; `player` is the main player's ChrIns, `tx` the world file writer.
  pub fn sample(&mut self,now:u64,player:usize,tx:&SyncSender<Message>){
   self.frame+=1;
   let me=unsafe{&*(player as *const ChrIns)};let origin=me.modules.physics.position;
   let (radius,near)=(profile::VAL_ACTOR_RADIUS as f32,profile::VAL_ACTOR_NEAR as f32);
   let mut batch=Vec::new();let mut infos=Vec::new();let mut context=Vec::new();let mut accepted=Vec::new();
-  let snapshot=now>=self.next_context;let (bodies,buddies)=live_snapshot();let mut body_ids=HashMap::new();
+  let snapshot=now>=self.next_context;let diagnostic=now>=self.next_diagnostic;
+  if diagnostic{self.next_diagnostic=now.saturating_add(1_000_000_000);}
+  let (bodies,buddies)=live_snapshot(diagnostic);let mut body_ids=HashMap::new();
   for chr in bodies{
    let c=unsafe{&*(chr as *const ChrIns)};if c.field_ins_handle.is_empty(){continue;}
+   // SDK documents character_id/npc_id 8000 as Torrent. Diagnose before pose/range filters;
+   // a model identifier alone does not authorize playback ownership or classify a track.
+   if diagnostic&&(buddies.contains(&chr)||c.character_id==8000||c.npc_id==8000){
+    let importer=read_ptr(chr+profile::OFF_CHRINS_POSE_IMPORTER);
+    let skel=if object(importer){read_ptr(importer+profile::OFF_POSE_IMPORTER_SKELETON)}else{0};
+    let counts=if object(skel){Some([read_i32(skel+profile::OFF_HKA_SKELETON_PARENT_COUNT),read_i32(skel+profile::OFF_HKA_SKELETON_BONE_COUNT),read_i32(skel+profile::OFF_HKA_SKELETON_REFPOSE_COUNT)])}else{None};
+    crate::log_game(&format!("COMPANION_CANDIDATE: handle=0x{:X} character_id={} npc_id={} npc_param={} buddy={} ride={:?} skeleton_counts={counts:?} pose_arrays={} transform={}",handle_of(c),c.character_id,c.npc_id,c.npc_param_id,buddies.contains(&chr),crate::companions::ride(chr),pose_arrays(chr).is_some(),read_transform(chr).is_some()));
+   }
    let p=c.modules.physics.position;let d=((p.0-origin.0).powi(2)+(p.1-origin.1).powi(2)+(p.2-origin.2).powi(2)).sqrt();
    if !d.is_finite()||d>radius{continue;}
    // Companions remain full rate even outside the near zone; no global-time slowdown.
@@ -126,7 +136,7 @@ impl Player{
   Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new()}}
  pub fn len(&self)->usize{self.tracks.len()}
  fn find(info:&ActorInfo,taken:&[usize],category:u32,unique_recorded:bool)->Option<usize>{
-  let (bodies,buddies)=live_snapshot();let mut candidates=Vec::new();
+  let (bodies,buddies)=live_snapshot(false);let mut candidates=Vec::new();
   for a in bodies.into_iter().filter(|a|!taken.contains(a)){let c=unsafe{&*(a as *const ChrIns)};if c.npc_param_id!=info.npc_param{continue;}
    if (info.entity!=0&&c.event_entity_id==info.entity)||(info.entity==0&&handle_of(c)==info.handle){return Some(a);}
    if info.entity==0&&unique_recorded{let observed=crate::companions::category(a,buddies.contains(&a),crate::companions::ride(a));
