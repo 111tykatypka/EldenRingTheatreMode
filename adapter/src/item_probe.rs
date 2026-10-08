@@ -6,7 +6,7 @@ use eldenring::cs::ChrIns;
 use std::mem::offset_of;
 
 #[derive(Default)]
-pub struct Probe{window:Option<Window>,item:Option<u32>,sfx:Option<[i32;3]>,effects:Option<Vec<i32>>,loc:Option<[u8;crate::weapon_loc::BYTES]>}
+pub struct Probe{anim:Option<i32>,window:Option<Window>,item:Option<u32>,sfx:Option<[i32;3]>,effects:Option<Vec<i32>>,loc:Option<[u8;crate::weapon_loc::BYTES]>}
 /// After an item is queued for use: for a few seconds, 10 times a second, report which bytes of the player's
 /// assembly, action-flag module, model instance and the front of the ChrIns itself changed (offset old->new).
 /// The weapon hiding while a flask is drunk must be one of them, since weapon_loc does not change then.
@@ -26,7 +26,18 @@ fn region_list(chr:usize)->Vec<(String,usize,usize)>{
  if let Some(a)=ptr(offset_of!(eldenring::cs::PlayerIns,chr_asm)){v.push(("ChrAsm".to_string(),a,std::mem::size_of::<eldenring::cs::ChrAsm>()));}
  if let Some(a)=crate::weapon_loc::module(chr){v.push(("ActionFlag".to_string(),a,0x258));}
  if let Some(a)=ptr(offset_of!(ChrIns,chr_model_ins)){v.push(("ModelIns".to_string(),a,0x300));}
- v.extend(asm_children(chr));v}
+v.extend(asm_children(chr));
+ // Character modules by their slot in ChrInsModuleContainer (8 bytes each): time act 3, sfx 22, vfx 23, model param modifier 26.
+ if let Some(container)=ptr(offset_of!(ChrIns,modules)){
+  for (name,slot,size) in [("TimeAct",3usize,0x100usize),("SfxModule",22,0x200),("VfxModule",23,0x200),("ModelParamModifier",26,0x60)]{
+   let Some(m)=crate::companions::word(container+slot*8).filter(|p|*p>0x10000) else {continue};
+   v.push((name.to_string(),m,size));
+   let mut seen=vec![m];
+   for off in (0..size).step_by(8){
+    let Some(p)=crate::companions::word(m+off).filter(|p|*p>0x10000&&*p<0x7FFF_FFFF_FFFF&&!seen.contains(p)) else {continue};
+    let mut probe=[0u8;8];if !crate::companions::copy(p,&mut probe){continue;}
+    seen.push(p);v.push((format!("{name}+{off:#x}"),p,0x300));if seen.len()>10{break;}}}}
+ v}
 fn snapshot(chr:usize)->Vec<(String,usize,Vec<u8>)>{
  region_list(chr).into_iter().filter_map(|(n,a,l)|{let mut b=vec![0u8;l];crate::companions::copy(a,&mut b).then_some((n,a,b))}).collect()}
 impl Probe{
@@ -50,6 +61,12 @@ impl Probe{
    if self.item.is_some()&&item.is_some_and(|v|v!=0&&v!=u32::MAX){self.window=Some(Window{until:seconds+6.0,next:seconds,regions:snapshot(chr)});crate::log_game("ITEM_DIFF: window opened (6 s, 10 Hz)");}
    self.item=item;self.sfx=sfx;}
   self.watch(chr,seconds);
+  // The animation the game's time-act module is playing (id and play time), logged when the id changes.
+  if let Some(container)=crate::companions::word(chr+offset_of!(ChrIns,modules)).filter(|p|*p>0x10000){
+   if let Some(t)=crate::companions::word(container+3*8).filter(|p|*p>0x10000){
+    if let Some(read)=crate::companions::dword(t+0xC4){let q=t+0x20+(read as usize%10)*16;
+     if let (Some(id),Some(len))=(crate::companions::dword(q),crate::companions::dword(q+12)){let id=id as i32;
+      if self.anim!=Some(id){crate::log_game(&format!("TIMEACT_PROBE t={seconds:.2}s: animation {id} (length {:.2} s)",f32::from_bits(len)));self.anim=Some(id);}}}}}
   if let Some(ids)=effect_ids(chr){
    if self.effects.as_ref()!=Some(&ids){
     let old=self.effects.clone().unwrap_or_default();
