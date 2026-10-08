@@ -62,6 +62,8 @@ namespace TheaterUI
         void Observe(const OverlayFrame& f);
         void DrawRail(const OverlayFrame& f);
         void DrawPanel(const OverlayFrame& f);
+        void DrawCameraModes(const OverlayFrame& f);
+        void DrawDollyViewport(const OverlayFrame& f);
         void DrawSequencer(const OverlayFrame& f);
         void DrawToolbar(const OverlayFrame& f, float height);
         void DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max);
@@ -83,6 +85,14 @@ namespace TheaterUI
         UIState ui_;
         unsigned cameraSelection_ = 0; // selection, not native ownership
         bool clearDollyDialog_ = false;
+        bool showDollyMarkers_=true,cameraMarkerClick_=false;
+        std::uint64_t selectedDollyKey_=0;
+        int gizmoOperation_=0,gizmoAxis_=-1;
+        bool gizmoDragging_=false;
+        cinematic::Key gizmoStart_;
+        ImVec2 gizmoMouseStart_{},gizmoScreenAxis_{},gizmoCenter_{};
+        double gizmoPixelsPerUnit_=1,gizmoAngle_=0,gizmoLastCommit_=0;
+
         int bindingWaiting_ = -1;
         bool bindingReleased_ = false;
         std::string bindingError_;

@@ -44,6 +44,8 @@ std::uintptr_t owner=0,destination=0;
 std::atomic<double> fov_wheel{0};
 std::atomic_bool free_input{false};
 double fov_target=60;
+cinematic::Vec rotation_pending{};
+bool dolly_seek=false;
 cinematic::Vec velocity{};
 std::atomic<int> selected_bone=-1;
 std::optional<cinematic::State> bone_pose;
@@ -78,18 +80,20 @@ cinematic::Quat product(cinematic::Quat a,cinematic::Quat b){return {a[3]*b[0]+a
 bool down(int key){return (GetAsyncKeyState(key)&0x8000)!=0;}
 bool held(theater_hotkeys::Action action){return down(theater_hotkeys::Key(action));}
 void move(double dt){
- if(ui_visible){mouse_x=0;mouse_y=0;fov_wheel=0;velocity={};return;}
+ if(ui_visible){mouse_x=0;mouse_y=0;fov_wheel=0;velocity={};rotation_pending={};return;}
  using A=theater_hotkeys::Action;
  const double yaw=(int(held(A::YawRight))-int(held(A::YawLeft)))*dt+std::clamp(mouse_x.exchange(0)*state.mouse_sensitivity,-.25,.25);
  const double pitch=(int(held(A::PitchDown))-int(held(A::PitchUp)))*dt+std::clamp(mouse_y.exchange(0)*state.mouse_sensitivity,-.25,.25);
  const double roll=(int(held(A::RollRight))-int(held(A::RollLeft)))*dt;
- if(auto orientation=cinematic::mouse_look(state.pose.orientation,yaw,pitch,roll))state.pose.orientation=*orientation;
+ rotation_pending=cinematic::add(rotation_pending,{yaw,pitch,roll});
+ const auto applied=cinematic::take_smoothed_angles(rotation_pending,dt,state.rotation_smoothing_seconds);
+ if(auto orientation=cinematic::mouse_look(state.pose.orientation,applied[0],applied[1],applied[2]))state.pose.orientation=*orientation;
  float m[16];encode(state.pose,m);
  if(held(A::ResetRoll)){double horizontal=std::hypot(m[8],m[10]);if(horizontal>1e-5){
   theater_camera::Slot slot;std::copy(m,m+16,slot.matrix);slot.fov=1;slot.aspect=1;slot.near_plane=.1f;slot.far_plane=1000;
   slot.matrix[0]=m[10]/horizontal;slot.matrix[1]=0;slot.matrix[2]=-m[8]/horizontal;
   slot.matrix[4]=-m[9]*m[8]/horizontal;slot.matrix[5]=horizontal;slot.matrix[6]=-m[9]*m[10]/horizontal;
-  if(auto upright=decode(slot))state.pose.orientation=upright->orientation;encode(state.pose,m);}}
+  if(auto upright=decode(slot))state.pose.orientation=upright->orientation;rotation_pending={};encode(state.pose,m);}}
  cinematic::Vec delta{};double right=int(held(A::Right))-int(held(A::Left)),forward=int(held(A::Forward))-int(held(A::Backward)),up=int(held(A::Up))-int(held(A::Down));
  for(int i=0;i<3;++i)delta[i]=m[i]*right+m[8+i]*forward;delta[1]+=up;
  double n=cinematic::length(delta);if(n>1)delta=cinematic::mul(delta,1/n);
@@ -120,11 +124,14 @@ bool update(void* output,void* source){
  auto focused=GetForegroundWindow();auto game=game_window.load();DWORD pid=0;GetWindowThreadProcessId(focused,&pid);
  if(!game||!focused||pid!=GetCurrentProcessId()||GetAncestor(focused,GA_ROOT)!=GetAncestor(game,GA_ROOT)){release("Game focus lost; native control restored");return false;}
  if(probe_until&&now>=probe_until){release("Two-second camera probe finished; native control restored");return false;}
- if(reset){owner=reinterpret_cast<std::uintptr_t>(source);destination=out;state.pose=*pose;fov_target=pose->fov_degrees;fov_wheel=0;if(probe_until)state.pose.position[0]+=.25;reset=false;last_tick=now;}
+ if(reset){owner=reinterpret_cast<std::uintptr_t>(source);destination=out;state.pose=*pose;rotation_pending={};fov_target=pose->fov_degrees;fov_wheel=0;if(probe_until)state.pose.position[0]+=.25;reset=false;last_tick=now;}
  if(owner!=reinterpret_cast<std::uintptr_t>(source)||destination!=out){release("Camera generation changed; native control restored");return false;}
  double dt=std::min(double(now-last_tick)/1e9,.05);last_tick=now;
  if(!probe_until){
-  if(effective_mode==1)move(dt);
+  if(effective_mode==1||(effective_mode==2&&!state.dolly_preview&&!state.cuts_enabled)){
+   if(effective_mode==2&&!playing&&dolly_seek&&keys_replay_path==replay_path){if(auto value=track.evaluate(time_at(now))){state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;velocity={};}}
+   dolly_seek=false;move(dt);
+  }
   else if(effective_mode==3){
    if(!bone_pose||now<bone_time||now-bone_time>250000000ULL){release("Bone camera target unavailable or stale; native camera restored");return false;}
    float basis[16];encode(*bone_pose,basis);state.pose.orientation=bone_pose->orientation;state.pose.position=bone_pose->position;
@@ -132,7 +139,7 @@ bool update(void* output,void* source){
   }
   else if(!track.keys().empty()&&keys_replay_path!=replay_path){release("Dolly keys belong to another replay; clear them before creating a new path");return false;}
   else if(auto value=track.evaluate(time_at(now))){
-   if(!state.writing&&cinematic::length(cinematic::sub(value->position,state.pose.position))>20){release("Dolly start exceeds 20 units; move camera near the path first");return false;}state.pose=*value;
+   if(!state.writing&&cinematic::length(cinematic::sub(value->position,state.pose.position))>20){release("Dolly start exceeds 20 units; move camera near the path first");return false;}state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;
   } else {release("Dolly cut has no path; native camera restored");return false;}
  }
  auto rendered=state.pose;
@@ -149,37 +156,36 @@ bool update(void* output,void* source){
  auto write_start=clock_now();bool written=camera_local_write(output,matrix,fov);write_cost_ns.fetch_add(clock_now()-write_start,std::memory_order_relaxed);++write_calls;
  if(!written){release("Camera write failed; native control restored on next native copy");return false;}
  if(!state.writing)state.status=probe_until?"Two-second offset probe active":"Experimental camera override active (runtime unverified)";
- state.writing=true;input_owned=true;free_input=effective_mode==1&&!probe_until;
+ state.writing=true;input_owned=true;free_input=(effective_mode==1||(effective_mode==2&&!state.dolly_preview&&!state.cuts_enabled))&&!probe_until;
  return true;
 }
 
 }
-View view(){std::lock_guard lock(mutex);auto copy=state;copy.keys=track.keys();copy.cuts=cut_track.cuts();if(faulted){copy.enabled=false;copy.writing=false;copy.status="Camera backend faulted; overrides disabled until process restart";}return copy;}
+View view(bool include_keys){std::lock_guard lock(mutex);auto copy=state;copy.track_current=keys_replay_path==replay_path&&!track.keys().empty();copy.key_count=track.keys().size();if(include_keys){copy.keys=track.keys();copy.cuts=cut_track.cuts();}if(faulted){copy.enabled=false;copy.writing=false;copy.status="Camera backend faulted; overrides disabled until process restart";}return copy;}
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot&slot){return decode(slot);}
 void encode_pose(const cinematic::State&pose,float*matrix){encode(pose,matrix);}
-void mode(unsigned value){std::lock_guard lock(mutex);state.mode=value%4;fov_target=state.pose.fov_degrees;fov_wheel=0;state.writing=false;input_owned=false;free_input=false;probe_until=0;if(state.mode==0)reset=true;state.status=state.enabled?"Camera mode changed":"Camera selected; enable experimental writes to apply";}
+void mode(unsigned value){std::lock_guard lock(mutex);state.mode=value%4;state.cuts_enabled=false;if(state.mode==2)state.dolly_preview=false;rotation_pending={};mouse_x=0;mouse_y=0;velocity={};fov_target=state.pose.fov_degrees;fov_wheel=0;state.writing=false;input_owned=false;free_input=false;probe_until=0;if(state.mode==0)reset=true;state.status=state.enabled?"Camera mode changed":"Camera selected; enable experimental writes to apply";}
 void enable(bool value){std::lock_guard lock(mutex);if(!value){release("Camera overrides disabled; native control restored");return;}if(faulted||!state.hook_ready||!state.observed||clock_now()-state.timestamp_ns>500000000ULL||!game_allowed||!linked){release("Cannot arm: fresh camera, offline player and host required; backend must not be faulted");return;}
- if(state.mode==2&&(track.keys().empty()||keys_replay_path!=replay_path)){release("Capture or load Dolly keys for this replay before selecting Dolly");return;}
  if(state.mode==3&&(selected_bone<0||!bone_pose||clock_now()-bone_time>250000000ULL)){release("Select an available player bone before selecting Bone camera");return;}
  if(!state.enabled)reset=true;state.enabled=true;state.status="Experimental writes armed";}
-void stop(){std::lock_guard lock(mutex);release("Camera stopped; native control restored");state.mode=0;state.cuts_enabled=false;}
+void stop(){std::lock_guard lock(mutex);release("Camera stopped; native control restored");state.mode=0;state.cuts_enabled=false;state.dolly_preview=false;}
 void probe(){enable(true);std::lock_guard lock(mutex);if(state.enabled){state.mode=1;probe_until=clock_now()+2000000000ULL;}}
-void add_key(){std::lock_guard lock(mutex);const auto now=clock_now();if(!state.observed||now-state.timestamp_ns>500000000ULL||!linked||now-host_heartbeat>1000000000ULL){state.status="Cannot add key: fresh native camera and host timeline required";return;}
+void add_key(){std::lock_guard lock(mutex);if(state.mode!=2||!state.enabled||!state.writing){state.status="Select and activate Dolly camera before capturing a key";return;}const auto now=clock_now();if(!state.observed||now-state.timestamp_ns>500000000ULL||!linked||now-host_heartbeat>1000000000ULL){state.status="Cannot add key: fresh native camera and host timeline required";return;}
  if(!duration_ns||replay_path.empty()){state.status="Load a replay before adding Dolly keys";return;}
  if(!track.keys().empty()&&keys_replay_path!=replay_path){state.status="Keys belong to another replay; confirm deletion first";return;}
  if(keys_replay_path!=replay_path)++state.project_generation;keys_replay_path=replay_path;
  auto keys=track.keys();auto time=time_at(now);auto found=std::find_if(keys.begin(),keys.end(),[&](const auto&k){return k.time_ns==time;});
  if(found!=keys.end())found->state=state.pose;else{cinematic::Key k;k.id=next_id++;k.time_ns=time;k.state=state.pose;keys.push_back(k);}
- if(track.replace(std::move(keys)))state.status="Dolly key captured from camera at current ReplayTime";
+ if(track.replace(std::move(keys))){++state.project_generation;state.status="Dolly key captured from camera at current ReplayTime";}
 }
-void clear_keys(){std::lock_guard lock(mutex);track.replace({});keys_replay_path.clear();++state.project_generation;if(state.mode==2)release("Dolly track deleted; native control restored");state.status="All dolly keys deleted";}
+void clear_keys(){std::lock_guard lock(mutex);track.replace({});keys_replay_path.clear();++state.project_generation;if(state.mode==2){release("Dolly track deleted; native control restored");state.mode=0;}state.dolly_preview=false;state.cuts_enabled=false;cut_track.replace({},duration_ns);state.status="All dolly keys and camera cuts deleted";}
 void edit_key(cinematic::Key key){
  std::vector<cinematic::Key> keys;std::string identity;std::uint64_t duration;
  {std::lock_guard lock(mutex);keys=track.keys();identity=keys_replay_path;duration=duration_ns;}
  auto at=std::find_if(keys.begin(),keys.end(),[&](const auto&k){return k.id==key.id;});
  cinematic::Track next;bool ok=at!=keys.end()&&key.time_ns<=duration;
  if(ok){*at=key;ok=next.replace(std::move(keys));}
- std::lock_guard lock(mutex);if(ok&&identity==keys_replay_path&&identity==replay_path){track=std::move(next);state.status="Dolly key updated";}else state.status="Invalid key, duplicate timestamp, or replay changed; edit rejected";
+ std::lock_guard lock(mutex);if(ok&&identity==keys_replay_path&&identity==replay_path){track=std::move(next);++state.project_generation;state.status="Dolly key updated";}else state.status="Invalid key, duplicate timestamp, or replay changed; edit rejected";
 }
 void delete_key(std::uint64_t id){std::vector<cinematic::Key> keys;std::string identity;
  {std::lock_guard lock(mutex);keys=track.keys();identity=keys_replay_path;}
@@ -200,7 +206,8 @@ void load_path(){std::string identity;std::uint64_t duration;{std::lock_guard lo
  }catch(...){ok=false;}
  std::lock_guard lock(mutex);if(ok&&identity==replay_path){release("Camera track loaded; writes OFF");track=std::move(next);keys_replay_path=identity;++state.project_generation;next_id=1;for(auto&k:track.keys())next_id=std::max(next_id,k.id+1);}else state.status="Camera load failed: missing, invalid, oversized or incompatible .ercam";
 }
-void movement(double value,double sensitivity,double smoothing){std::lock_guard lock(mutex);if(std::isfinite(value)&&value>0&&std::isfinite(sensitivity)&&sensitivity>0&&std::isfinite(smoothing)&&smoothing>=0){state.movement_speed=value;state.mouse_sensitivity=sensitivity;state.smoothing_seconds=smoothing;}}
+void movement(double value,double sensitivity,double smoothing,double rotation_smoothing){std::lock_guard lock(mutex);if(std::isfinite(value)&&value>0&&std::isfinite(sensitivity)&&sensitivity>0&&std::isfinite(smoothing)&&smoothing>=0&&std::isfinite(rotation_smoothing)&&rotation_smoothing>=0){state.rotation_smoothing_seconds=rotation_smoothing;state.movement_speed=value;state.mouse_sensitivity=sensitivity;state.smoothing_seconds=smoothing;}}
+void preview(bool enabled){std::lock_guard lock(mutex);state.dolly_preview=enabled;rotation_pending={};velocity={};}
 void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
 void shake(double position,double rotation,double frequency){std::lock_guard lock(mutex);if(std::isfinite(position)&&position>=0&&std::isfinite(rotation)&&rotation>=0&&std::isfinite(frequency)&&frequency>=0){state.shake_position=position;state.shake_rotation=rotation;state.shake_frequency=frequency;}}
 std::optional<cinematic::State> bone_world(const float*root,const float*qs){
@@ -210,7 +217,7 @@ std::optional<cinematic::State> bone_world(const float*root,const float*qs){
  for(int i=0;i<3;++i)for(int j=0;j<3;++j)world->position[i]+=root[j*4+i]*qs[j];
  world->orientation=*cinematic::normalized(product(world->orientation,*normalized));return world;
 }
-void timeline(std::uint64_t time,std::uint64_t duration,std::uint64_t anchor,bool play,double rate,bool link,const char* path){std::lock_guard lock(mutex);timeline_ns=time;duration_ns=duration;anchor_ns=anchor;playing=play;speed=rate;linked=link;auto identity=path?std::string(path,strnlen_s(path,260)):std::string{};if(identity!=replay_path){state.cuts_enabled=false;cut_track.replace({},duration);release("Replay changed; camera writes and cuts disabled");}replay_path=std::move(identity);host_heartbeat=clock_now();if(!link)release("Host disconnected; native control restored");}
+void timeline(std::uint64_t time,std::uint64_t duration,std::uint64_t anchor,bool play,double rate,bool link,const char* path){std::lock_guard lock(mutex);if(!play&&time!=timeline_ns)dolly_seek=true;if(play&&!playing&&state.mode==2&&track.keys().size()>=2&&keys_replay_path==replay_path)state.dolly_preview=true;timeline_ns=time;duration_ns=duration;anchor_ns=anchor;playing=play;speed=rate;linked=link;auto identity=path?std::string(path,strnlen_s(path,260)):std::string{};if(identity!=replay_path){state.dolly_preview=false;dolly_seek=false;state.cuts_enabled=false;cut_track.replace({},duration);release("Replay changed; camera writes and cuts disabled");}replay_path=std::move(identity);host_heartbeat=clock_now();if(!link)release("Host disconnected; native control restored");}
 bool owns_input(){return input_owned.load();}
 void overlay_visible(bool visible){ui_visible=visible;}
 void window(void* hwnd){game_window=static_cast<HWND>(hwnd);}

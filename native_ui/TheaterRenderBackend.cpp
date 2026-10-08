@@ -232,7 +232,7 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
   for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys})if(w==Key(action)){
    if(m==WM_KEYDOWN&&!(l&(1LL<<30))){
     {std::lock_guard lock(camera_mutex);if(camera_actions.size()<32)camera_actions.push_back(action);}
-    b.set_visibility(TheaterUI::UiVisibility::Shown);
+    if(action==Action::ClearDollyKeys)b.set_visibility(TheaterUI::UiVisibility::Shown);
    }return 0;
   }
  }
@@ -375,6 +375,10 @@ extern "C" int tm_render_test_ui(){
      b.visibility=int(vis);b.mode=vis==TheaterUI::UiVisibility::Shown?2:0;b.overlay.State().activeTool=tool;io.DisplaySize=size;
      ImGui::NewFrame();b.draw();ImGui::Render();valid=valid&&ImGui::GetDrawData()->Valid;
     }}
+ // Cycling cameras is independent of showing the main overlay.
+ b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;camera_runtime::mode(0);
+ for(unsigned expected:{1u,2u,0u}){b.overlay.CameraHotkey(theater_hotkeys::Action::CycleCamera);valid=valid&&b.visibility==int(TheaterUI::UiVisibility::Hidden)&&camera_runtime::view(false).mode==expected;}
+ // These are selection checks only: no game camera can arm in this test process.
  // Exercise short/narrow panels at different font/layout scales. Each child must
  // have its own scroll range and stay clipped above the separate event log.
  b.visibility=int(TheaterUI::UiVisibility::Shown);b.mode=2;

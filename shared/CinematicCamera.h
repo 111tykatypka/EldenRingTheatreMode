@@ -28,6 +28,11 @@ inline std::optional<Quat> mouse_look(Quat orientation,double yaw,double pitch,d
 inline Quat slerp(Quat a,Quat b,double t){double d=0;for(int i=0;i<4;++i)d+=a[i]*b[i];if(d<0){for(auto&v:b)v=-v;d=-d;}d=std::clamp(d,-1.,1.);
  double x=1-t,y=t;if(d<0.9995){double angle=std::acos(d),s=std::sin(angle);x=std::sin((1-t)*angle)/s;y=std::sin(t*angle)/s;}
  for(int i=0;i<4;++i)a[i]=a[i]*x+b[i]*y;return *normalized(a);}
+// Filter angular input, not whole camera quaternions: world-up yaw remains level.
+inline Vec take_smoothed_angles(Vec& pending,double dt,double seconds){
+ const double weight=seconds>0?-std::expm1(-std::max(0.,dt)/seconds):1.;
+ Vec applied=mul(pending,weight);pending=sub(pending,applied);return applied;
+}
 // Exponential response in real time: identical convergence at different refresh rates.
 inline double smooth_fov(double current,double target,double dt){
  if(!std::isfinite(current)||!std::isfinite(target)||!std::isfinite(dt)||dt<0)return current;

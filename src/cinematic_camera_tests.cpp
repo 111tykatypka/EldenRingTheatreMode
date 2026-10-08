@@ -1,4 +1,5 @@
 #include "../shared/CinematicCamera.h"
+#include "../shared/CameraViewport.h"
 #include "../shared/CameraTelemetry.h"
 #include "../shared/CameraProject.h"
 #include "../shared/CameraCutTrack.h"
@@ -13,6 +14,20 @@ int main(){using namespace cinematic;
   check(wheel_fov(2,100)==1);check(wheel_fov(177,-100)==178);
   double a=60,b=60;for(int i=0;i<60;++i)a=smooth_fov(a,30,1./60);for(int i=0;i<120;++i)b=smooth_fov(b,30,1./120);
   check(std::abs(a-b)<1e-10);check(a>30&&a<31);check(smooth_fov(60,30,0)==60);check(smooth_fov(60,NAN,.01)==60);}
+ {using namespace cinematic::viewport;State camera;camera.fov_degrees=90;
+  auto center=project(camera,{0,0,10},1920,1080);check(center&&std::abs(center->x-960)<1e-9&&std::abs(center->y-540)<1e-9);
+  check(project(camera,{1,1,10},1920,1080)->x>960);check(project(camera,{1,1,10},1920,1080)->y<540);
+  check(!project(camera,{0,0,-1},1920,1080));check(!project(camera,{0,0,1},0,1080));check(!project(camera,{NAN,0,1},1920,1080));
+  check(std::abs(*plane_angle(camera,1014,540,1920,1080,{0,0,10},2))<1e-12);
+  check(std::abs(*plane_angle(camera,960,486,1920,1080,{0,0,10},2)-3.141592653589793/2)<1e-12);
+  check(!plane_angle(camera,960,540,1920,1080,{0,0,10},2));check(!plane_angle(camera,960,540,1920,1080,{0,0,10},0));
+  auto q=*rotate_world({0,0,0,1},1,.5);check(std::abs(q[1]-std::sin(.25))<1e-12);check(!rotate_world(q,3,.2));
+  auto authored=*mouse_look({0,0,0,1},.8,.4,.2);auto a=angles(authored);auto restored=*mouse_look({0,0,0,1},a[1],a[0],a[2]);for(int i=0;i<4;++i)check(std::abs(authored[i]-restored[i])<1e-10);
+  check(segment_distance(5,2,{0,0,1},{10,0,1})==2);check(segment_distance(3,4,{0,0,1},{0,0,1})==5);
+  Vec pending{.5,.2,0};auto delivered=take_smoothed_angles(pending,1./60,.2);check(delivered[0]>0&&delivered[0]<.5);check(std::abs(pending[0]+delivered[0]-.5)<1e-12);
+  Vec pending2{.5,.2,0};check(take_smoothed_angles(pending2,1./60,0)==Vec({.5,.2,0}));check(pending2==Vec({0,0,0}));
+  Quat upright{0,0,0,1};Vec buffer{};for(int n=0;n<1000;++n){buffer=add(buffer,{.002,n%2?.001:-.001,0});auto d=take_smoothed_angles(buffer,1./60,.1);upright=*mouse_look(upright,d[0],d[1],d[2]);check(std::abs(2*(upright[0]*upright[1]+upright[3]*upright[2]))<1e-10);}
+ }
  // Upright mouse look must not accumulate roll while yawing at a nonzero pitch.
  {Quat q{0,0,0,1};q=*mouse_look(q,0,.6,0);
   for(int i=0;i<5000;++i){q=*mouse_look(q,.003,(i%2?.001:-.001),0);

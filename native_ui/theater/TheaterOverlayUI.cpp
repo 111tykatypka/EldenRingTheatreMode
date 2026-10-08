@@ -3,6 +3,7 @@
 #include "imgui_internal.h"
 #include "../CinematicCameraRuntime.h"
 #include "../EldenRingTimingAdapter.h"
+#include "CameraViewport.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -22,7 +23,7 @@ void Overlay::CameraHotkey(theater_hotkeys::Action action)
 {
     ui_.activeTool=Tool::Camera;ui_.layout.panelOpen=true;
     if(action==theater_hotkeys::Action::CycleCamera){
-        cameraSelection_=(camera_runtime::view().mode+1)%4;camera_runtime::mode(cameraSelection_);
+        const auto mode=camera_runtime::view(false).mode;cameraSelection_=mode>=2?0:mode+1;camera_runtime::mode(cameraSelection_);
         camera_runtime::enable(cameraSelection_!=0);
     } else if(action==theater_hotkeys::Action::AddDollyKey){
         camera_runtime::add_key();
@@ -38,6 +39,12 @@ namespace
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking |
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 
+    std::string KeyName(theater_hotkeys::Action action){
+        const auto vk=theater_hotkeys::Key(action);wchar_t wide[80]{};char text[256]{};
+        LONG scan=MapVirtualKeyW(vk,MAPVK_VK_TO_VSC)<<16;if(vk>=VK_PRIOR&&vk<=VK_DOWN)scan|=1<<24;
+        GetKeyNameTextW(scan,wide,80);WideCharToMultiByte(CP_UTF8,0,wide,-1,text,sizeof(text),nullptr,nullptr);
+        return text[0]?text:std::to_string(vk);
+    }
     constexpr size_t kMaxLog = 400;
 
     void FormatTime(double seconds, char* out, size_t n)
@@ -305,9 +312,11 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     {
         PushFont(Font::Body);
         DrawMenuBar();
+        DrawDollyViewport(f);
         if (showTools_) DrawRail(f);
         if (ui_.layout.panelOpen) DrawPanel(f);
         if (showTimeline_) DrawSequencer(f);
+        DrawCameraModes(f);
         DrawDialogs(f);
         UiSoundsAfterFrame();
         if (resetLayout_) { resetLayout_ = false; SaveSettings(); }
@@ -316,9 +325,105 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         ImGui::PopFont();
         DrawCursor();
     }
-    else DrawHiddenHint(f);
+    else {DrawHiddenHint(f);PushFont(Font::Body);DrawCameraModes(f);ImGui::PopFont();}
     if (ui_.visibility != UiVisibility::HiddenClean) DrawRecordingPill(f);
     return ui_.rects;
+}
+
+// Compact mode selector remains a read-only badge while the main overlay is hidden.
+// Geometry is drawn independently; no third-party icon assets are copied.
+void Overlay::DrawCameraModes(const OverlayFrame& f)
+{
+    if(ui_.visibility==UiVisibility::HiddenClean)return;
+    const float s=ui_.rects.uiScale;auto camera=camera_runtime::view(false);const bool shown=ui_.visibility==UiVisibility::Shown;
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x*.5f,shown?menuH_+Px(8,s):Px(12,s)),ImGuiCond_Always,ImVec2(.5f,0));
+    ImGuiWindowFlags flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoMove;
+    if(!shown)flags|=ImGuiWindowFlags_NoInputs;
+    ImGui::PushStyleColor(ImGuiCol_WindowBg,Color::OverlayBg.Alpha(235).Vec4());
+    if(ImGui::Begin("##camera-modes",nullptr,flags)){
+        const char*names[]={"Default","Free","Dolly"};
+        for(int mode=0;mode<3;++mode){if(mode)ImGui::SameLine();ImGui::PushID(mode);
+            ImVec2 start=ImGui::GetCursorScreenPos();const float w=Px(72,s),h=Px(48,s);
+            if(ImGui::InvisibleButton("mode",ImVec2(w,h))&&shown){camera_runtime::mode(mode);camera_runtime::enable(mode!=0);}
+            auto*draw=ImGui::GetWindowDrawList();const bool active=camera.mode==unsigned(mode);
+            draw->AddRectFilled(start,ImVec2(start.x+w,start.y+h),(active?Color::SelectedBg:Color::ChildBg).U32(),Px(5,s));
+            const ImU32 color=(active?Color::AccentBlue:Color::TextPrimary).U32();float x=start.x+w*.5f,y=start.y+Px(15,s);
+            if(mode==0){draw->AddCircle(ImVec2(x,y-Px(5,s)),Px(4,s),color);draw->AddLine(ImVec2(x,y),ImVec2(x,y+Px(8,s)),color,2);draw->AddLine(ImVec2(x-Px(7,s),y+Px(4,s)),ImVec2(x+Px(7,s),y+Px(4,s)),color,2);}
+            else {draw->AddRect(ImVec2(x-Px(10,s),y-Px(5,s)),ImVec2(x+Px(3,s),y+Px(5,s)),color,2);
+                draw->AddTriangle(ImVec2(x+Px(3,s),y),ImVec2(x+Px(11,s),y-Px(6,s)),ImVec2(x+Px(11,s),y+Px(6,s)),color,2);
+                if(mode==2){draw->AddLine(ImVec2(x-Px(12,s),y+Px(9,s)),ImVec2(x+Px(12,s),y+Px(9,s)),color);for(int j=-1;j<=1;++j)draw->AddCircleFilled(ImVec2(x+j*Px(10,s),y+Px(9,s)),Px(2,s),color);}}
+            const auto label=ImGui::CalcTextSize(names[mode]);draw->AddText(ImVec2(x-label.x*.5f,start.y+h-label.y-Px(3,s)),Color::TextPrimary.U32(),names[mode]);
+            if(shown&&ImGui::IsItemHovered())ImGui::SetTooltip("%s camera. Cycle key: VK %u (Settings > Keybindings).",names[mode],theater_hotkeys::Key(theater_hotkeys::Action::CycleCamera));
+            ImGui::PopID();
+        }
+        const auto cycleKey=KeyName(theater_hotkeys::Action::CycleCamera);
+        ImGui::TextDisabled("%s: cycle | %s",cycleKey.c_str(),camera.mode==0?"Player camera":camera.enabled?"Active":"Not armed");
+        if(camera.mode==2){
+            ImGui::TextDisabled("%s | %zu keys",camera.dolly_preview?"Path preview":"Authoring",camera.track_current?camera.key_count:0);
+            if(shown){
+                const auto capture="Capture ["+KeyName(theater_hotkeys::Action::AddDollyKey)+"]";
+                if(ImGui::Button(capture.c_str()))camera_runtime::add_key();ImGui::SameLine();
+                const auto clear="Clear ["+KeyName(theater_hotkeys::Action::ClearDollyKeys)+"]";
+                if(ImGui::Button(clear.c_str()))clearDollyDialog_=true;
+            }
+        }
+    }
+    ImGui::End();ImGui::PopStyleColor();
+}
+
+void Overlay::DrawDollyViewport(const OverlayFrame& f)
+{
+    using namespace cinematic;using namespace cinematic::viewport;
+    if(ui_.visibility!=UiVisibility::Shown||ui_.activeTool!=Tool::Camera||!showDollyMarkers_){gizmoDragging_=false;return;}
+    auto camera=camera_runtime::view();if(!camera.observed||!camera.track_current||camera.keys.empty()){selectedDollyKey_=0;gizmoDragging_=false;return;}
+    auto&io=ImGui::GetIO();const float s=ui_.rects.uiScale;const auto display=io.DisplaySize;
+    ImGui::SetNextWindowPos(ImVec2(0,menuH_),ImGuiCond_Always);ImGui::SetNextWindowSize(ImVec2(display.x,std::max(1.f,display.y-menuH_)),ImGuiCond_Always);
+    const auto flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoFocusOnAppearing;
+    ImGui::Begin("##dolly-viewport",nullptr,flags);auto*draw=ImGui::GetBackgroundDrawList();
+    draw->PushClipRect(ImVec2(0,menuH_),display,true);
+    const bool hovered=ImGui::IsWindowHovered();
+    auto projectPoint=[&](Vec p){return project(camera.pose,p,display.x,display.y);};
+    auto line=[&](Vec a,Vec b,ImU32 color,float width=1.f){auto pa=projectPoint(a),pb=projectPoint(b);if(pa&&pb)draw->AddLine(ImVec2(float(pa->x),float(pa->y)),ImVec2(float(pb->x),float(pb->y)),color,width);};
+    if(std::none_of(camera.keys.begin(),camera.keys.end(),[&](auto&k){return k.id==selectedDollyKey_;})){selectedDollyKey_=0;gizmoDragging_=false;}
+    for(const auto&key:camera.keys){
+        const auto center=projectPoint(key.state.position);if(!center)continue;
+        const ImU32 color=(key.id==selectedDollyKey_?Color::AccentAmber:Color::AccentBlue).U32();
+        const auto p=key.state.position;const auto right=basis(key.state.orientation,0),up=basis(key.state.orientation,1),forward=basis(key.state.orientation,2);
+        Vec corner[4];for(int j=0;j<4;++j)corner[j]=add(add(add(p,mul(forward,.65)),mul(right,(j==0||j==3?-.4:.4))),mul(up,(j<2?.25:-.25)));
+        for(int j=0;j<4;++j){line(p,corner[j],color);line(corner[j],corner[(j+1)%4],color);}
+        line(add(p,mul(up,.42)),add(p,mul(forward,.35)),color,2);
+        ImVec2 pixel(float(center->x),float(center->y));draw->AddCircleFilled(pixel,Px(4,s),color);
+        char name[48];snprintf(name,sizeof(name),"Camera %llu",static_cast<unsigned long long>(key.id));draw->AddText(ImVec2(pixel.x+Px(8,s),pixel.y),color,name);
+        if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(io.MousePos.x-pixel.x,io.MousePos.y-pixel.y)<Px(14,s))selectedDollyKey_=key.id;
+    }
+    auto selected=std::find_if(camera.keys.begin(),camera.keys.end(),[&](auto&k){return k.id==selectedDollyKey_;});
+    if(selected!=camera.keys.end())if(auto center=projectPoint(selected->state.position)){
+        const auto origin=selected->state.position;const ImU32 colors[]={IM_COL32(245,85,85,255),IM_COL32(100,220,110,255),IM_COL32(95,150,255,255)};
+        const double extent=std::max(.1,center->depth*std::tan(camera.pose.fov_degrees*3.141592653589793/360)*.18);
+        for(int axis=0;axis<3;++axis){
+            Vec direction{};direction[axis]=1;
+            if(gizmoOperation_==0){auto end=projectPoint(add(origin,mul(direction,extent)));if(!end)continue;
+                const double pixels=std::hypot(end->x-center->x,end->y-center->y);if(pixels<12)continue;
+                line(origin,add(origin,mul(direction,extent)),colors[axis],Px(3,s));draw->AddCircleFilled(ImVec2(float(end->x),float(end->y)),Px(5,s),colors[axis]);
+                if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(io.MousePos.x-center->x,io.MousePos.y-center->y)>Px(14,s)&&segment_distance(io.MousePos.x,io.MousePos.y,*center,*end)<Px(7,s)){
+                    gizmoDragging_=true;gizmoAxis_=axis;gizmoStart_=*selected;gizmoMouseStart_=io.MousePos;gizmoPixelsPerUnit_=pixels/extent;gizmoScreenAxis_={float((end->x-center->x)/pixels),float((end->y-center->y)/pixels)};}
+            }else {
+                double hit=1e9;for(int j=0;j<64;++j){auto point=[&](int n){Vec v=origin;const double a=n*6.283185307179586/64;v[(axis+1)%3]+=extent*std::cos(a);v[(axis+2)%3]+=extent*std::sin(a);return v;};
+                    auto a=projectPoint(point(j)),b=projectPoint(point(j+1));if(a&&b){draw->AddLine(ImVec2(float(a->x),float(a->y)),ImVec2(float(b->x),float(b->y)),colors[axis],Px(2,s));hit=std::min(hit,segment_distance(io.MousePos.x,io.MousePos.y,*a,*b));}}
+                if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&hit<Px(7,s))if(auto angle=plane_angle(camera.pose,io.MousePos.x,io.MousePos.y,display.x,display.y,origin,axis)){
+                    gizmoDragging_=true;gizmoAxis_=axis;gizmoStart_=*selected;gizmoCenter_={float(center->x),float(center->y)};gizmoAngle_=*angle;gizmoMouseStart_=io.MousePos;}
+            }
+        }
+    }
+    if(gizmoDragging_){
+        auto draft=gizmoStart_;
+        if(gizmoOperation_==0){double delta=((io.MousePos.x-gizmoMouseStart_.x)*gizmoScreenAxis_.x+(io.MousePos.y-gizmoMouseStart_.y)*gizmoScreenAxis_.y)/gizmoPixelsPerUnit_;draft.state.position[gizmoAxis_]+=delta;}
+        else if(auto angle=plane_angle(camera.pose,io.MousePos.x,io.MousePos.y,display.x,display.y,gizmoStart_.state.position,gizmoAxis_)){if(auto rotation=rotate_world(draft.state.orientation,gizmoAxis_,std::remainder(*angle-gizmoAngle_,6.283185307179586)))draft.state.orientation=*rotation;}
+        if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){camera_runtime::edit_key(gizmoStart_);gizmoDragging_=false;}
+        else if(f.now-gizmoLastCommit_>=1./30||!io.MouseDown[0]){camera_runtime::edit_key(draft);gizmoLastCommit_=f.now;}
+        if(!io.MouseDown[0])gizmoDragging_=false;
+    }
+    draw->PopClipRect();ImGui::End();
 }
 
 // Panels start at their solved default rect (below the menu bar) the first time, or every time
@@ -480,10 +585,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     auto labelAbove=[&](const char* label){ImGui::TextWrapped("%s",label);ImGui::SetNextItemWidth(-FLT_MIN);};
     auto number=[&](const char* label,double* value,double step=0,double fast=0,const char* format="%.6f"){
         ImGui::PushID(label);labelAbove(label);bool changed=ImGui::InputDouble("##value",value,step,fast,format);ImGui::PopID();return changed;};
-    auto slider=[&](const char* label,float* value,float min,float max,const char* format="%.3f",ImGuiSliderFlags flags=0){
-        ImGui::PushID(label);labelAbove(label);bool changed=ImGui::SliderFloat("##value",value,min,max,format,flags);ImGui::PopID();return changed;};
-    auto doubleSlider=[&](const char* label,double* value,double min,double max,const char* format="%.3f"){
-        ImGui::PushID(label);labelAbove(label);bool changed=ImGui::SliderScalar("##value",ImGuiDataType_Double,value,&min,&max,format);ImGui::PopID();return changed;};
+    auto slider=[&](const char* label,float* value,float min,float max,const char* format="%.3f",ImGuiSliderFlags flags=0,float resetValue=0){
+        ImGui::PushID(label);labelAbove(label);bool changed=ImGui::SliderFloat("##value",value,min,max,format,flags);
+        if(ImGui::IsItemHovered()&&(ImGui::IsMouseClicked(ImGuiMouseButton_Middle)||ImGui::IsMouseClicked(ImGuiMouseButton_Right))){*value=resetValue;changed=true;}
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Middle / right click: default %.5g. Ctrl+click: exact value.",double(resetValue));
+        ImGui::PopID();return changed;};
+    auto doubleSlider=[&](const char* label,double* value,double min,double max,const char* format="%.3f",double resetValue=0){
+        ImGui::PushID(label);labelAbove(label);bool changed=ImGui::SliderScalar("##value",ImGuiDataType_Double,value,&min,&max,format);
+        if(ImGui::IsItemHovered()&&(ImGui::IsMouseClicked(ImGuiMouseButton_Middle)||ImGui::IsMouseClicked(ImGuiMouseButton_Right))){*value=resetValue;changed=true;}
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Middle / right click: default %.5g. Ctrl+click: exact value.",resetValue);
+        ImGui::PopID();return changed;};
     auto checkbox=[&](const char* label,bool* value){
         ImGui::PushID(label);bool changed=ImGui::Checkbox("##value",value);ImGui::SameLine();ImGui::TextWrapped("%s",label);ImGui::PopID();return changed;};
     auto combo=[&](const char* label,int* value,const char* choices){ImGui::PushID(label);labelAbove(label);bool changed=ImGui::Combo("##value",value,choices);ImGui::PopID();return changed;};
@@ -564,9 +675,12 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     {
         section("CAMERA SHORTCUTS");
         auto runtime=camera_runtime::view();
-        const char* modes[]={"Default","Free","Dolly","Bone"};
-        ImGui::Text("Selection: %s | F3: cycle",modes[runtime.mode]);
-        int selectedMode=static_cast<int>(runtime.mode);labelAbove("Camera mode");if(ImGui::Combo("##camera-mode",&selectedMode,modes,4)){camera_runtime::mode(selectedMode);camera_runtime::enable(selectedMode!=0);}
+        ImGui::TextWrapped("Default / Free / Dolly are in the top-center camera bar. The configured Cycle Camera key works with the main overlay hidden.");
+        bool pathPreview=runtime.dolly_preview;if(checkbox("Preview Dolly path at ReplayTime (off = move and author keys)",&pathPreview))camera_runtime::preview(pathPreview);
+        ImGui::TextWrapped("Dolly: move with the overlay hidden and capture keys at ReplayTime. Play automatically previews a path with at least two keys. Turn preview off to keep authoring.");
+        if(ImGui::Button("Advanced: use selected Bone camera")){camera_runtime::mode(3);camera_runtime::enable(true);}
+        if(checkbox("Show Dolly cameras / transform handles",&showDollyMarkers_)){}
+        ImGui::RadioButton("Move handles",&gizmoOperation_,0);ImGui::SameLine();ImGui::RadioButton("Rotate handles",&gizmoOperation_,1);
         ImGui::Text("Native interception: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
         ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
         ImGui::TextWrapped("Runtime validation required. Test the two-second probe first; F6 immediately disables camera overrides.");
@@ -575,17 +689,19 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         if(checkbox("Enable experimental Free / Dolly writes",&armed))camera_runtime::enable(armed);
         ImGui::TextWrapped("Hide overlay with F4 to move: WASD, Q/E up/down, mouse/arrows rotate, Z/X roll, Shift fast, Ctrl slow. Gamepad input is not blocked.");
         float fov=static_cast<float>(runtime.pose.fov_degrees);ImGui::BeginDisabled(!runtime.enabled);
-        if(slider("Camera FOV (degrees)",&fov,1.f,178.f,"%.2f"))camera_runtime::fov(fov);
+        if(slider("Camera FOV (degrees)",&fov,1.f,178.f,"%.2f",0,60.f))camera_runtime::fov(fov);
         ImGui::EndDisabled();
         float movement=static_cast<float>(runtime.movement_speed),sensitivity=static_cast<float>(runtime.mouse_sensitivity),smooth=static_cast<float>(runtime.smoothing_seconds);
-        bool changed=slider("Move speed (units/sec)",&movement,.01f,1000.f,"%.3f",ImGuiSliderFlags_Logarithmic);
-        changed|=slider("Mouse sensitivity (rad/count)",&sensitivity,.00001f,.05f,"%.5f",ImGuiSliderFlags_Logarithmic);
+        bool changed=slider("Move speed (units/sec)",&movement,.01f,1000.f,"%.3f",ImGuiSliderFlags_Logarithmic,3.f);
+        changed|=slider("Mouse sensitivity (rad/count)",&sensitivity,.00001f,.05f,"%.5f",ImGuiSliderFlags_Logarithmic,.0025f);
         changed|=slider("Movement smoothing (seconds, 0 = direct)",&smooth,0.f,2.f,"%.3f");
-        if(changed)camera_runtime::movement(movement,sensitivity,smooth);
+        float rotationSmooth=static_cast<float>(runtime.rotation_smoothing_seconds);
+        changed|=slider("Rotation smoothing (seconds, 0 = direct)",&rotationSmooth,0.f,2.f,"%.3f");
+        if(changed)camera_runtime::movement(movement,sensitivity,smooth,rotationSmooth);
         double shakePosition=runtime.shake_position,shakeRotation=runtime.shake_rotation,shakeFrequency=runtime.shake_frequency;
         bool shakeChanged=doubleSlider("Shake position amplitude (units)",&shakePosition,0.,5.);
         shakeChanged|=doubleSlider("Shake rotation amplitude (degrees)",&shakeRotation,0.,30.);
-        shakeChanged|=doubleSlider("Shake frequency (Hz)",&shakeFrequency,0.,30.);
+        shakeChanged|=doubleSlider("Shake frequency (Hz)",&shakeFrequency,0.,30.,"%.3f",1.);
         if(shakeChanged)camera_runtime::shake(shakePosition,shakeRotation,shakeFrequency);
         ImGui::TextDisabled("Mouse wheel: smooth FOV; Shift fine, Ctrl very fine (overlay hidden). Ctrl+click sliders for exact values.");
         ImGui::TextDisabled("Shake is deterministic at ReplayTime and does not modify saved nodes.");
@@ -609,17 +725,22 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::TextDisabled("World speed: CameraTools scalar, synchronized while replay is playing.");
         ImGui::TextWrapped("%s",game_timing::status().c_str());
         for(auto key:runtime.keys){ImGui::PushID(static_cast<int>(key.id));
+            if(key.id==selectedDollyKey_)ImGui::SetNextItemOpen(true,ImGuiCond_Always);
             if(ImGui::TreeNode("edit","Key %llu at %.3fs",static_cast<unsigned long long>(key.id),double(key.time_ns)/1e9)){
                 // Edits apply explicitly; live camera continues until Apply is clicked.
                 static std::map<std::uint64_t,cinematic::Key> drafts;
                 static std::uint64_t draftGeneration=UINT64_MAX;
                 if(draftGeneration!=runtime.project_generation){drafts.clear();draftGeneration=runtime.project_generation;}
                 auto& draft=drafts.try_emplace(key.id,key).first->second;
+                if(ImGui::Button("Select and seek this camera key")){selectedDollyKey_=key.id;Emit(theater_ui::seek,key.time_ns);}
                 if(ImGui::Button("Revert draft to saved key"))draft=key;
                 double seconds=double(draft.time_ns)/1e9;number("Timestamp (s)",&seconds,.01,1,"%.6f");
                 if(std::isfinite(seconds)&&seconds>=0&&seconds<double(UINT64_MAX)/1e9)draft.time_ns=static_cast<std::uint64_t>(seconds*1e9);
                 for(int i=0;i<3;++i){const char* names[]={"Position X","Position Y","Position Z"};number(names[i],&draft.state.position[i],.01,1,"%.5f");}
-                for(int i=0;i<4;++i){const char* names[]={"Quaternion X","Quaternion Y","Quaternion Z","Quaternion W"};number(names[i],&draft.state.orientation[i],.001,.01,"%.6f");}
+                auto angles=cinematic::viewport::angles(draft.state.orientation);bool rotationChanged=false;
+                for(int i=0;i<3;++i){const char*names[]={"Pitch (degrees)","Yaw (degrees)","Roll (degrees)"};angles[i]*=180./3.141592653589793;rotationChanged|=number(names[i],&angles[i],.1,1,"%.3f");}
+                if(rotationChanged)if(auto rotation=cinematic::mouse_look({0,0,0,1},angles[1]*3.141592653589793/180,angles[0]*3.141592653589793/180,angles[2]*3.141592653589793/180))draft.state.orientation=*rotation;
+                if(ImGui::TreeNode("Raw quaternion (advanced)")){for(int i=0;i<4;++i){const char* names[]={"Quaternion X","Quaternion Y","Quaternion Z","Quaternion W"};number(names[i],&draft.state.orientation[i],.001,.01,"%.6f");}ImGui::TreePop();}
                 number("FOV degrees",&draft.state.fov_degrees,.1,1,"%.3f");
                 int interpolation=static_cast<int>(draft.outgoing);if(combo("Outgoing interpolation",&interpolation,"Linear\0Smooth\0Bezier\0Ease curve\0Catmull-Rom spline\0Step\0"))draft.outgoing=cinematic::Interpolation(interpolation);
                 checkbox("Constant position speed",&draft.constant_speed);
@@ -678,6 +799,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         section(T(Str::UiScale));
         ImGui::SetNextItemWidth(-1);
         if (ImGui::SliderFloat("##scale", &ui_.layout.uiScaleUser, 0.75f, 1.5f, "%.2fx")) {}
+        if(ImGui::IsItemHovered()&&(ImGui::IsMouseClicked(ImGuiMouseButton_Middle)||ImGui::IsMouseClicked(ImGuiMouseButton_Right))){ui_.layout.uiScaleUser=1.f;SaveSettings();}
         if (ImGui::IsItemDeactivatedAfterEdit()) SaveSettings();
         section(T(Str::UiSounds));
         {
@@ -687,6 +809,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             float volume = Sound::Volume() * 100.0f;
             ImGui::SetNextItemWidth(-1);
             if (ImGui::SliderFloat("##volume", &volume, 0.0f, 100.0f, "%.0f%%")) Sound::SetVolume(volume / 100.0f);
+            if(ImGui::IsItemHovered()&&(ImGui::IsMouseClicked(ImGuiMouseButton_Middle)||ImGui::IsMouseClicked(ImGuiMouseButton_Right))){Sound::SetVolume(.6f);SaveSettings();}
             if (ImGui::IsItemDeactivatedAfterEdit()) { Sound::Play(Sound::Cue::Focus); SaveSettings(); }
             ImGui::EndDisabled();
         }
@@ -1339,7 +1462,8 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
         rows.push_back({ name, Color::AccentAmber, 1, false, snap.actors[i].id, false });
     }
     rows.push_back({ T(Str::TrackBookmarks), Color::EventNeutral, 0, false, 0, false });
-    const auto cameraKeys=camera_runtime::view().keys;
+    const auto cameraView=camera_runtime::view();
+    const auto cameraKeys=cameraView.track_current?cameraView.keys:std::vector<cinematic::Key>{};
 
     const float rowsH = laneMax.y - laneMin.y;
     const float maxScroll = std::max(0.0f, rows.size() * rowH - rowsH);
@@ -1401,8 +1525,13 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
         // Selecting an actor row uses the existing select command.
         if(i==1&&!cameraKeys.empty()){
             dl->PushClipRect(ImVec2(laneMin.x,y0),ImVec2(laneMax.x,y1),true);
+            if(!io.MouseDown[0])cameraMarkerClick_=false;
             for(const auto&key:cameraKeys){float x=static_cast<float>(tv.TimeToX(double(key.time_ns)/1e9,laneMin.x));float y=(y0+y1)*.5f,r=Px(5,s);
-                dl->AddQuadFilled(ImVec2(x,y-r),ImVec2(x+r,y),ImVec2(x,y+r),ImVec2(x-r,y),Color::AccentBlue.U32());}
+                const auto color=(key.id==selectedDollyKey_?Color::AccentAmber:Color::AccentBlue).U32();
+                dl->AddQuadFilled(ImVec2(x,y-r),ImVec2(x+r,y),ImVec2(x,y+r),ImVec2(x-r,y),color);
+                if(ImGui::IsWindowHovered()&&io.MouseClicked[0]&&x>=laneMin.x&&x<=laneMax.x&&std::hypot(io.MousePos.x-x,io.MousePos.y-y)<Px(10,s)){
+                    selectedDollyKey_=key.id;ui_.activeTool=Tool::Camera;ui_.layout.panelOpen=true;cameraMarkerClick_=true;Emit(theater_ui::seek,key.time_ns);}
+            }
             dl->PopClipRect();
         }
         if (r.actor && ImGui::IsWindowHovered() && io.MouseClicked[0] && io.MousePos.x < min.x + tree && io.MousePos.y >= y0 && io.MousePos.y < y1)
@@ -1464,7 +1593,7 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
     ImGui::SetCursorScreenPos(ImVec2(laneMin.x, min.y));
     ImGui::InvisibleButton("##scrub", ImVec2(laneW, std::max(1.0f, laneMax.y - min.y)));
     const bool canSeek = f.hostLinked && snap.loaded && duration > 0;
-    if (canSeek && ImGui::IsItemActive())
+    if (canSeek && ImGui::IsItemActive()&&!cameraMarkerClick_)
     {
         scrubbing_ = true;
         scrubTime_ = std::clamp(tv.XToTime(io.MousePos.x, laneMin.x), 0.0, duration);
