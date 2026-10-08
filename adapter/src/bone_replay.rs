@@ -189,8 +189,8 @@ fn load(path:&PathBuf)->Result<Vec<Frame>,String>{
  if frames.windows(2).any(|w|w[1].time<w[0].time){return Err("frame times go backwards".into());}
  Ok(frames)}
 
-/// Effect events carry the game clock; the replay file uses time since the first recorded frame (events before it are dropped).
-fn fx_relative(v:Vec<world_file::EffectEvent>,first:u64)->Vec<world_file::EffectEvent>{v.into_iter().filter(|e|e.time>=first).map(|mut e|{e.time-=first;e}).collect()}
+/// Frames and effects both use the game clock (monotonic ns), so effect times are stored unchanged.
+fn fx_relative(v:Vec<world_file::EffectEvent>,_first:u64)->Vec<world_file::EffectEvent>{v}
 fn finish_recording(s:&mut State){
  let Some(r)=s.recording.take() else {return;};
  // Effects: stop capturing and hand the last ones to the writer before the channel closes.
@@ -227,7 +227,7 @@ fn follow_loaded(s:&mut State,l:&Link){
     let mut touched:Vec<u32>=w.flag_events.iter().map(|e|e.flag).collect();touched.sort_unstable();touched.dedup();
     let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context,&w.skeletons,w.actor_lifetime,w.meta));
     (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context,skeletons:w.skeletons,module:w.module,effects:w.effects},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
-  let result=opened.map(|(mut store,world_data,actors)|{
+  let result=opened.map(|(mut store,mut world_data,actors)|{
    // Learn the skeleton hierarchy from a few frames spread over the recording (see replay_interpolation).
    let n=store.len();let picks:Vec<Frame>=(0..5).filter_map(|k|store.get(k*(n-1)/4)).collect();
    let parents=world_data.skeletons.get(&0).map(|d|d.parents.clone()).unwrap_or_else(||crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..]))));
@@ -237,6 +237,9 @@ fn follow_loaded(s:&mut State,l:&Link){
    crate::log_game(&format!("BONE_REPLAY: world track: {} clock samples, {} flag changes on {} flags",world_data.samples.len(),world_data.events.len(),world_data.touched.len()));
    if let Some(a)=&actors{crate::log_game(&format!("BONE_REPLAY: {} recorded characters (enemies, NPCs, bosses)",a.len()));}
    // The player's anchor over the recording, for rebasing positions into the live physics frame.
+   // Files saved by C19-8 stored effect times relative to the recording start; every real clock reading is far larger than the
+   // recording itself, so such a file is recognised and shifted back onto the frame clock.
+   if let (Some(first),Some(last))=(store.get(0).map(|f|f.time),world_data.effects.last().map(|e|e.time)){if last<first{for e in world_data.effects.iter_mut(){e.time+=first;}}}
    let mut anchors=crate::replay_interpolation::AnchorTrack::default();
    for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.frame(),f.place.global);}}}
    crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
