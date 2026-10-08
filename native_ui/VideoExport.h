@@ -12,6 +12,7 @@ struct Settings {
     int codec = 0;              // Codec (video containers only)
     int fps = 60;               // constant output frame rate; frames are duplicated or dropped to hold it
     int quality = 75;           // 1 to 100 (ignored by lossless codecs and PNG)
+    int out_width = 0, out_height = 0; // output picture size; 0 = same as the game picture. Other sizes are scaled (Lanczos) and letterboxed to keep the aspect ratio
     std::string folder;         // UTF-8; empty = Videos\EldenRingTheaterMode
     std::string ffmpeg;         // UTF-8; empty = look next to the DLL, then PATH
 };

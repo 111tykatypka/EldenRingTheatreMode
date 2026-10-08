@@ -1743,7 +1743,18 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         if(combo("Output",&container,"AVI video\0" "PNG image sequence\0" "JPEG image sequence\0")){cfg.container=container;changed=true;}
         if(cfg.container==0){int codec=cfg.codec;
             if(combo("Video codec",&codec,"H.264 (NVIDIA NVENC)\0" "H.264 (CPU, x264)\0" "Motion JPEG\0" "FFV1 (lossless)\0")){cfg.codec=codec;changed=true;}}
-        int fps=cfg.fps;labelAbove("Frame rate");if(ImGui::SliderInt("##export_fps",&fps,10,120,"%d fps")){cfg.fps=fps;changed=true;}
+        {   // Output size: the game can run at one resolution while the export is scaled to another.
+            static const int presets[][2]={{0,0},{1280,720},{1920,1080},{2560,1440},{3840,2160},{-1,-1}};
+            int sel=5;for(int i=0;i<5;++i)if(cfg.out_width==presets[i][0]&&cfg.out_height==presets[i][1])sel=i;
+            if(combo("Output resolution",&sel,"Same as the game picture\0" "1280 x 720\0" "1920 x 1080\0" "2560 x 1440\0" "3840 x 2160 (4K)\0" "Custom\0")){
+                if(sel<5){cfg.out_width=presets[sel][0];cfg.out_height=presets[sel][1];}else if(cfg.out_width<=0){cfg.out_width=1920;cfg.out_height=1080;}
+                changed=true;}
+            if(sel==5){int wh[2]={cfg.out_width,cfg.out_height};labelAbove("Custom width / height");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::InputInt2("##export_size",wh)){cfg.out_width=std::clamp(wh[0],64,7680);cfg.out_height=std::clamp(wh[1],64,4320);changed=true;}}
+            if(cfg.out_width>0)ImGui::TextDisabled("The picture is scaled with Lanczos; a different aspect ratio gets black bars.");
+        }
+        int fps=cfg.fps;labelAbove("Frame rate");if(ImGui::SliderInt("##export_fps",&fps,10,240,"%d fps")){cfg.fps=fps;changed=true;}
+        ImGui::TextDisabled("Quick:");ImGui::SameLine();
+        for(int preset:{24,30,60,120}){char b[16];snprintf(b,sizeof(b),"%d",preset);ImGui::SameLine();if(ImGui::SmallButton(b)){cfg.fps=preset;changed=true;}}
         const bool lossless=cfg.container==1||(cfg.container==0&&cfg.codec==3);
         ImGui::BeginDisabled(lossless);
         int quality=cfg.quality;labelAbove("Quality");if(ImGui::SliderInt("##export_quality",&quality,1,100,"%d")){cfg.quality=quality;changed=true;}

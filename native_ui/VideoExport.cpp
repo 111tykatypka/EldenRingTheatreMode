@@ -84,28 +84,32 @@ std::string stamp() {
 }
 std::wstring quote(const std::wstring& s) { return L"\"" + s + L"\""; }
 
-std::string build_codec_args(const Settings& s, bool sequence, bool jpeg) {
+// `scale` is the picture-size filter chain (may be empty). Pieces are joined into one -vf argument.
+std::string vf_arg(const std::string& scale, const std::string& tail) {
+    std::string chain = scale;
+    if (!tail.empty()) chain += (chain.empty() ? "" : ",") + tail;
+    return chain.empty() ? std::string() : "-vf " + chain + " ";
+}
+std::string build_codec_args(const Settings& s, bool sequence, bool jpeg, const std::string& scale) {
     const int q = std::clamp(s.quality, 1, 100);
     char text[512];
     if (sequence) {
-        if (jpeg) { snprintf(text, sizeof(text), "-c:v mjpeg -q:v %d -pix_fmt yuvj420p", std::clamp(int(std::lround(31 - q * 0.29)), 2, 31)); return text; }
-        return "-c:v png -compression_level 3";
+        if (jpeg) { snprintf(text, sizeof(text), "-c:v mjpeg -q:v %d -pix_fmt yuvj420p", std::clamp(int(std::lround(31 - q * 0.29)), 2, 31)); return vf_arg(scale, "") + text; }
+        return vf_arg(scale, "") + "-c:v png -compression_level 3";
     }
     switch (Codec(s.codec)) {
     case Codec::H264Nvenc:
-        snprintf(text, sizeof(text), "-vf scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p -c:v h264_nvenc -preset p5 -rc vbr -cq %d -b:v 0", std::clamp(int(std::lround(40 - q * 0.28)), 10, 40));
-        break;
+        snprintf(text, sizeof(text), "-c:v h264_nvenc -preset p5 -rc vbr -cq %d -b:v 0", std::clamp(int(std::lround(40 - q * 0.28)), 10, 40));
+        return vf_arg(scale, "format=yuv420p") + text;
     case Codec::H264Cpu:
-        snprintf(text, sizeof(text), "-vf scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p -c:v libx264 -preset medium -crf %d", std::clamp(int(std::lround(40 - q * 0.28)), 10, 40));
-        break;
+        snprintf(text, sizeof(text), "-c:v libx264 -preset medium -crf %d", std::clamp(int(std::lround(40 - q * 0.28)), 10, 40));
+        return vf_arg(scale, "format=yuv420p") + text;
     case Codec::Mjpeg:
         snprintf(text, sizeof(text), "-c:v mjpeg -q:v %d -pix_fmt yuvj420p", std::clamp(int(std::lround(31 - q * 0.29)), 2, 31));
-        break;
+        return vf_arg(scale, "") + text;
     default:
-        snprintf(text, sizeof(text), "-c:v ffv1 -level 3 -pix_fmt bgr0");
-        break;
+        return vf_arg(scale, "") + "-c:v ffv1 -level 3 -pix_fmt bgr0";
     }
-    return text;
 }
 
 void finish_session(std::shared_ptr<Session> s) {
@@ -187,6 +191,8 @@ void configure(const Settings& value) {
         current_settings.codec = std::clamp(current_settings.codec, 0, 3);
         current_settings.fps = std::clamp(current_settings.fps, 1, 240);
         current_settings.quality = std::clamp(current_settings.quality, 1, 100);
+        current_settings.out_width = current_settings.out_width > 0 ? std::clamp(current_settings.out_width & ~1, 64, 7680) : 0;
+        current_settings.out_height = current_settings.out_height > 0 ? std::clamp(current_settings.out_height & ~1, 64, 4320) : 0;
         settings_loaded = true;
     }
     try {
@@ -195,7 +201,7 @@ void configure(const Settings& value) {
         std::filesystem::create_directories(p.parent_path());
         std::ofstream f(p, std::ios::trunc);
         Settings s = settings();
-        f << "container=" << s.container << "\ncodec=" << s.codec << "\nfps=" << s.fps << "\nquality=" << s.quality << "\nfolder=" << s.folder << "\nffmpeg=" << s.ffmpeg << "\n";
+        f << "container=" << s.container << "\ncodec=" << s.codec << "\nfps=" << s.fps << "\nquality=" << s.quality << "\nout_width=" << s.out_width << "\nout_height=" << s.out_height << "\nfolder=" << s.folder << "\nffmpeg=" << s.ffmpeg << "\n";
     } catch (...) {}
 }
 
@@ -213,6 +219,8 @@ void load_settings() {
             else if (key == "codec") s.codec = atoi(value.c_str());
             else if (key == "fps") s.fps = atoi(value.c_str());
             else if (key == "quality") s.quality = atoi(value.c_str());
+            else if (key == "out_width") s.out_width = atoi(value.c_str());
+            else if (key == "out_height") s.out_height = atoi(value.c_str());
             else if (key == "folder") s.folder = value;
             else if (key == "ffmpeg") s.ffmpeg = value;
         }
@@ -301,9 +309,17 @@ bool begin(unsigned width, unsigned height, bool bgra) {
         fail(std::string("cannot create the output folder: ") + e.what());
         return false;
     }
+    // Output picture size: native (rounded down to even numbers for the video codecs) or a chosen size with the aspect ratio kept.
+    std::string scale;
+    if (s.out_width > 0 && s.out_height > 0) {
+        const std::string w = std::to_string(s.out_width & ~1), h = std::to_string(s.out_height & ~1);
+        scale = "scale=" + w + ":" + h + ":force_original_aspect_ratio=decrease:flags=lanczos,pad=" + w + ":" + h + ":(ow-iw)/2:(oh-ih)/2:color=black";
+    } else if (!sequence) {
+        scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+    }
     std::wstring command = quote(widen(ffmpeg)) + L" -y -hide_banner -loglevel warning -f rawvideo -pix_fmt " + (bgra ? L"bgr0" : L"rgb0") +
         L" -video_size " + std::to_wstring(width) + L"x" + std::to_wstring(height) + L" -framerate " + std::to_wstring(std::clamp(s.fps, 1, 240)) +
-        L" -i - -an " + widen(build_codec_args(s, sequence, jpeg)) + L" " + quote(out_path.wstring());
+        L" -i - -an " + widen(build_codec_args(s, sequence, jpeg, scale)) + L" " + quote(out_path.wstring());
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
     HANDLE read_end = nullptr, write_end = nullptr;
     if (!CreatePipe(&read_end, &write_end, &sa, 8u << 20)) { fail("could not create the ffmpeg pipe"); return false; }
