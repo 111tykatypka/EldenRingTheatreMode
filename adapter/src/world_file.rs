@@ -85,8 +85,11 @@ pub struct PlayerFrame{pub time:u64,pub transform:[[f32;4];3],pub matrix:[f32;16
 pub struct ModuleSample{pub time:u64,pub data:[u8;crate::weapon_loc::BYTES]}
 fn encode_module(v:&[ModuleSample])->Vec<u8>{let mut o=Vec::new();for s in v{o.extend(s.time.to_le_bytes());o.extend(s.data);}o}
 fn decode_module(r:&[u8],count:usize)->Option<Vec<ModuleSample>>{
- const N:usize=8+crate::weapon_loc::BYTES;if r.len()!=count.checked_mul(N)?{return None;}
- let out:Vec<ModuleSample>=r.chunks_exact(N).map(|c|ModuleSample{time:u64::from_le_bytes(c[..8].try_into().unwrap()),data:c[8..].try_into().unwrap()}).collect();
+ // Records made by earlier builds are shorter (17 bytes: module only, 21: plus the hide-weapon effect id); the
+ // missing tail reads as zero (nothing in hand), so those files still open.
+ if count==0||r.len()%count!=0{return None;}let n=r.len()/count;
+ if !matches!(n.checked_sub(8)?,17|21|crate::weapon_loc::BYTES){return None;}
+ let out:Vec<ModuleSample>=r.chunks_exact(n).map(|c|{let mut data=[0u8;crate::weapon_loc::BYTES];data[..n-8].copy_from_slice(&c[8..]);ModuleSample{time:u64::from_le_bytes(c[..8].try_into().unwrap()),data}}).collect();
  (out.iter().all(|s|crate::weapon_loc::plausible(&s.data))&&out.windows(2).all(|w|w[1].time>w[0].time)).then_some(out)}
 /// Construction metadata of a recorded actor, enough to ask the game for a stand-in later. Pointer-free.
 /// `think_param` is -1 when it could not be read (only EnemyIns carries one).
@@ -473,6 +476,10 @@ pub fn open(path:&Path)->Result<WorldFile,String>{
   for _ in 0..500{if path.exists(){break;}std::thread::sleep(std::time::Duration::from_millis(10));}
   let mut w=open(&path).unwrap();assert_eq!(w.player.len(),661);assert_eq!(w.player.get(660).unwrap().time-w.player.get(0).unwrap().time,660_000_000_000);std::fs::remove_dir_all(dir).ok();
  }
+ #[test]fn older_weapon_location_records_still_decode(){
+  let mut raw=Vec::new();raw.extend(7u64.to_le_bytes());raw.extend([0u8;21]);raw.extend(9u64.to_le_bytes());raw.extend([0u8;21]);
+  let v=decode_module(&raw,2).unwrap();assert_eq!(v.len(),2);assert_eq!(v[1].time,9);assert_eq!(v[0].data,[0u8;crate::weapon_loc::BYTES]);
+  let mut old=Vec::new();old.extend(7u64.to_le_bytes());old.extend([0u8;17]);assert_eq!(decode_module(&old,1).unwrap().len(),1);assert!(decode_module(&old,2).is_none());}
  #[test]fn weapon_location_samples_roundtrip_and_reject_garbage(){
   let mut d=[0u8;crate::weapon_loc::BYTES];d[1]=3;d[16]=1;
   let v=vec![ModuleSample{time:5,data:[0;crate::weapon_loc::BYTES]},ModuleSample{time:9,data:d}];
