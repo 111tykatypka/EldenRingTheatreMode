@@ -114,6 +114,7 @@ PlaybackView playback_view();
 Snapshot recorder_view();
 void refresh_character_cursor(std::uint64_t);
 void initialize(HWND);
+void refresh_bindings();
 void shutdown();
 void post_command(Command);
 bool handle_global_hotkey(UINT);

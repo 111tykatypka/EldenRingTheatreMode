@@ -19,6 +19,7 @@ namespace TheaterUI::Sound
     };
     void Play(Cue cue);
     void SetEnabled(bool enabled);
+    void SetFocused(bool focused);
     void SetVolume(float volume); // 0..1
     bool Enabled();
     float Volume();

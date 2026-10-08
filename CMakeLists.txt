@@ -1,8 +1,14 @@
 cmake_minimum_required(VERSION 3.24)
-project(EldenRingTheaterMode LANGUAGES C CXX)
+project(EldenRingTheaterMode LANGUAGES C CXX ASM_MASM)
 add_subdirectory(shared)
 add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
+ native_ui/CinematicCameraRuntime.cpp
+ native_ui/NativeCameraMemory.cpp
+ native_ui/EldenRingCameraIntercept.asm
+ native_ui/EldenRingTimingAdapter.cpp
+ native_ui/EldenRingWeatherAdapter.cpp
+ native_ui/EldenRingHudAdapter.cpp
 
  native_ui/theater/TheaterOverlayUI.cpp
  native_ui/theater/TheaterSounds.cpp
@@ -11,9 +17,10 @@ add_library(TheaterRenderBackend STATIC
  third_party/minhook_vendor/src/buffer.c third_party/minhook_vendor/src/hook.c third_party/minhook_vendor/src/trampoline.c third_party/minhook_vendor/src/hde/hde64.c)
 target_include_directories(TheaterRenderBackend PRIVATE shared native_ui native_ui/theater third_party/imgui third_party/imgui/backends third_party/minhook_vendor/include)
 target_compile_features(TheaterRenderBackend PRIVATE cxx_std_20)
+target_link_libraries(TheaterRenderBackend PUBLIC GameProfile)
 target_compile_definitions(TheaterRenderBackend PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 if(MSVC)
- target_compile_options(TheaterRenderBackend PRIVATE /utf-8 /EHsc)
+ target_compile_options(TheaterRenderBackend PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
 endif()
 
 
@@ -31,6 +38,18 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(cinematic-channels-tests src/cinematic_channels_tests.cpp)
+  target_compile_features(cinematic-channels-tests PRIVATE cxx_std_20)
+  add_test(NAME cinematic-channels-tests COMMAND cinematic-channels-tests)
+  add_executable(native-camera-tests src/native_camera_tests.cpp)
+  target_include_directories(native-camera-tests PRIVATE shared native_ui)
+  target_compile_features(native-camera-tests PRIVATE cxx_std_20)
+  target_compile_definitions(native-camera-tests PRIVATE NOMINMAX)
+  target_link_libraries(native-camera-tests PRIVATE TheaterRenderBackend User32)
+  add_test(NAME native-camera-tests COMMAND native-camera-tests)
+  add_executable(cinematic-camera-tests src/cinematic_camera_tests.cpp)
+  target_compile_features(cinematic-camera-tests PRIVATE cxx_std_20)
+  add_test(NAME cinematic-camera-tests COMMAND cinematic-camera-tests)
   add_executable(capture-track-tests src/capture_track_tests.cpp src/erplay.cpp)
   target_compile_features(capture-track-tests PRIVATE cxx_std_20)
   target_compile_definitions(capture-track-tests PRIVATE NOMINMAX)

@@ -12,6 +12,7 @@ struct Paths {
     bool show_console{}; // YAFSML debug console; off unless the user ticks "Show debug console"
 };
 struct Runtime {
+    // IPC server readiness; focus-scoped hotkey registration is not a launch prerequisite.
     bool host_ready{};
     DWORD sample_pid{};
     bool control_connected{}, player_ready{};

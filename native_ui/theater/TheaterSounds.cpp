@@ -64,7 +64,7 @@ namespace
     public:
         Engine() { worker_ = std::thread([this] { Run(); }); }
         void Request(Cue c) { { std::lock_guard l(m_); if (queue_.size() < 16) queue_.push_back(c); } cv_.notify_one(); }
-        std::atomic<bool> enabled{ true };
+        std::atomic<bool> enabled{ true },focused{true};
         std::atomic<float> volume{ 0.6f };
     private:
         void Run()
@@ -83,14 +83,17 @@ namespace
                 Cue cue;
                 {
                     std::unique_lock l(m_);
-                    cv_.wait_for(l, std::chrono::milliseconds(500), [&] { return !queue_.empty(); });
+                    cv_.wait_for(l, std::chrono::milliseconds(25), [&] { return !queue_.empty(); });
+                    DWORD currentFocusPid=0;GetWindowThreadProcessId(GetForegroundWindow(),&currentFocusPid);
+                    if(!focused||currentFocusPid!=GetCurrentProcessId()){for(auto*voice:voices)voice->DestroyVoice();voices.clear();queue_.clear();}
                     // Finished voices are released here, on this thread only.
                     std::erase_if(voices, [](IXAudio2SourceVoice* v) { XAUDIO2_VOICE_STATE s; v->GetState(&s); if (s.BuffersQueued) return false; v->DestroyVoice(); return true; });
                     if (queue_.empty()) continue;
                     cue = queue_.front(); queue_.pop_front();
                 }
                 auto& set = clips[(int)cue];
-                if (!enabled || set.empty() || voices.size() >= 12) continue;
+                DWORD focusedPid=0;GetWindowThreadProcessId(GetForegroundWindow(),&focusedPid);
+                if (focusedPid!=GetCurrentProcessId() || !enabled || set.empty() || voices.size() >= 12) continue;
                 const Clip& clip = set[set.size() == 1 ? 0 : rng() % set.size()];
                 IXAudio2SourceVoice* voice = nullptr;
                 if (FAILED(audio->CreateSourceVoice(&voice, &clip.format))) continue;
@@ -105,7 +108,8 @@ namespace
     Engine& engine() { static auto* e = new Engine; return *e; } // process lifetime, like the render backend
 }
 
-void Play(Cue cue) { if (engine().enabled) engine().Request(cue); }
+void Play(Cue cue) { DWORD pid=0;GetWindowThreadProcessId(GetForegroundWindow(),&pid);if(pid!=GetCurrentProcessId())return;if (engine().enabled) engine().Request(cue); }
+void SetFocused(bool focused) { engine().focused=focused; }
 void SetEnabled(bool enabled) { engine().enabled = enabled; }
 void SetVolume(float volume) { engine().volume = volume < 0 ? 0 : volume > 1 ? 1 : volume; }
 bool Enabled() { return engine().enabled; }

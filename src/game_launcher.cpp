@@ -207,7 +207,7 @@ bool Launcher::start(Paths paths, RuntimeReader runtime, Logger logger) {
 void Launcher::close() { if (worker_.joinable()) { worker_.request_stop(); worker_.join(); } }
 void Launcher::run(std::stop_token stop, const Paths& paths, const RuntimeReader& runtime, const Logger& logger) {
     try {
-        if (!runtime().host_ready) throw std::runtime_error("Host pipe or F6 is unavailable. Close other hosts and reopen this application.");
+        if (!runtime().host_ready) throw std::runtime_error("Host IPC server is unavailable. Close other hosts and reopen this application.");
         if (find_game_process()) throw std::runtime_error("Elden Ring is already running. Close it before launching a new DLL session.");
         validate_dependencies(paths);
         // The user's YAFSML.ini may enable YAFSML's debug console (console=1). Theater Mode launches

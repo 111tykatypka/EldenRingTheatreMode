@@ -10,10 +10,14 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_set>
 #include "imgui.h"
 #include "TheaterUiProtocol.h"
 #include "TheaterLayout.h"
 #include "TheaterStrings.h"
+#include "CameraTelemetry.h"
+#include "CinematicCamera.h"
+#include "TheaterHotkeys.h"
 
 namespace TheaterUI
 {
@@ -25,13 +29,17 @@ namespace TheaterUI
     inline constexpr std::uint32_t kCommandToggleUi = 0xFFFFFFFFu;
     // Not a pipe command: set visibility (value: 0 shown, 1 hidden), used by the name box.
     inline constexpr std::uint32_t kCommandSetVisibility = 0xFFFFFFFEu;
+    inline constexpr std::uint32_t kCommandCleanView = 0xFFFFFFFDu;
 
     struct OverlayFrame
     {
+        ImTextureID game_texture=0; // current GPU-only back-buffer copy; zero in CPU tests
         theater_ui::Snapshot snapshot;   // copy taken under the IPC lock
+        bool        focused = true;
         bool        hostLinked = false;  // pipe round trip succeeded at least once since the last drop
         std::vector<std::string> events; // new game-side event log lines since the last frame
         double      now = 0.0;           // seconds, monotonic
+        theater_camera::Telemetry camera; // read-only candidates, copied from game task
         UiVisibility visibility = UiVisibility::Hidden;
         double      hiddenAt = -100.0;   // when F4 last hid the UI, for the fading hint
     };
@@ -50,14 +58,24 @@ namespace TheaterUI
 
         // Exposed for tests.
         UIState& State() { return ui_; }
+        bool DollyControlsVisible() const { return showDollyMarkers_; }
+        // Render-thread only; window thread queues actions instead of editing UI state.
+        void CameraHotkey(theater_hotkeys::Action action);
         Lang     language = Lang::English;
 
     private:
         void Observe(const OverlayFrame& f);
         void DrawRail(const OverlayFrame& f);
         void DrawPanel(const OverlayFrame& f);
+        void DrawCameraModes(const OverlayFrame& f);
+        void SelectDollyKey(std::uint64_t id, bool toggle=false, bool range=false);
+        void DeleteSelectedDollyKeys();
+        void PlayDollyPath(const OverlayFrame& f);
+        void DrawDollyViewport(const OverlayFrame& f);
+        void DrawGameViewport(const OverlayFrame& f);
         void DrawSequencer(const OverlayFrame& f);
         void DrawToolbar(const OverlayFrame& f, float height);
+        void DrawDollyCurves(const OverlayFrame& f, ImVec2 min, ImVec2 max);
         void DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max);
         void DrawEventLog(float height);
         void DrawRecordingPill(const OverlayFrame& f);
@@ -75,6 +93,39 @@ namespace TheaterUI
         void SaveSettings() const;
 
         UIState ui_;
+        bool compactTracks_=true,expandActorTracks_=false,gameViewInitialized_=false;
+        ImVec2 gameViewMin_{},gameViewMax_{};
+        bool gameViewFit_=true;
+        float curveFraction_=.5f;double curveZoom_=1,curvePan_=0;
+        bool inputFocused_=true;
+        float sequencerTop_=0,sequencerRight_=0;
+        unsigned cameraSelection_ = 0; // selection, not native ownership
+        bool clearDollyDialog_ = false;
+        bool showDollyMarkers_=true,enableDollyVisibilityKey_=true,cameraMarkerClick_=false;
+        bool showDollyCurves_=true,curveDragging_=false,cameraSettingsDirty_=false;
+        bool playDollyRequested_=false,curveBoxSelecting_=false;
+        ImVec2 curveBoxStart_{};
+        std::unordered_set<std::uint64_t> curveBoxBase_;
+        std::uint64_t cameraHistoryGeneration_=0;
+        double cameraSettingsChangedAt_=0;
+        int curveChannel_=0,curveInterpolation_=1,curveEditScope_=0;
+        cinematic::Track curveTrack_;
+        std::uint64_t curveGeneration_=UINT64_MAX;
+        cinematic::Key curveStart_;
+        float curveMin_=0,curveMax_=1;
+        std::uint64_t selectedDollyKey_=0;
+        std::unordered_set<std::uint64_t> selectedDollyKeys_;
+        std::uint64_t dollySelectionAnchor_=0;
+        int gizmoOperation_=0,gizmoAxis_=-1;
+        bool gizmoDragging_=false;
+        cinematic::Key gizmoStart_;
+        ImVec2 gizmoMouseStart_{},gizmoScreenAxis_{},gizmoCenter_{};
+        double gizmoPixelsPerUnit_=1,gizmoAngle_=0,gizmoLastCommit_=0;
+
+        int bindingWaiting_ = -1;
+        bool bindingReleased_ = false;
+        std::string bindingError_;
+        ImGuiTextFilter bindingFilter_;
         ImFont* iconFont_ = nullptr;
         float   appliedScale_ = 0.0f;
         EmitFn  emit_ = nullptr;
@@ -94,7 +145,7 @@ namespace TheaterUI
         int  lastLinked_ = -1, lastConnected_ = -1, lastPlayer_ = -1, lastLoaded_ = -1;
 
         // Panels and layout (Layout menu).
-        bool  showTools_ = true, showTimeline_ = true, resetLayout_ = false;
+        bool  showTools_ = true, showTimeline_ = true, showEventLog_ = true, resetLayout_ = false;
         bool  savedTools_ = true, savedTimeline_ = true, savedPanel_ = true;
         float menuH_ = 0.0f;
 

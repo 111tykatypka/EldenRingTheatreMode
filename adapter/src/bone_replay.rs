@@ -73,6 +73,13 @@ const RECORD_PAUSED:u32=2;
 unsafe extern "C"{fn tm_render_event(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
+pub fn world_timing_tick(now:u64){
+ unsafe extern "C"{fn tm_world_timing_tick(active:i32,speed:f64);}
+ let (active,rate)=match STATE.try_lock(){Ok(s)=>(s.owning&&s.host.0&&!s.replay_blocked,s.host.1),Err(_)=>(false,1.0)};
+ let mut link:Link=unsafe{std::mem::zeroed()};unsafe{tm_overlay_bone_link(&mut link)};
+ let fresh=link.linked!=0&&link.loaded!=0&&link.recording!=RECORD_RECORDING&&link.recording!=RECORD_PAUSED&&now>=link.received_ns&&now-link.received_ns<250_000_000;
+ unsafe{tm_world_timing_tick((active&&fresh&&crate::offline_allowed()&&player_chr().is_some()) as i32,rate);}
+}
 // place.block == -1: recorded before map data existed (bones file version 1); positions are used as recorded.
 type Frame=world_file::PlayerFrame;
 // Player frames of the loaded replay: the old .bones format is read whole, .world is decoded a chunk at
@@ -144,6 +151,16 @@ fn pose_arrays(chr:usize)->Option<(usize,usize)>{
  let (local,model)=(read_ptr(importer+LOCAL_POSE),read_ptr(importer+MODEL_POSE));
  (array(local)&&array(model)).then_some((local,model))}
 fn pose(p:usize,bytes:usize)->&'static [u8]{unsafe{std::slice::from_raw_parts(p as *const u8,bytes)}}
+// Read-only publication on Draw_Pre; no retained game pointers cross the FFI.
+pub fn camera_bone_sample(){
+ unsafe extern "C"{fn tm_camera_bone_index()->i32;fn tm_camera_bone_publish(root:*const f32,qs:*const f32);}
+ let index=unsafe{tm_camera_bone_index()};if index<0{return;}
+ let sample=(||{let chr=player_chr()?;let count=crate::actors::bone_count(chr)?;if index as usize>=count{return None;}
+  let (_,model)=pose_arrays(chr)?;let mut root=[0u8;64];let mut qs=[0u8;48];
+  if !crate::companions::copy(matrix_address(chr),&mut root)||!crate::companions::copy(model.checked_add((index as usize).checked_mul(48)?)?,&mut qs){return None;}
+  Some((std::array::from_fn::<f32,16,_>(|i|f32::from_le_bytes(root[i*4..i*4+4].try_into().unwrap())),std::array::from_fn::<f32,12,_>(|i|f32::from_le_bytes(qs[i*4..i*4+4].try_into().unwrap()))))})();
+ match sample{Some((root,qs))=>unsafe{tm_camera_bone_publish(root.as_ptr(),qs.as_ptr())},None=>unsafe{tm_camera_bone_publish(std::ptr::null(),std::ptr::null())}}
+}
 fn bones_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.bones"))}
 fn world_path(replay:&str)->PathBuf{PathBuf::from(format!("{replay}.world"))}
 
@@ -368,11 +385,11 @@ fn begin_arrival(s:&mut State,chr:usize){
  crate::log_game(&format!("ARRIVAL: travel needed (convertible={convertible}, distance {far_m:.0} m, limit {FAR_DIRECT_M:.0} m)"));
  match arrival::nearest_grace(&target){
   None if convertible=>{crate::log_game(&format!("ARRIVAL: no grace found for {}; placing the body directly ({far_m:.0} m)",arrival::block_name(target.block)));}
-  None=>{crate::log_game(&format!("ARRIVAL_ERROR: no grace found for {}; cannot travel there",arrival::block_name(target.block)));status("BONE REPLAY ERROR: the replay was recorded where no grace can take you. Travel there first, then play it");if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}}
+  None=>{crate::log_game(&format!("ARRIVAL_ERROR: no grace found for {}; cannot travel there",arrival::block_name(target.block)));status("BONE REPLAY ERROR: the replay was recorded where no grace can take you. Travel there first, then play it");reject(s,chr,"no grace to travel to");}
   Some((grace,name))=>match arrival::warp_to_grace(grace){
    Ok(())=>{s.warped=true;s.arrival=Arrival::Warping{target,since:crate::monotonic_ns(),stable:0};crate::log_game(&format!("ARRIVAL: warping to {name} for {}",arrival::block_name(target.block)));status("BONE REPLAY: travelling to the replay's location...");}
    Err(e) if convertible=>{crate::log_game(&format!("ARRIVAL: grace warp unavailable ({e}); placing the body directly ({far_m:.0} m)"));}
-   Err(e)=>{crate::log_game(&format!("ARRIVAL_ERROR: grace warp failed: {e}"));status("BONE REPLAY ERROR: could not travel to the replay's location (see log)");if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}}}}}
+   Err(e)=>{crate::log_game(&format!("ARRIVAL_ERROR: grace warp failed: {e}"));status("BONE REPLAY ERROR: could not travel to the replay's location (see log)");reject(s,chr,"grace warp failed");}}}}
 // Each frame while owning: finish a warp once the map has loaded, then confirm the body is on the spot.
 fn advance_arrival(s:&mut State,chr:usize,now:u64){
  match s.arrival{
@@ -475,6 +492,7 @@ pub fn tick(group:usize,now:u64){
      // Keep flag tracks read-only until a verified no-save/lifecycle contract exists.
      s.flags_saved=None;
      begin_arrival(s,chr);
+     if s.replay_blocked{s.host=(l.playing!=0,l.timescale,l.play_source_ns,l.received_ns);return;}
      let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
    else if !want&&s.owning{release(s,chr,if s.loaded.is_none(){"replay unloaded"}else{"timeline idle and overlay closed"});}

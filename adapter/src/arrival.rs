@@ -1,20 +1,16 @@
 //! Getting the player to where a replay was recorded (Phase 1.4).
 //!
-//! Positions: the physics position (HavokPosition) is in the current physics world, whose origin
-//! moves as the game streams map tiles. ChrIns.chunk_position is the same point in global map-chunk
-//! coordinates, which do not move. A recording keeps both, so a recorded point can be placed in
-//! today's physics world as  physics = recorded_global - (current_global - current_physics).
-//!
-//! Far away or in another map, the player first travels with the game's own grace warp (fast travel,
-//! with its loading screen), to the grace closest to the recorded spot. Playback waits until the map
-//! has finished loading, then places the body and checks the spot (within 0.5 m, 3 tries).
-//! Grace warp only works for areas reachable by fast travel; the event log says when no grace is found.
+//! Physics roots are Havok coordinates. The legacy field named `global` stores
+//! ChrIns.chunk_position; real captures show that it can stay constant while the player
+//! moves, then change with streaming. It is NOT a recorded global player position.
+//! No cross-origin conversion or nearest-grace distance is proven by that field alone.
+//! Playback must retain its origin guard until a validated conversion is available.
 use eldenring::cs::{BlockId,ChrIns,CSLuaEventManImp,SoloParamRepository};
 use fromsoftware_shared::FromStatic;
 use pelite::pe64::{Pe,PeView};
 use crate::game_profile as profile;
 
-/// Where a character is: block (map tile), origin block for chunk coordinates, global position.
+/// Legacy location metadata: block, origin and chunk field (NOT global moving root).
 #[derive(Clone,Copy,Debug,Default,PartialEq)]
 pub struct Place{pub block:i32,pub origin:i32,pub global:[f32;4]}
 impl Place{

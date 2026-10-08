@@ -72,7 +72,7 @@ int wmain(int argc, wchar_t** argv) {
     assert(launcher.start(paths, [] { return Runtime{}; }, [](const auto&) {}));
     for (unsigned i = 0; i < 100 && launcher.state().phase != Phase::error; ++i) Sleep(10);
     assert(launcher.state().phase == Phase::error);
-    assert(launcher.state().diagnostic.find(L"Host pipe or F6") != std::wstring::npos);
+    assert(launcher.state().diagnostic.find(L"Host IPC server") != std::wstring::npos);
     launcher.close();
     std::cout << "Launcher PASS: config preservation, relative paths/conditions, Unicode, argument quoting, duplicate/wrong config rejection, missing dependencies, host-not-ready refusal. No loader or game was launched.\n";
 }

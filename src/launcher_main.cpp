@@ -135,7 +135,9 @@ void draw_launcher() {
   const auto launch = app.launcher.state();
   const auto control = app.control.state();
   const bool game_running = app.game_pid.load() != 0;
-  const bool ready = app.stop_hotkey && app.sample_pipe_ready.load();
+  // F5/F6 are registered only while the game has focus, so they cannot be
+  // prerequisites for launching that game. Pipe readiness is independent.
+  const bool ready = app.sample_pipe_ready.load();
   const float pad = S(32);
 
   const ImGuiViewport *vp = ImGui::GetMainViewport();
@@ -223,7 +225,7 @@ void draw_launcher() {
   ImGui::PushStyleColor(ImGuiCol_Text, (error ? Rgba{236, 118, 110, 255} : LabelText).Vec4());
   ImGui::PushTextWrapPos(0.0f);
   ImGui::TextUnformatted(ready ? text(launch.diagnostic).c_str()
-                               : tr("Preparing the recorder and the F5/F6 hotkeys...", "Подготовка записи и клавиш F5/F6..."));
+                               : tr("Waiting for the recorder IPC server. If this persists, close other Theater Mode hosts.", "Ожидание IPC-сервера записи. Если ожидание продолжается, закройте другие экземпляры Theater Mode."));
   ImGui::PopTextWrapPos();
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -293,6 +295,7 @@ void draw_launcher() {
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK launcher_proc(HWND w, UINT m, WPARAM a, LPARAM b) {
+  if(m==WM_TIMER&&a==0x544D){theater::refresh_bindings();return 0;}
   if (m == WM_APP + 77) { theater::ingame_editor::poll(); return 0; }
   if (m == WM_HOTKEY) {
     // RegisterHotKey is application-wide; F5/F6 work while the game has focus.

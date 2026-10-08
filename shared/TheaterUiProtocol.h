@@ -19,7 +19,7 @@ inline constexpr std::uint32_t magic=0x37495554;
 // Version 9: continuous timescale, request value = IEEE-754 binary64 bits, no centi-speed quantization.
 // Version 10: authoritative host clock anchor in shared QueryInterruptTimePrecise nanoseconds.
 // Version 11: explicit replay application ownership, independent from overlay visibility.
-inline constexpr std::uint32_t version=11;
+inline constexpr std::uint32_t version=12;
 enum Command : std::uint32_t { poll, play, pause, stop, restart, seek, previous, next, timescale, select, page, record_start, record_stop, replay_page, replay_open,
  record_named,    // text = display name; starts recording with that name
  replay_sort,     // value = key*2 + descending; key: 0 date, 1 size, 2 name, 3 duration
@@ -27,6 +27,7 @@ enum Command : std::uint32_t { poll, play, pause, stop, restart, seek, previous,
  replay_delete,   // value = library index; moved to the Recycle Bin with its sidecar files
  toggle_playback,
  replay_unload,
+ camera_target_window, // value = requested replay timestamp; recorded player transforms only
  command_count };
 // Mirrors erplay::RecordingState without making the overlay depend on the host headers.
 enum RecordingState : std::uint32_t { record_idle, record_recording, record_paused, record_saving };
@@ -59,6 +60,10 @@ struct Snapshot {std::uint32_t magic_value{magic},version{theater_ui::version},l
  std::uint32_t host_playing{};   // the host timeline is advancing
  std::uint32_t application_requested{};
  std::uint64_t master_clock_ns{};
+ // v12: bounded original-sample window, not live player state. The camera
+ // interpolates these brackets at the same time as its path evaluation.
+ struct TargetPoint {std::uint64_t time_ns{};float position[3]{};std::uint32_t reserved{};};
+ std::uint32_t target_count{},target_reserved{};TargetPoint target_points[64]{};
 };
 static_assert(sizeof(Request)==32+text_size);
 inline bool has_text(const Request&r){return r.text[0]!=0&&memchr(r.text,0,text_size)!=nullptr;}
@@ -69,6 +74,6 @@ inline bool valid(const Request&r,std::uint64_t last){
  if(r.command==record_named)return r.value==0&&has_text(r);
  if(r.command==replay_rename)return has_text(r);
  if(r.command==replay_sort)return r.value<sort_key_count*2;
- return r.command==seek||r.command==select||r.command==page||r.command==replay_page||r.command==replay_open||r.command==replay_delete||(r.value==0&&!r.text[0]);
+ return r.command==camera_target_window||r.command==seek||r.command==select||r.command==page||r.command==replay_page||r.command==replay_open||r.command==replay_delete||(r.value==0&&!r.text[0]);
 }
 }

@@ -8,10 +8,9 @@
 #include <string>
 #include <string_view>
 namespace theater_timescale {
-// Replay speed range (Phase 1.3 spec: 0.01x to 4x, logarithmic). The replay has its own clock;
-// this never changes the game's speed.
-inline constexpr double minimum=0.01, maximum=4.0, normal=1.0;
-// Quick-set marks drawn on the slider; clicking a mark (or dragging close to it) snaps to it.
+// Authoritative sequencer rate. Native world timing can opt into this same rate.
+inline constexpr double minimum=0.001, maximum=10.0, normal=1.0;
+// Visual ruler marks only; continuous dragging never snaps to these values.
 inline constexpr double marks[]={0.1,0.25,0.5,1.0,2.0};
 inline bool valid(double value){return std::isfinite(value)&&value>=minimum&&value<=maximum;}
 inline double clamp(double value){return std::clamp(value,minimum,maximum);}

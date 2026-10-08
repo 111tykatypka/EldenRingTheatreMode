@@ -1,5 +1,11 @@
 # Targeted Ghidra queries
 
+`resolve_rtti.py` additionally resolves exact decorated type names through MSVC
+x64 PE-relative complete-object locators and candidate executable virtual tables.
+Example: `python tools/ghidra_query/resolve_rtti.py '.?AVGXPointLight@GXSR@@'`.
+It validates the same exact analysis-copy SHA-256. Layout results do not establish
+constructor ABI, ownership, task affinity, or permission to call those functions.
+
 Python 3.10+. Standard library for SQLite/PE/RTTI; optional **Capstone 5.0.6** for
 `disasm`. Never loads or executes the game. SQLite is opened `mode=ro` plus
 `query_only=ON`. Binary commands verify the analysis copy's exact SHA-256 before

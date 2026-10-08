@@ -14,6 +14,8 @@ use pelite::pe64::{Pe, PeView};
 
 mod game_profile { include!(concat!(env!("OUT_DIR"), "/game_profile.rs")); }
 mod control_protocol;
+mod camera_probe;
+mod foliage;
 mod control_link;
 mod player_action;
 mod character_capture;
@@ -45,8 +47,8 @@ const TM_CHECK_PATH:u32=0x0001;const TM_CHECK_FILE_VERSION:u32=0x0002;const TM_C
 #[repr(C)]#[derive(Clone,Copy,Default)]struct WireMessage{magic:u32,version:u16,kind:u16,sequence:u64,timestamp_ns:u64,position:[f32;3],quaternion_xyzw:[f32;4],euler_raw:[f32;3],player_present:u32,reserved:u32,action:player_action::State}
 const _:()=assert!(std::mem::size_of::<WireMessage>()==104);
 #[repr(C)]struct TmValidationReport{size:u32,status:u32,checked:u32,passed:u32,file_version:[u16;4],product_version:[u16;4],machine:u16,reserved:u16,image_base:usize,runtime_path:[u16;32768],sha256:[i8;65]}
-unsafe extern "C"{fn tm_render_start(emergency:extern "C" fn())->i32;}
-extern "C" fn render_emergency_stop(){log_game("EMERGENCY_STOP from the overlay (no game writes are active outside bone replay)");}
+unsafe extern "C"{fn tm_render_start(emergency:extern "C" fn())->i32;fn tm_camera_runtime_start(address:*mut c_void)->i32;fn tm_camera_runtime_stop();fn tm_camera_game_context(allowed:i32);fn tm_weather_tick(active:i32);fn tm_weather_disable();}
+extern "C" fn render_emergency_stop(){unsafe{tm_camera_runtime_stop();tm_weather_disable();}log_game("EMERGENCY_STOP from overlay; camera and weather overrides disabled");}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
 #[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
 #[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
@@ -140,6 +142,11 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 // Early, after exact executable guard; never under the loader lock.
                 let graphics=unsafe{tm_render_start(render_emergency_stop)};
                 log_game(&format!("IN_GAME_UI_HOOKS={graphics}; visuals UNVERIFIED"));
+                if graphics!=0 {
+                    let base=unsafe{GetModuleHandleW(std::ptr::null())} as usize;
+                    let result=unsafe{tm_camera_runtime_start((base+game_profile::VAL_CAMERA_INTERCEPT_RVA) as *mut c_void)};
+                    log_game(&format!("CAMERA_INTERCEPT_HOOK={} RVA=0x{:X} mechanism=native_write_suppression exact_profile=2.7.0.0 writes=OFF runtime=UNVERIFIED",result,game_profile::VAL_CAMERA_INTERCEPT_RVA));
+                }
                 set_state(PROFILE_READY,"PROFILE_READY");
                 set_state(TASK_SIGNATURE_SCAN,"TASK_SIGNATURE_SCAN");
                 log_game("Task signature scan start: ERSoundBankLoader register_task pattern; profile=EldenRing_1_17 / WW_2.7.0.0");
@@ -163,16 +170,27 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 set_state(TASK_RUNTIME_READY,"TASK_RUNTIME_READY");
                 set_state(WORLDCHR_SEARCH,"WORLDCHR_SEARCH");
                 let world_ready=std::sync::atomic::AtomicBool::new(false);let player_found=std::sync::atomic::AtomicBool::new(false);
+                unsafe extern "C"{fn tm_hud_initialize()->i32;}
+                log_game(if unsafe{tm_hud_initialize()}!=0{"HUD_OPACITY hook READY; default visible; runtime validation required"}else{"HUD_OPACITY signature/hook UNAVAILABLE; no HUD override"});
                 fidelity_capture::initialize();
                 let mut characters=character_capture::Capture::new();
 
                 // Warm reflected singleton resolution outside game callbacks; instance may not yet exist.
                 let _=unsafe{eldenring::cs::CSLuaEventManImp::instance()};
+                let _=eldenring::cs::CSCamera::instance_ptr();
                 let mut last_animation_id=-1i32;
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
+                    let weather_active=offline_allowed()&&!arrival::loading()&&unsafe{WorldChrMan::instance()}.map(|world|world.main_player.is_some()).unwrap_or(false);
+                    unsafe{tm_weather_tick(weather_active as i32);}
+                    unsafe{tm_camera_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
+                    unsafe extern "C"{fn tm_hud_game_context(active:i32);}
+                    unsafe{tm_hud_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
+                    camera_probe::tick(now);
+                    foliage::tick(PRESENT.load(Ordering::Acquire)!=0&&offline_allowed());
                     characters.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}
+                    bone_replay::world_timing_tick(now);
                     if let Ok(world)=unsafe{WorldChrMan::instance()} {
                         if !world_ready.swap(true,Ordering::AcqRel){log_game(&format!("WorldChrMan READY; instance={:p}",world));set_state(WORLDCHR_READY,"WORLDCHR_READY");set_state(PLAYER_SEARCH,"PLAYER_SEARCH");}
                         if let Some(player)=world.main_player.as_ref() {
@@ -201,7 +219,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_BehaviorSafe,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(1,monotonic_ns()));}))));}
                 unsafe{register_task(task,CSTaskGroupIndex::ChrIns_PrePhysicsSafe,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(2,monotonic_ns()));}))));}
                 unsafe{register_task(task,CSTaskGroupIndex::LocationUpdate_PrePhysics,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(3,monotonic_ns()));}))));}
-                unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||bone_replay::tick(4,monotonic_ns()));}))));}
+                unsafe{register_task(task,CSTaskGroupIndex::Draw_Pre,Box::leak(Box::new(RecurringTask::new(|_:&FD4TaskData|{let _=std::panic::catch_unwind(||{bone_replay::tick(4,monotonic_ns());if offline_allowed(){bone_replay::camera_bone_sample();}});} ))));}
                 log_game(&format!("Recurring task registered using resolved function eldenring.exe+0x{register_rva:X}; group=ChrIns_PostPhysics; waiting for WORLDCHR_READY and PLAYER_FOUND"));
                 loop {
                     let allowed=unsafe{tm_anti_cheat_state()}==0;

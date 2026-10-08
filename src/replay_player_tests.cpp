@@ -17,18 +17,19 @@ int run_tests(int argc,char**argv){
     {erplay::Writer w(file,meta,2);for(std::uint64_t i=0;i<5;++i){erplay::Sample s;s.index=i;s.source_time_ns=100+i*100'000'000;s.replay_time_ns=i*100'000'000;s.position={float(i),float(2*i),0};s.orientation={0,0,0,1};w.append(s);}const auto saved=w.finalize();assert(saved.sample_count==5);}
     erplay::Reader r(file);assert(r.summary().sample_count==5);assert(r.sample(3).position.x==3);assert(r.lower_sample(250'000'000)==2);auto [a,b]=r.bracket(250'000'000);assert(a.position.x==2&&b.position.x==3);
     replay::Player p(file);const auto t0=replay::Player::Clock::time_point{};p.play(t0);p.advance(t0+250ms);assert(p.state().timestamp_ns==250'000'000);assert(std::abs(p.state().position.x-2.5f)<0.001f);p.pause(t0+300ms);const auto paused=p.state().timestamp_ns;assert(p.state().status==replay::Status::paused);p.advance(t0+4s);assert(p.state().timestamp_ns==paused);
-    p.set_timescale(0.5,t0+4s);p.play(t0+4s);p.advance(t0+4s+200ms);assert(p.state().timestamp_ns==paused+100'000'000);p.seek(0);assert(p.state().timestamp_ns==0);p.step(1);assert(p.state().timestamp_ns==100'000'000);p.seek(400'000'000);assert(p.state().sample_index==4);
+    p.set_timescale(0.5,t0+4s);p.play(t0+4s);p.advance(t0+4s+200ms);assert(p.state().timestamp_ns==(paused+100'000'000)%p.summary().duration_ns); // C16 looping preserves overshoot
+    p.seek(0);assert(p.state().timestamp_ns==0);p.step(1);assert(p.state().timestamp_ns==100'000'000);p.seek(400'000'000);assert(p.state().sample_index==4);
     p.stop();assert(p.state().status==replay::Status::stopped&&p.state().timestamp_ns==0);p.restart(t0+5s);assert(p.state().status==replay::Status::playing);p.advance(t0+5s+50ms);assert(p.state().timestamp_ns==25'000'000);
     auto q=replay::slerp({0,0,0,1},{0,1,0,0},0.5);const double norm=std::sqrt(double(q.x)*q.x+double(q.y)*q.y+double(q.z)*q.z+double(q.w)*q.w);assert(std::abs(norm-1.0)<1e-5);
     // Continuous timescale, exact IPC representation, logarithmic math and strict input.
-    for(double scale:{.01,.0105,.015,.037,1.,2.5,4.}){
+    for(double scale:{.001,.00105,.005,.01,.0105,.015,.037,1.,2.5,4.,10.}){
         assert(theater_timescale::valid(scale));
         assert(theater_timescale::decode(theater_timescale::encode(scale))==scale);
         assert(std::abs(theater_timescale::from_normalized(theater_timescale::normalized(scale))-scale)<1e-12);
     }
     double parsed=0;assert(theater_timescale::parse(" 0.0105x ",parsed)&&parsed==.0105);
-    assert(theater_timescale::parse("20",parsed)&&parsed==4.);
-    assert(theater_timescale::parse("0.00001",parsed)&&parsed==.01);
+    assert(theater_timescale::parse("20",parsed)&&parsed==10.);
+    assert(theater_timescale::parse("0.00001",parsed)&&parsed==.001);
     for(auto text:{"0","-1","NaN","Infinity","junk","1xjunk"})assert(!theater_timescale::parse(text,parsed));
     replay::Player slow(file);slow.set_timescale(.01,t0);slow.play(t0);
     for(int i=1;i<=11;++i)slow.advance(t0+std::chrono::nanoseconds(i*10));

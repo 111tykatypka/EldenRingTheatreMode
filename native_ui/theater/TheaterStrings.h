@@ -38,6 +38,7 @@ namespace TheaterUI
         UnloadReplay,
         UiSounds, UiSoundsOn,
         ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote, ReplayEquipment, ReplayEquipmentNote, ReplaySummonHorse, ReplaySummonHorseNote, NoNearFade, NoNearFadeNote,
+        Weather, WeatherEditor,
         Count
     };
 
@@ -123,6 +124,7 @@ namespace TheaterUI
         { "No fade-out near the camera", "Не скрывать объекты вблизи камеры" },
         { "While a replay plays or a recording runs, grass, trees, rocks and models do not fade away when the camera comes close. Only the in-memory parameter tables change, and they are restored exactly.",
           "Пока идёт повтор или запись, трава, деревья, скалы и модели не исчезают при приближении камеры. Таблицы параметров изменяются только в памяти и возвращаются." },
+        { "Weather", "Погода" }, { "Weather editor", "Редактор погоды" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 
