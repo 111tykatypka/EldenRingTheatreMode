@@ -76,3 +76,57 @@ extern "C" int tm_effect_spawn(std::uint32_t id,const float*pos){
  replaying=true;const bool ok=call_original(manager,id,pos);replaying=false;
  if(ok)++replayed;return ok?1:0;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Replay through the scene-controller creation path (found by the particle research, RVA 0x1CA0CB0): CSSfxImp -> scene_ctrl ->
+// create(scene, handle, fxr id, null parameters, 4x4 matrix, 0, 0). Only effects whose FXR is resident in the game's list are
+// created (the debug-position function above silently ignores anything else). Every created effect owns one fixed handle slot and is
+// stopped and released after a fixed real-time lifetime or when the replay ends.
+namespace game_effects { namespace {
+struct Slot{alignas(16) unsigned char handle[TM_VAL_VFX_HANDLE_SIZE];bool used=false;ULONGLONG expires=0;};
+Slot slots[32];
+std::atomic<std::uint64_t> created{0},not_resident{0},failed{0},no_slot{0};
+bool read_mem(std::uintptr_t p,void*out,std::size_t n){SIZE_T got=0;return p>=0x10000&&p<=0x00007FFFFFFFFFFFULL-n&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(p),out,n,&got)&&got==n;}
+bool scene_guard(std::uintptr_t b){
+ struct Site{std::uintptr_t rva;unsigned char bytes[10];};
+ const Site sites[]={{TM_VAL_VFX_SCENE_CREATE_RVA,{0x40,0x53,0x48,0x81,0xec,0x80,0,0,0,0x48}},{TM_VAL_VFX_HANDLE_STOP_RVA,{0x48,0x89,0x4c,0x24,0x08,0x57,0x48,0x83,0xec,0x20}},{TM_VAL_VFX_HANDLE_RELEASE_RVA,{0x48,0x89,0x4c,0x24,0x08,0x57,0x48,0x83,0xec,0x30}}};
+ for(const auto&s:sites){unsigned char a[10]{};if(!read_mem(b+s.rva,a,10)||memcmp(a,s.bytes,10))return false;}return true;}
+bool resident(std::uintptr_t scene,std::uint32_t wanted){
+ std::uintptr_t graphics=0,container=0,head=0,node=0;
+ if(!read_mem(scene+TM_OFF_FFX_GRAPHICS_MANAGER,&graphics,8)||!read_mem(graphics+TM_OFF_FFX_RESOURCE_CONTAINER,&container,8)||!read_mem(container+TM_OFF_FXR_LIST_HEAD,&head,8)||!read_mem(head,&node,8))return false;
+ const auto deadline=GetTickCount64()+4;
+ while(node&&node!=head&&GetTickCount64()<deadline){
+  std::uint32_t id=0;std::uintptr_t next=0,wrapper=0,fxr=0;
+  if(!read_mem(node,&next,8)||next==node||!read_mem(node+TM_OFF_FXR_NODE_ID,&id,4))return false;
+  if(id==wanted)return read_mem(node+TM_OFF_FXR_NODE_WRAPPER,&wrapper,8)&&read_mem(wrapper,&fxr,8)&&fxr;
+  node=next;}
+ return false;}
+using CreateFn=void*(__fastcall*)(void*,void*,std::uint32_t,void*,const float*,int,int);
+using HandleFn=void(__fastcall*)(void*);
+bool seh_create(std::uintptr_t b,std::uintptr_t scene,Slot&s,std::uint32_t id,const float*m){
+ __try{reinterpret_cast<CreateFn>(b+TM_VAL_VFX_SCENE_CREATE_RVA)(reinterpret_cast<void*>(scene),s.handle,id,nullptr,m,0,0);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
+bool seh_release(std::uintptr_t b,Slot&s){
+ __try{reinterpret_cast<HandleFn>(b+TM_VAL_VFX_HANDLE_STOP_RVA)(s.handle);reinterpret_cast<HandleFn>(b+TM_VAL_VFX_HANDLE_RELEASE_RVA)(s.handle);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
+std::atomic_bool scene_faulted=false;
+void release_slot(Slot&s){if(!s.used)return;if(!seh_release(base,s))scene_faulted=true;memset(s.handle,0,sizeof(s.handle));s.used=false;}
+}}
+// manager = CSSfxImp address (from the Rust side, game callback thread only). Returns 1 created, 0 refused, -1 not resident, -2 no free
+// slot, -3 faulted. `life_ms` is the real-time lifetime before the effect is stopped and released.
+extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,const float*pos,std::uint32_t life_ms){
+ using namespace game_effects;if(!manager||!pos||!id)return 0;if(scene_faulted)return -3;
+ if(!base)base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+ static bool guarded=false,guard_ok=false;if(!guarded){guard_ok=scene_guard(base);guarded=true;}if(!guard_ok)return 0;
+ std::uintptr_t scene=0;if(!read_mem(manager+TM_OFF_SFX_SCENE_CTRL,&scene,8)||!scene)return 0;
+ if(!resident(scene,id)){++not_resident;return -1;}
+ Slot*slot=nullptr;for(auto&s:slots)if(!s.used){slot=&s;break;}if(!slot){++no_slot;return -2;}
+ alignas(16) float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, pos[0],pos[1],pos[2],1};
+ memset(slot->handle,0,sizeof(slot->handle));
+ if(!seh_create(base,scene,*slot,id,m)){scene_faulted=true;++failed;return -3;}
+ std::uintptr_t object=0;memcpy(&object,slot->handle+TM_OFF_VFX_HANDLE_OBJECT,sizeof(object));
+ slot->used=true;slot->expires=GetTickCount64()+life_ms;
+ if(!object){release_slot(*slot);++failed;return 0;}
+ ++created;return 1;}
+extern "C" void tm_effect_scene_tick(){
+ using namespace game_effects;const auto now=GetTickCount64();for(auto&s:slots)if(s.used&&now>=s.expires)release_slot(s);}
+extern "C" void tm_effect_scene_release_all(){using namespace game_effects;for(auto&s:slots)release_slot(s);}
+extern "C" void tm_effect_scene_stats(std::uint64_t*c,std::uint64_t*nr,std::uint64_t*f,std::uint64_t*ns){using namespace game_effects;*c=created;*nr=not_resident;*f=failed;*ns=no_slot;}
