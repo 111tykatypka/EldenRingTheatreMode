@@ -46,6 +46,19 @@ v.extend(asm_children(chr));
     let mut probe=[0u8;8];if !crate::companions::copy(p,&mut probe){continue;}
     seen.push(p);v.push((format!("{name}+{off:#x}"),p,0x300));if seen.len()>10{break;}}}}
  v}
+/// Heap objects reachable from a character's model instance, as (offset path, address): two levels, enough to see model parts being
+/// attached or removed. Research probe for enemy weapon swaps.
+pub fn model_pointers(chr:usize)->Vec<(u32,u64)>{
+ let mut out=Vec::new();
+ let Some(root)=crate::companions::word(chr+offset_of!(ChrIns,chr_model_ins)).filter(|p|*p>0x10000) else {return out};
+ let ok=|p:usize|p>0x10000&&p<0x7FFF_FFFF_FFFF&&{let mut b=[0u8;8];crate::companions::copy(p,&mut b)};
+ for off in (0..0x400usize).step_by(8){
+  let Some(p)=crate::companions::word(root+off).map(|p|p as usize).filter(|p|ok(*p)) else {continue};
+  out.push((off as u32,p as u64));
+  for o2 in (0..0x100usize).step_by(8){
+   if let Some(q)=crate::companions::word(p+o2).map(|q|q as usize).filter(|q|ok(*q)){out.push((((off as u32)<<12)|o2 as u32,q as u64));}
+   if out.len()>300{return out;}}}
+ out}
 fn snapshot(chr:usize)->Vec<(String,usize,Vec<u8>)>{
  region_list(chr).into_iter().filter_map(|(n,a,l)|{let mut b=vec![0u8;l];crate::companions::copy(a,&mut b).then_some((n,a,b))}).collect()}
 impl Probe{
