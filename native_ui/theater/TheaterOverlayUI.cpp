@@ -22,6 +22,7 @@ namespace TheaterUI
 {
 void Overlay::CameraHotkey(theater_hotkeys::Action action)
 {
+    if(action==theater_hotkeys::Action::PlayDollyPath){playDollyRequested_=true;return;}
     if(action==theater_hotkeys::Action::ToggleDollyControls){if(enableDollyVisibilityKey_){showDollyMarkers_=!showDollyMarkers_;gizmoDragging_=false;SaveSettings();}return;}
     ui_.activeTool=Tool::Camera;ui_.layout.panelOpen=true;
     if(action==theater_hotkeys::Action::CycleCamera){
@@ -320,9 +321,11 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     ImGuiIO& io = ImGui::GetIO();
     inputFocused_=f.focused;
     const auto selectionTrack=camera_runtime::view();
+    if(cameraHistoryGeneration_!=selectionTrack.history_generation){cameraHistoryGeneration_=selectionTrack.history_generation;gizmoDragging_=curveDragging_=curveBoxSelecting_=false;}
     std::erase_if(selectedDollyKeys_,[&](auto id){return !selectionTrack.track_current||std::none_of(selectionTrack.keys.begin(),selectionTrack.keys.end(),[&](const auto&key){return key.id==id;});});
     if(!selectedDollyKeys_.contains(selectedDollyKey_))selectedDollyKey_=selectedDollyKeys_.empty()?0:*selectedDollyKeys_.begin();
-    if(!inputFocused_){gizmoDragging_=false;curveDragging_=false;scrubbing_=false;draggingNavigator_=false;}
+    if(!inputFocused_){gizmoDragging_=false;curveDragging_=false;curveBoxSelecting_=false;scrubbing_=false;draggingNavigator_=false;camera_runtime::end_edit();}
+    if(playDollyRequested_){playDollyRequested_=false;if(f.focused)PlayDollyPath(f);}
     ui_.visibility = f.visibility;
     ui_.hiddenAt = f.hiddenAt;
 
@@ -360,6 +363,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         if (showTimeline_) DrawSequencer(f);
         DrawGameViewport(f);
         DrawDollyViewport(f);
+        DrawCameraModes(f);
         if(f.focused&&!io.WantTextInput&&bindingWaiting_<0&&!ImGui::IsAnyItemActive()&&ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteSelectedDollyKeys();
         DrawDialogs(f);
         UiSoundsAfterFrame();
@@ -371,6 +375,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     }
     else {gameViewInitialized_=false;DrawHiddenHint(f);PushFont(Font::Body);DrawDollyViewport(f);DrawCameraModes(f);ImGui::PopFont();}
     if(cameraSettingsDirty_&&!ImGui::IsMouseDown(ImGuiMouseButton_Left)&&f.now-cameraSettingsChangedAt_>.4){SaveSettings();cameraSettingsDirty_=false;}
+    if(!gizmoDragging_&&!curveDragging_)camera_runtime::end_edit();
     if (ui_.visibility != UiVisibility::HiddenClean) DrawRecordingPill(f);
     return ui_.rects;
 }
@@ -416,13 +421,15 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
 {
     if(ui_.visibility==UiVisibility::HiddenClean)return;
     const bool shown=ui_.visibility==UiVisibility::Shown;
-    const float s=shown?std::min(ui_.rects.uiScale,ImGui::GetContentRegionAvail().x/250.f):ui_.rects.uiScale;auto camera=camera_runtime::view(false);
-    if(!shown)ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x*.5f,Px(12,s)),ImGuiCond_Always,ImVec2(.5f,0));
+    const auto pictureMin=shown?ui_.rects.gameMin:ImVec2(0,0),pictureMax=shown?ui_.rects.gameMax:ImGui::GetIO().DisplaySize;
+    if(pictureMax.x<=pictureMin.x||pictureMax.y<=pictureMin.y)return;
+    const float s=std::min(ui_.rects.uiScale,(pictureMax.x-pictureMin.x)/280.f);auto camera=camera_runtime::view(false);
+    ImGui::SetNextWindowPos(ImVec2((pictureMin.x+pictureMax.x)*.5f,pictureMin.y+Px(8,s)),ImGuiCond_Always,ImVec2(.5f,0));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0,0),ImVec2(pictureMax.x-pictureMin.x,std::max(1.f,pictureMax.y-pictureMin.y-Px(8,s))));
     ImGuiWindowFlags flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoMove;
     if(!shown)flags|=ImGuiWindowFlags_NoInputs;
     ImGui::PushStyleColor(ImGuiCol_WindowBg,Color::OverlayBg.Alpha(235).Vec4());
-    bool visible=true;
-    if(shown){ImGui::BeginGroup();}else visible=ImGui::Begin("##camera-modes",nullptr,flags);
+    const bool visible=ImGui::Begin("##camera-modes",nullptr,flags);
     if(visible){
         const char*names[]={"Default","Free","Dolly"};
         for(int mode=0;mode<3;++mode){if(mode)ImGui::SameLine();ImGui::PushID(mode);
@@ -436,15 +443,15 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
                 draw->AddTriangle(ImVec2(x+Px(3,s),y),ImVec2(x+Px(11,s),y-Px(6,s)),ImVec2(x+Px(11,s),y+Px(6,s)),color,2);
                 if(mode==2){draw->AddLine(ImVec2(x-Px(12,s),y+Px(9,s)),ImVec2(x+Px(12,s),y+Px(9,s)),color);for(int j=-1;j<=1;++j)draw->AddCircleFilled(ImVec2(x+j*Px(10,s),y+Px(9,s)),Px(2,s),color);}}
             const auto label=ImGui::CalcTextSize(names[mode]);draw->AddText(ImVec2(x-label.x*.5f,start.y+h-label.y-Px(3,s)),Color::TextPrimary.U32(),names[mode]);
-            if(shown&&ImGui::IsItemHovered())ImGui::SetTooltip("%s camera. Cycle key: VK %u (Settings > Keybindings).",names[mode],theater_hotkeys::Key(theater_hotkeys::Action::CycleCamera));
+            if(shown&&ImGui::IsItemHovered())ImGui::SetTooltip("%s camera. %s",names[mode],mode==2?"Author keys: move and capture with K. Play path: follow recorded keys at ReplayTime.":mode==1?"Move independently from the player; mouse wheel adjusts FOV.":"Native player camera; Theater releases camera ownership.");
             ImGui::PopID();
         }
         const auto cycleKey=KeyName(theater_hotkeys::Action::CycleCamera);
-        ImGui::TextDisabled("%s: cycle | %s",cycleKey.c_str(),camera.mode==0?"Player camera":camera.enabled?"Active":"Not armed");
+        ImGui::TextDisabled("%s | %s",cycleKey.c_str(),camera.mode==0?"Player":camera.enabled?"Active":"Not armed");
         const auto visibilityKey=KeyName(theater_hotkeys::Action::ToggleDollyControls);
         ImGui::TextDisabled("Dolly controls: %s | %s",showDollyMarkers_?"visible":"hidden",enableDollyVisibilityKey_?(visibilityKey+": toggle").c_str():"shortcut disabled");
         if(camera.mode==2){
-            ImGui::TextDisabled("%s | %zu keys",camera.dolly_preview?"Path preview":"Authoring",camera.track_current?camera.key_count:0);
+            ImGui::TextDisabled("%s | %zu keys | %s: play path",camera.dolly_preview?"Preview":"Authoring",camera.track_current?camera.key_count:0,KeyName(theater_hotkeys::Action::PlayDollyPath).c_str());
             if(shown){
                 ImGui::BeginDisabled(!camera.track_current||camera.key_count<2);
                 if(ImGui::Button("Play path"))PlayDollyPath(f);
@@ -457,14 +464,14 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
             }
         }
     }
-    if(shown)ImGui::EndGroup();else ImGui::End();ImGui::PopStyleColor();
+    ImGui::End();ImGui::PopStyleColor();
 }
 
 void Overlay::DrawGameViewport(const OverlayFrame& f)
 {
     auto&io=ImGui::GetIO();if(!f.game_texture){gameViewInitialized_=false;return;}
     const float s=ui_.rects.uiScale,gap=Px(6,s),top=menuH_+gap;
-    const float minHeight=Px(240,s);
+    const float minHeight=Px(80,s);
     const float bottom=std::max(top+minHeight,sequencerTop_-gap);
     const float right=std::min(io.DisplaySize.x,sequencerRight_);
     ImVec2 pos(std::min(ui_.rects.areaMin.x,std::max(0.f,right-Px(240,s))),top),size(std::max(Px(240,s),right-pos.x),std::max(minHeight,bottom-top));
@@ -480,7 +487,6 @@ void Overlay::DrawGameViewport(const OverlayFrame& f)
     if(gameViewFit_)sz=ImVec2(right-p.x,bottom-p.y);
     sz.x=std::min(sz.x,right-p.x);
     sz.y=std::min(sz.y,bottom-p.y);ImGui::SetWindowPos(p);ImGui::SetWindowSize(sz);
-    DrawCameraModes(f);
     ImGui::TextDisabled("Gizmo: %s | Middle click in picture to switch",gizmoOperation_==0?"Move":"Rotate");
     ImGui::SameLine();if(ImGui::Checkbox("Fit sequencer",&gameViewFit_))SaveSettings();
     ImVec2 content=ImGui::GetCursorScreenPos(),end(p.x+sz.x-ImGui::GetStyle().WindowPadding.x,bottom);
@@ -549,12 +555,12 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
                 const double pixels=std::hypot(end->x-center->x,end->y-center->y);if(pixels<12)continue;
                 line(origin,add(origin,mul(direction,extent)),colors[axis],Px(3,s));draw->AddCircleFilled(ImVec2(float(end->x),float(end->y)),Px(5,s),colors[axis]);
                 if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(io.MousePos.x-center->x,io.MousePos.y-center->y)>Px(14,s)&&segment_distance(io.MousePos.x,io.MousePos.y,*center,*end)<Px(7,s)){
-                    gizmoDragging_=true;gizmoAxis_=axis;gizmoStart_=*selected;gizmoMouseStart_=io.MousePos;gizmoPixelsPerUnit_=pixels/extent;gizmoScreenAxis_={float((end->x-center->x)/pixels),float((end->y-center->y)/pixels)};}
+                    camera_runtime::begin_edit();gizmoDragging_=true;gizmoAxis_=axis;gizmoStart_=*selected;gizmoMouseStart_=io.MousePos;gizmoPixelsPerUnit_=pixels/extent;gizmoScreenAxis_={float((end->x-center->x)/pixels),float((end->y-center->y)/pixels)};}
             }else {
                 double hit=1e9;for(int j=0;j<64;++j){auto point=[&](int n){Vec v=origin;const double a=n*6.283185307179586/64;v[(axis+1)%3]+=extent*std::cos(a);v[(axis+2)%3]+=extent*std::sin(a);return v;};
                     auto a=projectPoint(point(j)),b=projectPoint(point(j+1));if(a&&b){draw->AddLine(ImVec2(float(a->x),float(a->y)),ImVec2(float(b->x),float(b->y)),colors[axis],Px(2,s));hit=std::min(hit,segment_distance(io.MousePos.x,io.MousePos.y,*a,*b));}}
                 if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&hit<Px(7,s))if(auto angle=plane_angle(camera.pose,mousePoint().x,mousePoint().y,display.x,display.y,origin,axis)){
-                    gizmoDragging_=true;gizmoAxis_=axis;gizmoStart_=*selected;gizmoCenter_={float(center->x),float(center->y)};gizmoAngle_=*angle;gizmoMouseStart_=io.MousePos;}
+                    camera_runtime::begin_edit();gizmoDragging_=true;gizmoAxis_=axis;gizmoStart_=*selected;gizmoCenter_={float(center->x),float(center->y)};gizmoAngle_=*angle;gizmoMouseStart_=io.MousePos;}
             }
         }
     }
@@ -1427,7 +1433,7 @@ void Overlay::DrawSequencer(const OverlayFrame& f)
         if(pos.y+size.y>ImGui::GetIO().DisplaySize.y)ImGui::SetWindowPos(ImVec2(pos.x,std::max(menuH_,ImGui::GetIO().DisplaySize.y-size.y)));
     }
     if(f.game_texture&&!ImGui::IsWindowDocked()){
-        const auto p=ImGui::GetWindowPos();const float minimum=menuH_+Px(250,s);
+        const auto p=ImGui::GetWindowPos();const float minimum=menuH_+Px(150,s);
         if(p.y<minimum)ImGui::SetWindowPos(ImVec2(p.x,minimum));
         if(ImGui::GetWindowPos().y+ImGui::GetWindowHeight()>ImGui::GetIO().DisplaySize.y)ImGui::SetWindowSize(ImVec2(ImGui::GetWindowWidth(),ImGui::GetIO().DisplaySize.y-ImGui::GetWindowPos().y));
     }
@@ -1443,6 +1449,7 @@ void Overlay::DrawSequencer(const OverlayFrame& f)
     ImGui::BeginDisabled(selectedDollyKeys_.empty());
     if(ImGui::Button("Remove selected camera keys [Del]"))DeleteSelectedDollyKeys();
     ImGui::EndDisabled();ImGui::SameLine();ImGui::TextDisabled("%zu selected | Ctrl: toggle | Shift: range",selectedDollyKeys_.size());
+    ImGui::SameLine();if(ImGui::SmallButton("Undo [Alt+Z]"))camera_runtime::undo();ImGui::SameLine();if(ImGui::SmallButton("Redo [Alt+Shift+Z]"))camera_runtime::redo();
     const float selectionBar=ImGui::GetCursorScreenPos().y-min.y;
     DrawToolbar(f, toolbar);
     const float space=std::max(0.f,max.y-min.y-toolbar-selectionBar),curveHeight=showDollyCurves_?std::min(std::max(0.f,space-Px(80,s)),space*curveFraction_):0.f;
@@ -1488,13 +1495,13 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     auto xAt=[&](std::uint64_t t){return lane+float((t/1e9-ui_.timeline.viewStart)*ui_.timeline.pixelsPerSecond);};
     auto value=[&](const cinematic::State& pose){return curveChannel_<3?pose.position[curveChannel_]:pose.fov_degrees;};
     auto&curveIo=ImGui::GetIO();
-    if(!curveDragging_&&ImGui::IsWindowHovered()&&curveIo.MousePos.x>=a.x&&curveIo.MousePos.x<=b.x&&curveIo.MousePos.y>=a.y&&curveIo.MousePos.y<=b.y&&curveIo.MouseWheel){
+    if(!curveDragging_&&!curveBoxSelecting_&&ImGui::IsWindowHovered()&&curveIo.MousePos.x>=a.x&&curveIo.MousePos.x<=b.x&&curveIo.MousePos.y>=a.y&&curveIo.MousePos.y<=b.y&&curveIo.MouseWheel){
         if(curveIo.KeyCtrl){const auto anchor=timeAt(curveIo.MousePos.x);ui_.timeline.pixelsPerSecond=std::clamp(ui_.timeline.pixelsPerSecond*std::pow(1.2,curveIo.MouseWheel),.1,2000.*s);ui_.timeline.viewStart=anchor-(curveIo.MousePos.x-lane)/ui_.timeline.pixelsPerSecond;}
         else if(curveIo.KeyShift)curvePan_+=curveIo.MouseWheel*(curveMax_-curveMin_)*.1;
         else curveZoom_=std::clamp(curveZoom_*std::pow(1.2,curveIo.MouseWheel),.01,1000.);
     }
     const double t0=timeAt(a.x),t1=timeAt(b.x);
-    if(!curveDragging_){
+    if(!curveDragging_&&!curveBoxSelecting_){
         double lo=1e300,hi=-1e300;
         for(int n=0;n<=192;++n)if(auto pose=cinematic::dolly_evaluate(curveTrack_,std::uint64_t((t0+(t1-t0)*n/192)*1e9),camera.dolly_smoothing_seconds)){lo=std::min(lo,value(*pose));hi=std::max(hi,value(*pose));}
         for(auto&key:camera.keys)if(xAt(key.time_ns)>=a.x&&xAt(key.time_ns)<=b.x){lo=std::min(lo,value(key.state));hi=std::max(hi,value(key.state));}
@@ -1508,9 +1515,23 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     ImVec2 last{};bool has=false;
     for(int n=0;n<=192;++n){auto t=std::uint64_t((t0+(t1-t0)*n/192)*1e9);if(auto pose=cinematic::dolly_evaluate(curveTrack_,t,camera.dolly_smoothing_seconds)){ImVec2 point(xAt(t),yAt(value(*pose)));if(has)draw->AddLine(last,point,Color::AccentBlue.U32(),Px(2,s));last=point;has=true;}}
     const float playhead=xAt(f.snapshot.time_ns);draw->AddLine(ImVec2(playhead,a.y),ImVec2(playhead,b.y),Color::AccentAmber.U32());
+    bool pointHit=false;
     for(auto&key:camera.keys){ImVec2 point(xAt(key.time_ns),yAt(value(key.state)));draw->AddCircleFilled(point,Px(5,s),(selectedDollyKeys_.contains(key.id)?Color::AccentAmber:Color::TextPrimary).U32());
-        if(!curveDragging_&&ImGui::IsItemHovered()&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(ImGui::GetIO().MousePos.x-point.x,ImGui::GetIO().MousePos.y-point.y)<Px(9,s)){
-            SelectDollyKey(key.id,io.KeyCtrl,io.KeyShift);curveStart_=key;curveDragging_=!io.KeyCtrl&&!io.KeyShift;gizmoDragging_=false;gizmoLastCommit_=f.now;}
+        if(!pointHit&&!curveDragging_&&!curveBoxSelecting_&&ImGui::IsItemHovered()&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(ImGui::GetIO().MousePos.x-point.x,ImGui::GetIO().MousePos.y-point.y)<Px(9,s)){
+            pointHit=true;SelectDollyKey(key.id,io.KeyCtrl,io.KeyShift);curveStart_=key;curveDragging_=!io.KeyCtrl&&!io.KeyShift;if(curveDragging_)camera_runtime::begin_edit();gizmoDragging_=false;gizmoLastCommit_=f.now;}
+    }
+    if(f.focused&&!pointHit&&!curveDragging_&&!curveBoxSelecting_&&ImGui::IsItemHovered()&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)){
+        curveBoxSelecting_=true;curveBoxStart_=io.MousePos;curveBoxBase_=(io.KeyCtrl||io.KeyShift)?selectedDollyKeys_:std::unordered_set<std::uint64_t>{};
+    }
+    if(curveBoxSelecting_){
+        ImVec2 mouse(std::clamp(io.MousePos.x,a.x,b.x),std::clamp(io.MousePos.y,a.y,b.y));
+        ImVec2 lo(std::min(curveBoxStart_.x,mouse.x),std::min(curveBoxStart_.y,mouse.y)),hi(std::max(curveBoxStart_.x,mouse.x),std::max(curveBoxStart_.y,mouse.y));
+        selectedDollyKeys_=curveBoxBase_;
+        for(const auto&key:camera.keys){auto x=xAt(key.time_ns),y=yAt(value(key.state));if(x>=lo.x&&x<=hi.x&&y>=lo.y&&y<=hi.y)selectedDollyKeys_.insert(key.id);}
+        selectedDollyKey_=selectedDollyKeys_.empty()?0:*selectedDollyKeys_.begin();
+        draw->AddRectFilled(lo,hi,Color::AccentBlue.Alpha(35).U32());draw->AddRect(lo,hi,Color::AccentBlue.U32());
+        if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){selectedDollyKeys_=curveBoxBase_;curveBoxSelecting_=false;}
+        if(!io.MouseDown[0]){curveBoxSelecting_=false;dollySelectionAnchor_=selectedDollyKey_;}
     }
     char bounds[80];snprintf(bounds,sizeof(bounds),"%.3f / %.3f",curveMin_,curveMax_);draw->AddText(ImVec2(a.x+Px(4,s),a.y),Color::TextMuted.U32(),bounds);
     draw->PopClipRect();

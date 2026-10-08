@@ -103,6 +103,10 @@ namespace TheaterUI
         bool clearDollyDialog_ = false;
         bool showDollyMarkers_=true,enableDollyVisibilityKey_=true,cameraMarkerClick_=false;
         bool showDollyCurves_=true,curveDragging_=false,cameraSettingsDirty_=false;
+        bool playDollyRequested_=false,curveBoxSelecting_=false;
+        ImVec2 curveBoxStart_{};
+        std::unordered_set<std::uint64_t> curveBoxBase_;
+        std::uint64_t cameraHistoryGeneration_=0;
         double cameraSettingsChangedAt_=0;
         int curveChannel_=0;
         cinematic::Track curveTrack_;

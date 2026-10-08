@@ -14,6 +14,7 @@ struct View {
  bool dolly_preview=false,track_current=false;
  int bone_index=-1;bool bone_available=false;cinematic::Vec bone_offset{0,0,-1};
  std::uint64_t project_generation=0;
+ std::uint64_t history_generation=0;
  double dolly_smoothing_seconds=0;
  double shake_position=0,shake_rotation=0,shake_frequency=1,shake_speed=1,shake_smoothing_seconds=0;
  bool shake_dolly=true;
@@ -29,6 +30,10 @@ void clear_keys();
 void edit_key(cinematic::Key key);
 void delete_key(std::uint64_t id);
 void delete_keys(const std::vector<std::uint64_t>& ids);
+void begin_edit();
+void end_edit();
+void undo();
+void redo();
 void save_path();
 void load_path();
 void movement(double speed,double sensitivity,double smoothing_seconds,double rotation_smoothing_seconds=0);

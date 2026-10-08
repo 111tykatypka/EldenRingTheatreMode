@@ -257,8 +257,11 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==theater_hotkeys::Key(theater_hotkeys::Action::ToggleAllHud)&&!b.text_input&&!theater_hotkeys::rebinding){b.clean_view();return 0;}
  // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
  using theater_hotkeys::Action;using theater_hotkeys::Key;
+ if((m==WM_SYSKEYDOWN||m==WM_SYSKEYUP)&&w=='Z'&&!b.text_input.load()&&!theater_hotkeys::rebinding&&(GetKeyState(VK_MENU)&0x8000)){
+  if(m==WM_SYSKEYDOWN&&!(l&(1LL<<30))){if(GetKeyState(VK_SHIFT)&0x8000)camera_runtime::redo();else camera_runtime::undo();}return 0;
+ }
  if((m==WM_KEYDOWN||m==WM_KEYUP)&&!b.text_input.load()&&!theater_hotkeys::rebinding){
-  for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys,Action::ToggleDollyControls})if(w==Key(action)){
+  for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys,Action::ToggleDollyControls,Action::PlayDollyPath})if(w==Key(action)){
    if(m==WM_KEYDOWN&&!(l&(1LL<<30))){
     {std::lock_guard lock(camera_mutex);if(camera_actions.size()<32)camera_actions.push_back(action);}
     if(action==Action::ClearDollyKeys)b.set_visibility(TheaterUI::UiVisibility::Shown);
