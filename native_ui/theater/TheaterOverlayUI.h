@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_set>
 #include "imgui.h"
 #include "TheaterUiProtocol.h"
 #include "TheaterLayout.h"
@@ -67,6 +68,9 @@ namespace TheaterUI
         void DrawRail(const OverlayFrame& f);
         void DrawPanel(const OverlayFrame& f);
         void DrawCameraModes(const OverlayFrame& f);
+        void SelectDollyKey(std::uint64_t id, bool toggle=false, bool range=false);
+        void DeleteSelectedDollyKeys();
+        void PlayDollyPath(const OverlayFrame& f);
         void DrawDollyViewport(const OverlayFrame& f);
         void DrawGameViewport(const OverlayFrame& f);
         void DrawSequencer(const OverlayFrame& f);
@@ -92,7 +96,7 @@ namespace TheaterUI
         bool compactTracks_=true,expandActorTracks_=false,gameViewInitialized_=false;
         ImVec2 gameViewMin_{},gameViewMax_{};
         bool gameViewFit_=true;
-        float cameraBarBottom_=0,curveFraction_=.5f;double curveZoom_=1,curvePan_=0;
+        float curveFraction_=.5f;double curveZoom_=1,curvePan_=0;
         bool inputFocused_=true;
         float sequencerTop_=0,sequencerRight_=0;
         unsigned cameraSelection_ = 0; // selection, not native ownership
@@ -106,6 +110,8 @@ namespace TheaterUI
         cinematic::Key curveStart_;
         float curveMin_=0,curveMax_=1;
         std::uint64_t selectedDollyKey_=0;
+        std::unordered_set<std::uint64_t> selectedDollyKeys_;
+        std::uint64_t dollySelectionAnchor_=0;
         int gizmoOperation_=0,gizmoAxis_=-1;
         bool gizmoDragging_=false;
         cinematic::Key gizmoStart_;

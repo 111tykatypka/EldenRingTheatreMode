@@ -139,7 +139,10 @@ bool update(void* output,void* source){
   }
   else if(!track.keys().empty()&&keys_replay_path!=replay_path){release("Dolly keys belong to another replay; clear them before creating a new path");return false;}
   else if(auto value=cinematic::dolly_evaluate(track,time_at(now),state.dolly_smoothing_seconds)){
-   if(!state.writing&&cinematic::length(cinematic::sub(value->position,state.pose.position))>20){release("Dolly start exceeds 20 units; move camera near the path first");return false;}state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;
+   // An explicitly selected path preview may jump the camera to its authored
+   // pose. It never moves the player. Keep the displacement guard for automatic
+   // camera-cut ownership changes, plus all native/finite/context guards.
+   if(!state.writing&&state.cuts_enabled&&cinematic::length(cinematic::sub(value->position,state.pose.position))>20){release("Dolly cut start exceeds 20 units; move camera near the path first");return false;}state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;
   } else {release("Dolly cut has no path; native camera restored");return false;}
  }
  auto rendered=state.pose;
@@ -187,10 +190,16 @@ void edit_key(cinematic::Key key){
  if(ok){*at=key;ok=next.replace(std::move(keys));}
  std::lock_guard lock(mutex);if(ok&&identity==keys_replay_path&&identity==replay_path){track=std::move(next);++state.project_generation;state.status="Dolly key updated";}else state.status="Invalid key, duplicate timestamp, or replay changed; edit rejected";
 }
-void delete_key(std::uint64_t id){std::vector<cinematic::Key> keys;std::string identity;
- {std::lock_guard lock(mutex);keys=track.keys();identity=keys_replay_path;}
- keys.erase(std::remove_if(keys.begin(),keys.end(),[&](const auto&k){return k.id==id;}),keys.end());cinematic::Track next;if(!next.replace(std::move(keys)))return;
- std::lock_guard lock(mutex);if(identity!=keys_replay_path)return;track=std::move(next);++state.project_generation;if(track.keys().empty()&&state.mode==2)release("Last Dolly key deleted; native camera restored");state.status="Dolly key deleted";
+void delete_key(std::uint64_t id){delete_keys({id});}
+void delete_keys(const std::vector<std::uint64_t>& ids){
+ std::lock_guard lock(mutex);if(ids.empty()||keys_replay_path!=replay_path)return;
+ auto keys=track.keys();const auto before=keys.size();
+ std::erase_if(keys,[&](const auto&k){return std::find(ids.begin(),ids.end(),k.id)!=ids.end();});
+ if(keys.size()==before)return;
+ cinematic::Track next;if(!next.replace(std::move(keys)))return;
+ track=std::move(next);++state.project_generation;
+ if(track.keys().empty()&&state.mode==2){state.dolly_preview=false;state.cuts_enabled=false;release("Last Dolly key deleted; native camera restored");}
+ state.status="Selected Dolly keys deleted";
 }
 void save_path(){std::string identity,text;{std::lock_guard lock(mutex);identity=keys_replay_path;if(identity.empty()||identity!=replay_path){state.status="No camera track for the loaded replay";return;}text=cinematic::save_project(identity,track.keys());}
  bool ok=false;try{auto path=std::filesystem::u8path(identity+".ercam");auto temp=path;temp+=L".tmp";
@@ -207,7 +216,11 @@ void load_path(){std::string identity;std::uint64_t duration;{std::lock_guard lo
  std::lock_guard lock(mutex);if(ok&&identity==replay_path){release("Camera track loaded; writes OFF");track=std::move(next);keys_replay_path=identity;++state.project_generation;next_id=1;for(auto&k:track.keys())next_id=std::max(next_id,k.id+1);}else state.status="Camera load failed: missing, invalid, oversized or incompatible .ercam";
 }
 void movement(double value,double sensitivity,double smoothing,double rotation_smoothing){std::lock_guard lock(mutex);if(std::isfinite(value)&&value>0&&std::isfinite(sensitivity)&&sensitivity>0&&std::isfinite(smoothing)&&smoothing>=0&&std::isfinite(rotation_smoothing)&&rotation_smoothing>=0){state.rotation_smoothing_seconds=rotation_smoothing;state.movement_speed=value;state.mouse_sensitivity=sensitivity;state.smoothing_seconds=smoothing;}}
-void preview(bool enabled){std::lock_guard lock(mutex);state.dolly_preview=enabled;rotation_pending={};velocity={};}
+void preview(bool enabled){std::lock_guard lock(mutex);
+ if(enabled&&(state.mode!=2||track.keys().size()<2||keys_replay_path!=replay_path)){state.status="Path preview requires Dolly mode and at least two keys for this replay";return;}
+ state.dolly_preview=enabled;rotation_pending={};velocity={};mouse_x=0;mouse_y=0;
+ state.status=enabled?"Dolly path preview at ReplayTime":"Dolly authoring: move camera and capture keys";
+}
 void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
 void dolly_smoothing(double seconds){std::lock_guard lock(mutex);if(std::isfinite(seconds)&&seconds>=0&&seconds<=2)state.dolly_smoothing_seconds=seconds;}
 void shake(double position,double rotation,double frequency,double speed,double smoothing,bool dolly){std::lock_guard lock(mutex);if(std::isfinite(position)&&position>=0&&position<=5&&std::isfinite(rotation)&&rotation>=0&&rotation<=30&&std::isfinite(frequency)&&frequency>=0&&frequency<=30&&std::isfinite(speed)&&speed>=0&&speed<=10&&std::isfinite(smoothing)&&smoothing>=0&&smoothing<=2){state.shake_position=position;state.shake_rotation=rotation;state.shake_frequency=frequency;state.shake_speed=speed;state.shake_smoothing_seconds=smoothing;state.shake_dolly=dolly;}}

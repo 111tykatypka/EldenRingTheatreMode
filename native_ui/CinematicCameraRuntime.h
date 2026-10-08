@@ -28,6 +28,7 @@ void add_key();
 void clear_keys();
 void edit_key(cinematic::Key key);
 void delete_key(std::uint64_t id);
+void delete_keys(const std::vector<std::uint64_t>& ids);
 void save_path();
 void load_path();
 void movement(double speed,double sensitivity,double smoothing_seconds,double rotation_smoothing_seconds=0);
