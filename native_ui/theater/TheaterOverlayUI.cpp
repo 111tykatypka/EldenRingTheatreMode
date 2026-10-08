@@ -4,6 +4,7 @@
 #include "../CinematicCameraRuntime.h"
 #include "../EldenRingTimingAdapter.h"
 #include "../EldenRingWeatherAdapter.h"
+#include "../EldenRingLightAdapter.h"
 #include "../EldenRingHudAdapter.h"
 #include "CameraViewport.h"
 
@@ -172,7 +173,7 @@ void Overlay::LoadSettings()
         else if (key == "language") language = value >= 1 ? Lang::Russian : Lang::English;
         else if (key == "ui_scale") ui_.layout.uiScaleUser = std::clamp(value, 0.75f, 1.5f);
         else if (key == "panel_open") ui_.layout.panelOpen = value != 0;
-        else if (key == "tool" && value >= 0 && value <= (float)Tool::Weather) ui_.activeTool = (Tool)(int)value;
+        else if (key == "tool" && value >= 0 && value <= (float)Tool::Lights) ui_.activeTool = (Tool)(int)value;
         else if (key == "show_tools") showTools_ = value != 0;
         else if (key == "show_timeline") showTimeline_ = value != 0;
         else if (key == "show_event_log") showEventLog_ = value != 0;
@@ -636,11 +637,11 @@ void Overlay::DrawMenuBar()
 void Overlay::DrawRail(const OverlayFrame& f)
 {
     const float s = ui_.rects.uiScale;
-    const float btn = Px(Metric::RailButton, s);
+    const float btn = std::min(Px(Metric::RailButton, s), std::max(Px(32,s),(ImGui::GetIO().DisplaySize.y-Px(110,s))/11.f-Px(4,s)));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, Color::PanelBgSolid.Vec4());
     const bool visible = BeginPanel("###tools", T(Str::PanelTools), ui_.rects.railMin, ui_.rects.railMax,
-        ImVec2(btn + Px(8, s), (btn + Px(4, s)) * 10 + Px(60, s)), &showTools_);
+        ImVec2(btn + Px(8, s), (btn + Px(4, s)) * 11 + Px(60, s)), &showTools_);
     if (!visible) { ImGui::End(); ImGui::PopStyleColor(); ImGui::PopStyleVar(); return; }
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 o(ImGui::GetWindowPos().x, ImGui::GetCursorScreenPos().y);
@@ -654,7 +655,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     struct Item { Tool tool; std::uint16_t glyph; Str label; bool available; };
     const Item top[] = {
         { Tool::Scene, Glyph::Scene, Str::Scene, true }, { Tool::Camera, Glyph::Camera, Str::Camera, true },
-        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
+        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Lights, Glyph::Look, Str::Lights, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
         { Tool::Export, Glyph::Export, Str::Export, true } };
     const Item bottom[] = { { Tool::Debug, Glyph::Debug, Str::Debug, true }, { Tool::Settings, Glyph::Settings, Str::Settings, true } };
 
@@ -730,8 +731,8 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     const auto& snap = f.snapshot;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(Space::LG, s), Px(Space::MD, s)));
     // The title bar shows the tool name and is the grab area; the window id stays the same per tool.
-    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather };
-    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 7)]), ui_.rects.panelMin, ui_.rects.panelMax,
+    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather, Str::Lights };
+    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 8)]), ui_.rects.panelMin, ui_.rects.panelMax,
         ImVec2(Px(260, s), Px(320, s)), &ui_.layout.panelOpen);
     if (!visible) { ImGui::End(); ImGui::PopStyleVar(); return; }
     // Hiding the log returns its space to the independently scrolling tool.
@@ -1002,6 +1003,31 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         } // SDK probe
         } // Diagnostics
         ImGui::PopStyleVar();
+        break;
+    }
+    case Tool::Lights:
+    {
+        section(T(Str::LightsEditor));
+        auto lights=game_lights::view();bool monitoring=lights.monitoring;
+        if(checkbox("Monitor native lights (1 Hz)",&monitoring))game_lights::monitor(monitoring);
+        if(ImGui::Button("Refresh",ImVec2(-FLT_MIN,0)))game_lights::request_scan();
+        ImGui::TextWrapped("%s",lights.diagnostic.c_str());
+        ImGui::Text("Collections A / B: %llu / %llu",(unsigned long long)lights.count[0],(unsigned long long)lights.count[1]);
+        ImGui::Text("Observed generation: %llu | scans: %llu",(unsigned long long)lights.generation,(unsigned long long)lights.scans);
+        if(lights.sampled_ms)ImGui::TextDisabled("Sample age: %.1f s",double(GetTickCount64()-lights.sampled_ms)/1000.);
+        int collection=lights.collection;
+        if(ImGui::Combo("Collection",&collection,"A\0B\0"))game_lights::page(collection,0);
+        if(ImGui::Button("Previous page")&&lights.page)game_lights::page(lights.collection,lights.page-1);
+        ImGui::SameLine();
+        if(ImGui::Button("Next page")&&(std::uint64_t(lights.page)+1)*game_lights::page_size<lights.count[lights.collection])game_lights::page(lights.collection,lights.page+1);
+        ImGui::TextDisabled("Page %u | up to %u rows",lights.page+1,game_lights::page_size);
+        for(unsigned i=0;i<lights.rows;++i){const auto& light=lights.lights[i];ImGui::PushID(i);
+            ImGui::Text("%s | ID %u",!light.readable?"Unreadable":light.type==1?"Point":light.type==2?"Spot":"Other",light.id);
+            if(light.spatial_valid)ImGui::TextDisabled("Raw: %.2f %.2f %.2f %.2f",light.spatial[0],light.spatial[1],light.spatial[2],light.spatial[3]);
+            ImGui::PopID();}
+        ImGui::Separator();
+        ImGui::BeginDisabled();ImGui::Button("Add point light");ImGui::SameLine();ImGui::Button("Add spot light");ImGui::EndDisabled();
+        ImGui::TextWrapped("Creation pending renderer cleanup and task ownership proof. Raw spatial units are unverified. No lighting is changed.");
         break;
     }
     case Tool::Weather:

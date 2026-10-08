@@ -100,3 +100,16 @@ extern "C" __declspec(dllexport) int __cdecl tm_anti_cheat_state();
 #define TM_VAL_ACTOR_NEAR 30
 // Corruption guard for the SDK's companion ChrSet capacity, not a recording actor limit.
 #define TM_VAL_COMPANION_SCAN_GUARD 4096
+
+// C20 read-only native light discovery, exact-target disassembly guards.
+#define TM_VAL_LIGHT_ROOT_RVA 0x47F37A8
+#define TM_VAL_LIGHT_ROOT_SITE 0x1CCB9AD
+#define TM_VAL_LIGHT_MANAGER_SITE 0x1CCB9B9
+#define TM_OFF_GRAPHICS_LIGHT_MANAGER 0xC518
+#define TM_VAL_LIGHT_MANAGER_VTABLE 0x2F116C8
+#define TM_VAL_POINT_LIGHT_VTABLE 0x2F15630
+#define TM_VAL_SPOT_LIGHT_VTABLE 0x2F15790
+#define TM_OFF_LIGHT_COLLECTION_A 0x20
+#define TM_OFF_LIGHT_COLLECTION_B 0x40
+#define TM_OFF_LIGHT_ID 0xD0
+#define TM_OFF_POINT_LIGHT_SPATIAL 0x190

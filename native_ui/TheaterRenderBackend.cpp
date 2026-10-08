@@ -3,6 +3,7 @@
 #include <windows.h>
 #include "EldenRingTimingAdapter.h"
 #include "EldenRingWeatherAdapter.h"
+#include "EldenRingLightAdapter.h"
 #include "EldenRingHudAdapter.h"
 #include <realtimeapiset.h>
 #pragma comment(lib,"mincore.lib")
@@ -121,11 +122,11 @@ public:
   theater_ui::Request r;{std::lock_guard lock(ipc);if(!commands.empty()){r=commands.front();commands.pop_front();}}if(r.command==theater_ui::poll)if(auto query=camera_runtime::player_target_query()){r.command=theater_ui::camera_target_window;r.value=*query;}
   r.sequence=++sequence;theater_ui::Snapshot s;
   if(!transfer(h,&r,sizeof(r),true)||!transfer(h,&s,sizeof(s),false)||s.magic_value!=theater_ui::magic||s.version!=theater_ui::version||s.sequence!=r.sequence||s.count>16||s.target_count>64||!theater_timescale::valid(s.timescale)){
-   CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;game_weather::host_connected(false);replay_loaded=false;replay_playing=false;camera_runtime::timeline(0,0,0,false,1,false);{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
-  {std::lock_guard lock(ipc);snapshot=s;}{ULONGLONG t=0;QueryInterruptTimePrecise(&t);snapshot_ns=std::uint64_t(t)*100;}host_linked=true;game_weather::host_connected(s.connected&&s.player_found);replay_loaded=s.loaded!=0;replay_playing=s.host_playing!=0;
+   CloseHandle(h);h=INVALID_HANDLE_VALUE;host_linked=false;game_weather::host_connected(false);game_lights::host_connected(false);replay_loaded=false;replay_playing=false;camera_runtime::timeline(0,0,0,false,1,false);{std::lock_guard lock(ipc);snapshot={};commands.clear();}Sleep(100);continue;}
+  {std::lock_guard lock(ipc);snapshot=s;}{ULONGLONG t=0;QueryInterruptTimePrecise(&t);snapshot_ns=std::uint64_t(t)*100;}host_linked=true;game_weather::host_connected(s.connected&&s.player_found);game_lights::host_connected(s.connected&&s.player_found);replay_loaded=s.loaded!=0;replay_playing=s.host_playing!=0;
   camera_runtime::timeline(s.time_ns,s.duration_ns,s.master_clock_ns,s.host_playing!=0,s.timescale,true,s.loaded_path);
   std::vector<camera_runtime::TargetSample> targets;for(unsigned i=0;i<s.target_count;++i){const auto&p=s.target_points[i];targets.push_back({p.time_ns,{p.position[0],p.position[1],p.position[2]}});}camera_runtime::player_targets(targets);Sleep(50);
- }game_weather::host_connected(false);if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
+ }game_weather::host_connected(false);game_lights::host_connected(false);if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
  void adopt(IDXGISwapChain*sc,IUnknown*unknown){ComPtr<ID3D12CommandQueue> q;ComPtr<IDXGISwapChain3> c;
   if(FAILED(unknown->QueryInterface(IID_PPV_ARGS(&q)))||q->GetDesc().Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||FAILED(sc->QueryInterface(IID_PPV_ARGS(&c))))return;
   std::lock_guard lock(graphics);if(chain)return;chain=c;queue=q;

@@ -43,3 +43,39 @@ Evidence: `light_registration_c19.json`, `spot_light_constructor_c19.json`, exac
 Next concrete milestone: read-only manager and existing-light enumeration on the proven renderer task, logging type, stable ID, generation and lifecycle through load/unload. Then establish a paired public factory/removal path. Only after that, expose a Lights tab with Add Point/Add Spot, transform, color/intensity/range and capability-gated cone/shadow controls. Never call a deleting destructor while an object is still registered. An editor track stores IDs/properties separately from native handles and reconciles on seek; no per-frame respawning.
 
 No Lights tab with fake controls or unvalidated allocations was added in C19. Runtime/visual evidence for custom light creation: **UNKNOWN**.
+
+## C20 native inspector — 2026-10-08
+
+This section supersedes C19's unknown manager lookup. It does **not** supersede the unresolved allocation/lifetime requirements.
+
+### STATIC_VERIFIED observations
+
+- `141CCB9AD`: RIP-relative load resolves to graphics-root slot `1447F37A8`; `141CCB9B9` reads its `+C518` light manager. Multiple factory and removal callers corroborate this path.
+- Constructor `141A27880` installs manager vtable `142F116C8`. Point/spot constructors install `142F15630` / `142F15790`. RVAs and structural offsets are centralized in `shared/GameProfile.h`; runtime checks both discovery instructions and manager vtable.
+- Two pointer collections have begin/end/capacity at `+20/+28/+30` and `+40/+48/+50`. Both may contain mixed light types. The selection flag is `light+E0`, not point versus spot. IDs at `+D0` are assigned by registration.
+- Removal `141A2AD40` searches collections under manager `+58` lock, notifies listeners for the first collection and invokes `141AEDEB0`. It does **not** immediately erase the entry.
+- `141AEDEB0` writes `+F0=0`, `+EC=-abs(fade)`, and `+F4=1` for nonzero fade. Interpretation: deferred fade-out request. Hidden floating-point argument ABI must be established before a call.
+- `141A277A0` releases pointer ranges through intrusive reference counts. `141A2B2D0` reallocates vector capacity; it is not a removal drain. `141A2AFF0` shifts spatial origin; it is not a fade update.
+- Point `+190` contains four spatial floats. Culling consumes XYZ and twice W. Position/radius is HIGH CONFIDENCE; coordinate convention/units remain UNKNOWN. Spot `+190` is matrix-like and its cone/range setter semantics remain UNKNOWN.
+
+Evidence captured in `light_manager_access_c20.json`, `light_manager_constructor_c20.json`, `light_remove_c20.json`, `light_fadeout_c20.json`, and exact-target SQLite callers/vtable references. Disassembly buffers can extend past a function; do not infer extra instructions belong to the initial function. Research addresses are preferred VAs with base `140000000`.
+
+### Implemented runtime inspection
+
+`native_ui/EldenRingLightAdapter.{h,cpp}` copies a page of existing-light diagnostics using checked `ReadProcessMemory`. No factory, native lock, destructor, hook, or game-memory write is used. The existing Rust `Draw_Pre` callback invokes the inspector only after user opt-in, with loaded-world/offline gating. Host connection heartbeat also gates scans. UI/IPC threads only set requests or read copied snapshots; editor protocol remains v12.
+
+Manual Refresh or opt-in 1 Hz monitoring. Maximum 32 displayed rows per page is a work/UI budget, not a limit on native collection size. Both full collection counts are reported. Root, manager/vtable and collection headers are reread after copying; inconsistent snapshots are discarded. This is **best-effort observation**, not a transaction: elements can change in place and address reuse/ABA is not detectable. Observed generation is an editor observation counter, not a native generation token. No borrowed native pointer is retained for later dereferencing.
+
+On context loss counts/rows clear; monitor waits for return. Monitoring defaults off and is not persisted. New Lights toolbar/tab includes Refresh, monitor, A/B selection and paging. Disabled creation buttons explicitly state why allocation is not enabled. Raw spatial values are labeled unverified.
+
+### Remaining blockers before creation
+
+1. Identify the renderer update that consumes fade-out and erases/releases the registered reference; prove map unload and outstanding render-task references.
+2. Verify factory/removal x64 ABI including XMM argument registers and descriptor layout.
+3. Establish creation/removal task affinity and locking contract; Draw_Pre inspection is **not** proof that allocation is legal there.
+4. Validate manager lookup/enumeration in the user's exact runtime and observe replacement across loading.
+5. Establish color/intensity/range/cone units, shader participation and resource/shadow limits.
+
+Then implement one explicitly activated point light with owned handle and idempotent deferred removal, followed by spot lights and master-ReplayTime light tracks. Never directly call deleting destructors or continuously allocate per frame.
+
+Build: COMPILE_VERIFIED Release AMD64. Automated tests: NOT_RUN (not requested). Runtime/visual creation and inspector behavior: UNKNOWN, user testing required.
