@@ -108,9 +108,10 @@ struct State{
  // Reserved root-rebase value; remains zero until cross-origin conversion is verified.
  now_offset:[f32;3],
  replay_blocked:bool,
+ mount_note:u8,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -209,7 +210,7 @@ fn follow_loaded(s:&mut State,l:&Link){
    if let Some(a)=&actors{crate::log_game(&format!("BONE_REPLAY: {} recorded characters (enemies, NPCs, bosses)",a.len()));}
    // The player's anchor over the recording, for rebasing positions into the live physics frame.
    let mut anchors=crate::replay_interpolation::AnchorTrack::default();
-   for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.origin,f.place.global);}}}
+   for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.frame(),f.place.global);}}}
    crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
    Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors,anchors:Arc::new(anchors)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
@@ -237,11 +238,11 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
  let (a,b)=&*s.cur.insert((a,b));
  // The physics origin moves when the game re-bases the world; each recorded position is carried into the
  // live frame by the change of the anchor (see replay_interpolation::rebase, measured on real recordings).
- let translate=|p:&Place|->Option<[f32;3]>{if p.block==-1{Some([0.0;3])}else{crate::replay_interpolation::rebase(p.origin,p.global,live_place.origin,live_place.global)}};
+ let translate=|p:&Place|->Option<[f32;3]>{if p.block==-1{Some([0.0;3])}else{crate::replay_interpolation::rebase(p.frame(),p.global,live_place.frame(),live_place.global)}};
  let (Some(ta),Some(tb))=(translate(&a.place),translate(&b.place)) else {
   s.evaluated_root=None;
-  crate::log_game(&format!("ROOT_SPACE_UNAVAILABLE: replay origin id {} vs live origin id {} differ (anchors {:?} / {:?}); no conversion is known for different origin ids",a.place.origin,live_place.origin,a.place.global,live_place.global));
-  status("REPLAY BLOCKED: the world origin id differs from the recording (see log). No transform written.");return false;};
+  crate::log_game(&format!("ROOT_SPACE_UNAVAILABLE: replay frame {} (origin {}, block {}) vs live frame {} (origin {}, block {}) differ; anchors {:?} / {:?}; no conversion is known between different frames",a.place.frame(),a.place.origin,a.place.block,live_place.frame(),live_place.origin,live_place.block,a.place.global,live_place.global));
+  status("REPLAY BLOCKED: you are too far from where this was recorded (different world frame). Walk back near the recording start and play again.");return false;};
  s.shift=ta;s.now_offset=ta;
  // Interpolate in the live frame, so an origin re-base between two samples is not a 32 m jump.
  let (mut ra,mut rb)=(a.transform,b.transform);for k in 0..3{ra[2][k]+=ta[k];rb[2][k]+=tb[k];}
@@ -293,9 +294,9 @@ fn begin_arrival(s:&mut State,chr:usize){
  let here=arrival::place(chr);
  // Positions are rebased by the anchor change (measured), so a different tile anchor is fine; only a
  // different origin id has no known conversion.
- if target.block!=-1&&crate::replay_interpolation::rebase(target.origin,target.global,here.origin,here.global).is_none(){
-  crate::log_game(&format!("ARRIVAL_ERROR: origin id differs (replay {} vs live {}), anchors {:?} / {:?}; no known conversion",target.origin,here.origin,target.global,here.global));
-  status("REPLAY BLOCKED: the world origin id differs from the recording (see log).");
+ if target.block!=-1&&crate::replay_interpolation::rebase(target.frame(),target.global,here.frame(),here.global).is_none(){
+  crate::log_game(&format!("ARRIVAL_ERROR: world frame differs (replay frame {} origin {} block {} vs live frame {} origin {} block {}), anchors {:?} / {:?}; no known conversion",target.frame(),target.origin,target.block,here.frame(),here.origin,here.block,target.global,here.global));
+  status("REPLAY BLOCKED: you are too far from where this was recorded (different world frame). Walk back near the recording start and play again.");
   if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}return;
  }
  if target.block==-1{s.arrival=Arrival::Ready;crate::log_game("ARRIVAL: recording has no map data (older file); positions used as recorded");return;}
@@ -379,17 +380,20 @@ pub fn tick(group:usize,now:u64){
   let fresh=l.linked!=0&&l.received_ns!=0&&now.saturating_sub(l.received_ns)<500_000_000;
   if !fresh&&s.owning{s.replay_blocked=true;}
   if fresh&&l.apply_requested!=0&&l.playing!=0&&!s.host.0{s.replay_blocked=false;}
-  let mut want=fresh&&s.loaded.is_some()&&s.recording.is_none()&&l.apply_requested!=0&&!s.replay_blocked;
+  let want=fresh&&s.loaded.is_some()&&s.recording.is_none()&&l.apply_requested!=0&&!s.replay_blocked;
   // No guessed mounting API: reject a mounted/unmounted mismatch before body ownership/writes.
+  // Mounted/on-foot differences no longer block playback (owner request): the rider's recorded pose and root are
+  // simply replayed, and Torrent is driven as a recorded character when he is in the world. The game's mounted
+  // state itself is never changed (no guessed mount API). A short note says what to expect.
   if want{if let Some(chr)=chr{
    let required=s.loaded.as_ref().and_then(|x|world_file::context_at(&x.world.context,0,l.play_source_ns));
    let live_ride=crate::companions::ride(chr);
    if let Some(required)=required.filter(|c|!crate::companions::mount_compatible(c.ride_flags,live_ride)){
-    want=false;s.replay_blocked=true;if s.owning{release(s,chr,"mount state mismatch");}
-    let recorded=if required.ride_flags&crate::companions::MOUNTED!=0{"mounted"}else{"on foot"};
-    let live=match live_ride{Some(r) if r.flags&crate::companions::MOUNTED!=0=>"mounted",Some(_)=>"on foot",None=>"unavailable"};
-    crate::log_game(&format!("COMPANION_REPLAY_BLOCKED: source_ns={} recorded={recorded} flags=0x{:X} state={} param={} mount_id={} live={live} live_ride={live_ride:?}; mount/dismount reconstruction unavailable",l.play_source_ns,required.ride_flags,required.ride_state,required.ride_param,required.mount_id));
-    status(&format!("REPLAY BLOCKED: recording is {recorded}, live player is {live}. Mount/dismount transitions are not supported. Test a recording made entirely on foot or entirely mounted."));}}}
+    let recorded_mounted=required.ride_flags&crate::companions::MOUNTED!=0;
+    let key=(recorded_mounted as u8)+1;
+    if s.mount_note!=key{s.mount_note=key;
+     let msg=if recorded_mounted{"MOUNT: this was recorded mounted and you are on foot. Replaying the rider pose; Torrent is shown only if he is in the world (whistle for him first)."}else{"MOUNT: this was recorded on foot and you are mounted. Replaying the on-foot pose; dismounting first gives the cleanest result."};
+     crate::log_game(&format!("MOUNT_STATE_MISMATCH: recorded_mounted={recorded_mounted} live_ride={live_ride:?} mount_id={}; replay continues (not blocked)",required.mount_id));status(msg);}}}}
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){
@@ -462,7 +466,7 @@ pub fn tick(group:usize,now:u64){
    unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,s.local_out.len());std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,s.model_out.len());}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);
    // Recorded enemies/NPCs/bosses at the same replay time (Phase 2.2).
-   let (t,live)=(s.last_t,(here.origin,here.global));
+   let (t,live)=(s.last_t,(here.frame(),here.global));
    let anchors=s.loaded.as_ref().map(|l|l.anchors.clone());
    if let (Some(anchors),Some(a))=(anchors,s.loaded.as_mut().and_then(|l|l.actors.as_mut())){a.set_options(s.options);a.write(t,now,live,&anchors,interpolated_pose_enabled());}}
   DRAW_GROUP=>{

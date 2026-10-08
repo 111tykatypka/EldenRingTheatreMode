@@ -89,6 +89,12 @@ pub fn evaluate(a:&Transform,b:&Transform,t:f64)->Option<Transform> {
         let t=rebase(-1,before_anchor,-1,after_anchor).unwrap();
         assert!((before[0]+t[0]-0.09).abs()<0.01,"rebased x {}",before[0]+t[0]); // next real frame was 0.15: one frame of motion
         assert_eq!(t,[-32.0,0.0,0.0]);assert!(rebase(-1,before_anchor,7,after_anchor).is_none());assert!(rebase(-1,[f32::NAN;4],-1,after_anchor).is_none());}
+    #[test]fn effective_frame_is_origin_or_block(){
+        use crate::arrival::Place;
+        // Recording 06-41: origin -1 in block 1009460480 vs live origin 1009460480 -> the same physics frame.
+        let rec=Place{block:1009460480,origin:-1,global:[80.,-88.,-48.,1.]};let live=Place{block:1009460480,origin:1009460480,global:[240.,-104.,-96.,1.]};
+        assert_eq!(rec.frame(),live.frame());
+        assert_eq!(rebase(rec.frame(),rec.global,live.frame(),live.global),Some([160.,-16.,-48.]));}
     #[test]fn anchor_track_applies_the_anchor_in_force(){
         let mut tr=AnchorTrack::default();tr.push(0,-1,[-48.,-104.,-96.,1.]);tr.push(10,-1,[-48.,-104.,-96.,1.]);tr.push(20,-1,[-80.,-104.,-96.,1.]);
         assert_eq!(tr.entries.len(),2);assert_eq!(tr.translation(5,-1,[-80.,-104.,-96.,1.]),Some([-32.,0.,0.]));assert_eq!(tr.translation(25,-1,[-80.,-104.,-96.,1.]),Some([0.,0.,0.]));}

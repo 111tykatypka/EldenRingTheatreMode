@@ -17,6 +17,13 @@ use crate::game_profile as profile;
 /// Where a character is: block (map tile), origin block for chunk coordinates, global position.
 #[derive(Clone,Copy,Debug,Default,PartialEq)]
 pub struct Place{pub block:i32,pub origin:i32,pub global:[f32;4]}
+impl Place{
+ /// The physics frame this position is in: the origin block, or the character's own block while no origin
+ /// is set. MEASURED (tools/dump_player_root.py, recording 06-41): origin is -1 while the player stays in
+ /// the first block, and after the player crosses into the next block the origin becomes the block it
+ /// came from, with the anchor and physics still continuous; the effective frame never changed.
+ pub fn frame(&self)->i32{if self.origin!=-1{self.origin}else{self.block}}
+}
 pub fn place(chr:usize)->Place{
  let c=unsafe{&*(chr as *const ChrIns)};
  Place{block:i32::from(c.block_id),origin:i32::from(c.block_origin),global:[c.chunk_position.0,c.chunk_position.1,c.chunk_position.2,c.chunk_position.3]}}
