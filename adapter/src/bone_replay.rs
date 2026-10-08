@@ -189,10 +189,12 @@ fn load(path:&PathBuf)->Result<Vec<Frame>,String>{
  if frames.windows(2).any(|w|w[1].time<w[0].time){return Err("frame times go backwards".into());}
  Ok(frames)}
 
+/// Effect events carry the game clock; the replay file uses time since the first recorded frame (events before it are dropped).
+fn fx_relative(v:Vec<world_file::EffectEvent>,first:u64)->Vec<world_file::EffectEvent>{v.into_iter().filter(|e|e.time>=first).map(|mut e|{e.time-=first;e}).collect()}
 fn finish_recording(s:&mut State){
  let Some(r)=s.recording.take() else {return;};
  // Effects: stop capturing and hand the last ones to the writer before the channel closes.
- effects::capture(false);{let rest=effects::drain();let (seen,dropped,_)=effects::stats();if !rest.is_empty(){let _=r.tx.try_send(Message::Effects(rest));}
+ effects::capture(false);{let rest=fx_relative(effects::drain(),r.first);let (seen,dropped,_)=effects::stats();if !rest.is_empty(){let _=r.tx.try_send(Message::Effects(rest));}
   crate::log_game(&format!("EFFECTS: {seen} effect creations seen so far this session ({dropped} dropped by the queue)"));}
  let seconds=r.last.saturating_sub(r.first) as f64/1e9;
  crate::log_game(&format!("BONE_REPLAY: recording stopped; {} frames over {seconds:.2} s ({} dropped while the disk was busy), {} characters; finishing {}",r.frames,r.dropped,r.actors.count(),world_path(&r.path).display()));
@@ -239,6 +241,7 @@ fn follow_loaded(s:&mut State,l:&Link){
    for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.frame(),f.place.global);}}}
    crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
    crate::log_game(&format!("BONE_REPLAY: {} recorded effects in the file; replay of them is {}",world_data.effects.len(),if effects::ready(){"available"}else{"unavailable (hook not installed)"}));
+   {let sample:Vec<String>=world_data.effects.iter().take(12).map(|e|format!("id {} t={:.2}s at ({:.1},{:.1},{:.1})",e.id,e.time as f64/1e9,e.pos[0],e.pos[1],e.pos[2])).collect();crate::log_game(&format!("EFFECTS_IN_FILE first events: {sample:?}"));}
    Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors,anchors:Arc::new(anchors)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
 // The replay time for this game frame, in source time. The host sends the timeline about 20 times a
@@ -537,7 +540,7 @@ pub fn tick(group:usize,now:u64){
    }
    let first_definition=if r.frames==0{definition.clone()}else{None};
    match r.tx.try_send(Message::PlayerPose(frame,first_definition)){Ok(())=>{if r.frames==0{r.first=now;r.skeleton=definition;}r.frames+=1;r.last=now;}Err(_)=>r.dropped+=1}
-   {let fx=effects::drain();if !fx.is_empty(){let _=r.tx.try_send(Message::Effects(fx));}}
+   {let fx=fx_relative(effects::drain(),r.first);if !fx.is_empty(){let _=r.tx.try_send(Message::Effects(fx));}}
    r.probe.sample(chr,now.saturating_sub(r.first) as f64/1e9);
    if let Some(m)=weapon_loc::read(chr){if r.module!=Some(m){r.module=Some(m);let _=r.tx.try_send(Message::PlayerModule(vec![world_file::ModuleSample{time:now,data:m}]));}}
    r.actors.sample(now,chr,&r.tx);}}
@@ -591,7 +594,8 @@ pub fn tick(group:usize,now:u64){
     let jumped=s.fx_t==0||t<s.fx_t||t-s.fx_t>500_000_000;
     let mut i=if jumped{ev.partition_point(|e|e.time<=t)}else{s.fx_cursor.min(ev.len())};
     if !jumped{let mut made=0;while i<ev.len()&&ev[i].time<=t&&made<16{
-     if let Some(sh)=loaded.anchors.translation(ev[i].time,live.0,live.1){let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];if effects::spawn(ev[i].id,p){made+=1;}}
+     if let Some(sh)=if loaded.anchors.is_empty(){Some([0.0f32;3])}else{loaded.anchors.translation(ev[i].time,live.0,live.1)}{let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];let ok=effects::spawn(ev[i].id,p);if ok{made+=1;}
+      static LOGGED:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);if LOGGED.fetch_add(1,std::sync::atomic::Ordering::Relaxed)<40{crate::log_game(&format!("EFFECT_REPLAY: id {} at t={:.2}s -> ({:.1},{:.1},{:.1}) called={} (player at {:.1},{:.1},{:.1})",ev[i].id,ev[i].time as f64/1e9,p[0],p[1],p[2],ok,live.1[0],live.1[1],live.1[2]));}}
      i+=1;}}
     s.fx_cursor=i;s.fx_t=t;}}}
   DRAW_GROUP=>{
