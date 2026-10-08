@@ -253,10 +253,10 @@ impl Player{
   let mask=(profile::VAL_DEBUG_FLAG_NO_MOVE|profile::VAL_DEBUG_FLAG_NO_ATTACK) as u32;
   if !on{self.unfreeze_all();return;}
   if now>=self.next_scan{self.next_scan=now+500_000_000;
-   let alive=live();let player=live_player();
+   let (alive,buddies)=live_snapshot(false);let player=live_player();
    self.frozen.retain(|a,(h,_)|alive.contains(a)&&handle_of(unsafe{&*(*a as *const ChrIns)})==*h);
    let mut added=0;
-   for a in alive{if Some(a)==player||self.frozen.contains_key(&a)||self.controlled.values().any(|c|c.chr==a){continue;}
+   for a in alive{if Some(a)==player||buddies.contains(&a)||self.frozen.contains_key(&a)||self.controlled.values().any(|c|c.chr==a){continue;}
     let c=unsafe{&*(a as *const ChrIns)};if c.field_ins_handle.is_empty(){continue;}
     let Some(f)=debug_flags(a) else {continue};
     self.frozen.insert(a,(handle_of(c),unsafe{std::ptr::read_volatile(f as *const u32)}));added+=1;}
@@ -375,7 +375,9 @@ impl Player{
      Plan::Unavailable(why)=>{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} {why}",info.id));}}
      // The recording says this character does not exist now (not yet, gone, left): its real body, if the game has
      // one, is held and hidden instead of standing in the scene; it is given back when the replay ends.
-     Plan::Absent=>{if let Some(chr)=found{let c=unsafe{&*(chr as *const ChrIns)};
+     // Companions (Torrent) are never hidden or held while the recording says they do not exist yet: hiding the real
+     // horse made the game drop his skeleton (census: bones=None afterwards), so he could not be posed later.
+     Plan::Absent=>{if self.categories.get(&info.id).copied().unwrap_or(0)!=0{continue;}if let Some(chr)=found{let c=unsafe{&*(chr as *const ChrIns)};
       let (Some(transform),Some(flags),Some(gravity))=(read_transform(chr),debug_flags(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)}),gravity_flag(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1)) else {continue};
       let flags=self.original_flags(chr,Some(flags));let flags=flags.unwrap_or(0);
       let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0);set_render(chr,false);

@@ -87,6 +87,11 @@ fn hide_set()->&'static Vec<i32>{
  SET.get_or_init(||{
   let started=std::time::Instant::now();let mut v=Vec::new();let mut rows=0u32;let mut hist=std::collections::BTreeMap::<u16,u32>::new();
   if let Ok(repo)=unsafe{SoloParamRepository::instance()}{for id in 0..=SCAN_MAX{if let Some(p)=repo.get::<SpEffectParam>(id){rows+=1;*hist.entry(p.state_info()).or_default()+=1;if p.state_info()==HIDE_WEAPON_STATE{v.push(id as i32);}}}}
+  // What the effects seen around a flask / whistle really are (state info, visual effect ids, and whether they touch HP).
+  if let Ok(repo)=unsafe{SoloParamRepository::instance()}{
+   for id in [26u32,39,45,81,100,101,106,141,202,430,4289,9607,9610,19996,19997,19998,19999,90301,100000,100001,100002,100006,100007,100170,100240,100300,100390,100690,102368,501000,501025,501050]{
+    if let Some(p)=repo.get::<SpEffectParam>(id){crate::log_game(&format!("SPEFFECT_ROW id={id} state_info={} vfx[{},{},{},{},{},{},{}] hp rate/point {}/{} endurance {} icon {}",p.state_info(),p.vfx_id(),p.vfx_id1(),p.vfx_id2(),p.vfx_id3(),p.vfx_id4(),p.vfx_id5(),p.vfx_id6(),p.change_hp_rate(),p.change_hp_point(),p.effect_endurance(),p.icon_id()));}else{crate::log_game(&format!("SPEFFECT_ROW id={id}: no such row"));}}
+   for g in [130u32,1001,1051]{if let Some(p)=repo.get::<EquipParamGoods>(g){crate::log_game(&format!("GOODS_ROW id={g} ref_id_default={} use_anim={} sfx_variation={}",p.ref_id_default(),p.goods_use_anim(),p.sfx_variation_id()));}}}
   crate::log_game(&format!("SPEFFECT_PARAM_SCAN: {rows} rows in ids 0..={SCAN_MAX}; state info histogram {:?}",hist));
   crate::log_game(&format!("HIDE_WEAPON_EFFECTS: {} special effects have state info {HIDE_WEAPON_STATE} ({:?}); scan of ids 0..={SCAN_MAX} took {:?}",v.len(),&v[..v.len().min(40)],started.elapsed()));v})}
 /// The hide-weapon effect currently active on `chr`, 0 for none.
