@@ -25,6 +25,7 @@ mod world_file;
 mod world_state;
 mod actors;
 mod omission;
+mod weapon_loc;
 mod actor_lifetime;
 mod companions;
 mod skeleton;

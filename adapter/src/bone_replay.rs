@@ -28,6 +28,7 @@ use std::ffi::{c_char,CStr,CString};
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc,Mutex};
+use crate::weapon_loc;
 use std::sync::mpsc::SyncSender;
 use crate::world_file::{self,Message};
 use crate::world_state;
@@ -77,14 +78,14 @@ type Frame=world_file::PlayerFrame;
 // a time (cached). Compressed file bytes and the timestamp index still reside in RAM.
 enum Store{Memory(Vec<Frame>),Chunked(world_file::PlayerTrack)}
 // World state of the loaded replay (Phase 2.1); empty for older files.
-#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>,context:Vec<world_file::EntityContext>,skeletons:std::collections::HashMap<u32,crate::skeleton::Definition>}
+#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>,context:Vec<world_file::EntityContext>,skeletons:std::collections::HashMap<u32,crate::skeleton::Definition>,module:Vec<world_file::ModuleSample>}
 impl Store{
  fn len(&self)->usize{match self{Store::Memory(v)=>v.len(),Store::Chunked(t)=>t.len()}}
  fn time(&self,i:usize)->u64{match self{Store::Memory(v)=>v[i].time,Store::Chunked(t)=>t.times[i]}}
  fn index_at(&self,t:u64)->usize{let n=self.len();let (mut lo,mut hi)=(0,n);while lo<hi{let m=(lo+hi)/2;if self.time(m)<=t{lo=m+1}else{hi=m}}lo.saturating_sub(1).min(n-1)}
  fn get(&mut self,i:usize)->Option<Frame>{match self{Store::Memory(v)=>v.get(i).cloned(),Store::Chunked(t)=>t.get(i).cloned()}}}
 // The game thread hands frames to the world file writer thread; it never waits for the disk.
-struct Recorder{path:String,tx:SyncSender<Message>,frames:u64,first:u64,last:u64,dropped:u64,next_world:u64,flags:world_file::FlagGroups,actors:crate::actors::Recorder,skeleton:Option<crate::skeleton::Definition>,skeleton_warned:bool}
+struct Recorder{path:String,tx:SyncSender<Message>,frames:u64,first:u64,last:u64,dropped:u64,next_world:u64,flags:world_file::FlagGroups,actors:crate::actors::Recorder,skeleton:Option<crate::skeleton::Definition>,skeleton_warned:bool,module:Option<[u8;weapon_loc::BYTES]>}
 #[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_drawn_cm:f32,sum_drawn_cm:f64}
 struct Loaded{path:String,store:Store,parents:Arc<Vec<i16>>,seconds:f64,world:Arc<WorldData>,actors:Option<crate::actors::Player>,anchors:Arc<crate::replay_interpolation::AnchorTrack>}
 #[derive(PartialEq)]enum Loading{None,Busy(String),Missing(String),Failed(String)}
@@ -111,9 +112,10 @@ struct State{
  now_offset:[f32;3],
  replay_blocked:bool,
  mount_note:u8,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,virt:Option<Virt>,
+ module_saved:Option<[u8;weapon_loc::BYTES]>,module_written:Option<[u8;weapon_loc::BYTES]>,module_lost:u64,module_frames:u64,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None,eval_place:None,virt:None});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None,eval_place:None,virt:None,module_saved:None,module_written:None,module_lost:0,module_frames:0});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -200,7 +202,7 @@ fn follow_loaded(s:&mut State,l:&Link){
   let opened=if world.is_file(){world_file::open(&world).map(|w|{
     let mut touched:Vec<u32>=w.flag_events.iter().map(|e|e.flag).collect();touched.sort_unstable();touched.dedup();
     let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context,&w.skeletons,w.actor_lifetime,w.meta));
-    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context,skeletons:w.skeletons},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
+    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context,skeletons:w.skeletons,module:w.module},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
   let result=opened.map(|(mut store,world_data,actors)|{
    // Learn the skeleton hierarchy from a few frames spread over the recording (see replay_interpolation).
    let n=store.len();let picks:Vec<Frame>=(0..5).filter_map(|k|store.get(k*(n-1)/4)).collect();
@@ -313,6 +315,8 @@ fn release(s:&mut State,chr:usize,reason:&str){
  // After a grace warp the saved spot is in another map; the player stays where the replay was.
  if s.warped{s.saved=None;status("BONE REPLAY: you stay at the replay's location (the replay travelled there by grace warp)");}
  if let Some(t)=saved_for_now(s,chr){write_transform(chr,&t);}
+ if s.module_frames>0{crate::log_game(&format!("WEAPON_LOCATION: written {} frames; the game replaced it before drawing on {} of them",s.module_frames,s.module_lost));}
+ if let Some(m)=s.module_saved.take(){weapon_loc::write(chr,&m);}
  if s.equip_frames>0{crate::log_game(&format!("EQUIPMENT: written {} frames; the game replaced it before drawing on {} of them",s.equip_frames,s.equip_lost));}
  if let Some(e)=s.equip_saved.take(){if equipment::write(chr,&e){crate::log_game("EQUIPMENT: your own equipment restored");}}
  if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.release();}
@@ -428,7 +432,7 @@ pub fn tick(group:usize,now:u64){
      Ok(tx)=>{
       let flags=world_state::read_flags();let _=tx.send(Message::Flags(now,flags.clone()));
       crate::log_game(&format!("BONE_REPLAY: recording started for {path} ({} event flag groups)",flags.len()));
-      s.recording=Some(Recorder{path,tx,frames:0,first:0,last:0,dropped:0,next_world:now,flags,actors:crate::actors::Recorder::new(),skeleton:None,skeleton_warned:false});s.last_second=0;}
+      s.recording=Some(Recorder{path,tx,frames:0,first:0,last:0,dropped:0,next_world:now,flags,actors:crate::actors::Recorder::new(),skeleton:None,skeleton_warned:false,module:None});s.last_second=0;}
      Err(e)=>{crate::log_game(&format!("BONE_REPLAY_ERROR: cannot create the world file for {path}: {e}"));status("BONE REPLAY ERROR: cannot write the recording file (see log)");}}}}
   if !recording&&s.recording.is_some(){finish_recording(s);}
   s.record_paused=l.recording==RECORD_PAUSED;
@@ -462,7 +466,7 @@ pub fn tick(group:usize,now:u64){
     s.saved=read_transform(chr);if s.saved.is_some(){
      s.saved_place=Some(arrival::place(chr));s.inv_saved=crate::actors::invincible(chr);crate::actors::set_invincible(chr,true);
      s.owning=true;s.written=None;s.evaluated_root=None;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;s.warped=false;
-     s.equip_saved=equipment::read(chr);s.equip_written=None;s.equip_lost=0;s.equip_frames=0;
+     s.module_saved=weapon_loc::read(chr);s.module_written=None;s.module_lost=0;s.module_frames=0;s.equip_saved=equipment::read(chr);s.equip_written=None;s.equip_lost=0;s.equip_frames=0;
      // The clock may also be save-backed. Capture it, but do not override before save isolation.
      s.clock_saved=None;s.options=l.options;
      // Temporary flag restoration alone cannot prevent autosave persisting an override.
@@ -503,6 +507,7 @@ pub fn tick(group:usize,now:u64){
    }
    let first_definition=if r.frames==0{definition.clone()}else{None};
    match r.tx.try_send(Message::PlayerPose(frame,first_definition)){Ok(())=>{if r.frames==0{r.first=now;r.skeleton=definition;}r.frames+=1;r.last=now;}Err(_)=>r.dropped+=1}
+   if let Some(m)=weapon_loc::read(chr){if r.module!=Some(m){r.module=Some(m);let _=r.tx.try_send(Message::PlayerModule(vec![world_file::ModuleSample{time:now,data:m}]));}}
    r.actors.sample(now,chr,&r.tx);}}
  if !s.owning{return;}
  match group{
@@ -526,6 +531,10 @@ pub fn tick(group:usize,now:u64){
    let alpha=if interpolated_pose_enabled(){s.pose_alpha}else{0.0};
    // Equipment first (grip, active slots, pieces), then the pose: the frame's full state, so scrubbing
    // backwards across a weapon swap reverts it.
+   // Weapon model locations (hand / sheath / hidden while a flask is drunk): the state recorded at this replay time.
+   s.module_written=None;
+   if let Some(loaded)=&s.loaded{let m=&loaded.world.module;let i=m.partition_point(|x|x.time<=s.last_t);
+    if i>0{let want=m[i-1].data;if weapon_loc::write(chr,&want){s.module_frames+=1;s.module_written=Some(want);}}}
    s.equip_written=if f.equip.recorded()&&equipment::write(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}else{None};
    // Bones whose interpolation is invalid keep the earlier recorded frame instead of dropping the replay.
    // Local pose is interpolated per bone; model space is rebuilt from it through the learned hierarchy.
@@ -541,6 +550,7 @@ pub fn tick(group:usize,now:u64){
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
    if let Some(e)=s.equip_written{if equipment::read(chr)!=Some(e){s.equip_lost+=1;}}
+   if let Some(m)=s.module_written{if weapon_loc::read(chr)!=Some(m){s.module_lost+=1;}}
    if s.settle>0{s.settle-=1;return;}
    let a=&mut s.accuracy;a.frames+=1;if pose(local,s.local_out.len())==&s.local_out[..]&&pose(model,s.model_out.len())==&s.model_out[..]{a.exact_bones+=1;}
    let d=(0..3).map(|k|(drawn[12+k]-s.expected[k]).powi(2)).sum::<f32>().sqrt()*100.0;a.max_drawn_cm=a.max_drawn_cm.max(d);a.sum_drawn_cm+=d as f64;}
