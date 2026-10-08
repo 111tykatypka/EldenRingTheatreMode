@@ -13,13 +13,13 @@
 //! others; the parameter repository is only touched once the world exists (at start-up it is not filled yet, and the
 //! first version of this file latched an error there and never applied anything).
 use eldenring::cs::{AssetEnvironmentGeometryParam,ChrModelParam,GrassTypeParam,GrassTypeParam_Lv1,GrassTypeParam_Lv2,SoloParamRepository,WorldChrMan};
-use eldenring::param::{CAMERA_FADE_PARAM_ST,ParamDef};
+use eldenring::param::{CAMERA_FADE_PARAM_ST,SPEEDTREE_MODEL_PARAM_ST,ParamDef};
 use fromsoftware_shared::FromStatic;
 use std::panic::{catch_unwind,AssertUnwindSafe};
 use std::sync::Mutex;
 
-struct State{root:usize,applied:bool,assets:Vec<(u32,i8)>,fades:Vec<(u32,f32,f32,f32)>,models:Vec<(u32,i16)>,grass:Vec<(u8,u32,u8)>,failures:u32,next_try:u64,faulted:bool,sections:[bool;4]}
-static STATE:Mutex<State>=Mutex::new(State{root:0,applied:false,assets:Vec::new(),fades:Vec::new(),models:Vec::new(),grass:Vec::new(),failures:0,next_try:0,faulted:false,sections:[false;4]});
+struct State{root:usize,applied:bool,assets:Vec<(u32,i8)>,fades:Vec<(u32,f32,f32,f32)>,models:Vec<(u32,i16)>,grass:Vec<(u8,u32,u8)>,trees:Vec<(u32,f32,f32,f32)>,failures:u32,next_try:u64,faulted:bool,sections:[bool;4]}
+static STATE:Mutex<State>=Mutex::new(State{root:0,applied:false,assets:Vec::new(),fades:Vec::new(),models:Vec::new(),grass:Vec::new(),trees:Vec::new(),failures:0,next_try:0,faulted:false,sections:[false;4]});
 
 fn camera_fade_cap(repo:&mut SoloParamRepository)->Option<&mut eldenring::fd4::FD4ParamResCap>{
  repo.params_mut().find(|p|p.struct_name()==CAMERA_FADE_PARAM_ST::NAME)}
@@ -32,9 +32,12 @@ fn restore(state:&mut State,repo:&mut SoloParamRepository){
    if let Some(row)=unsafe{cap.get_mut::<CAMERA_FADE_PARAM_ST>(id)}{if row.near_min_dist()==-1.0&&row.near_max_dist()==0.0{row.set_near_min_dist(min);row.set_near_max_dist(max);row.set_middle_alpha(mid);f+=1;}}}}}));
   let _=catch_unwind(AssertUnwindSafe(||{for &(id,v) in &state.models{if let Some(row)=repo.get_mut::<ChrModelParam>(id){if row.camera_dither_fade_id()==0{row.set_camera_dither_fade_id(v);m+=1;}}}}));
   let _=catch_unwind(AssertUnwindSafe(||{for &(table,id,v) in &state.grass{let row=match table{0=>repo.get_mut::<GrassTypeParam>(id),1=>repo.get_mut::<GrassTypeParam_Lv1>(id),_=>repo.get_mut::<GrassTypeParam_Lv2>(id)};if let Some(row)=row{if row.dithering()==0{row.set_dithering(v);g+=1;}}}}));
+  let mut tr=0;let _=catch_unwind(AssertUnwindSafe(||{if let Some(cap)=repo.params_mut().find(|p|p.struct_name()==SPEEDTREE_MODEL_PARAM_ST::NAME){for &(id,l,f,b) in &state.trees{
+   if let Some(row)=unsafe{cap.get_mut::<SPEEDTREE_MODEL_PARAM_ST>(id)}{if row.min_fade_leaf()==1.0&&row.min_fade_frond()==1.0&&row.min_fade_branch()==1.0{row.set_min_fade_leaf(l);row.set_min_fade_frond(f);row.set_min_fade_branch(b);tr+=1;}}}}}));
+  crate::log_game(&format!("CAMERA_FADE: restored {tr} speedtree rows"));
   crate::log_game(&format!("CAMERA_FADE: restored {a} of {} asset rows, {f} of {} camera-fade rows, {m} of {} model rows, {g} of {} grass rows",state.assets.len(),state.fades.len(),state.models.len(),state.grass.len()));
  }else if state.applied{crate::log_game("CAMERA_FADE: the parameter repository was replaced; old rows left alone");}
- state.assets.clear();state.fades.clear();state.models.clear();state.grass.clear();state.applied=false;state.root=0;state.sections=[false;4];}
+ state.assets.clear();state.fades.clear();state.models.clear();state.grass.clear();state.trees.clear();state.applied=false;state.root=0;state.sections=[false;4];}
 
 /// Call once per game frame; `active` = the feature is wanted right now. Never panics into the game.
 pub fn tick(active:bool,now:u64){
@@ -56,6 +59,11 @@ pub fn tick(active:bool,now:u64){
    out.push((id,row.near_min_dist(),row.near_max_dist(),row.middle_alpha()));row.set_near_min_dist(-1.0);row.set_near_max_dist(0.0);row.set_middle_alpha(1.0);}}out}));
  let ok_models=catch_unwind(AssertUnwindSafe(||{let mut out=Vec::new();
   for (id,row) in repo.rows_mut::<ChrModelParam>(){let v=row.camera_dither_fade_id();if v!=0{out.push((id,v));row.set_camera_dither_fade_id(0);}}out}));
+ // Trees (SpeedTree models): the "minimum fade value" of leaf / frond / branch set to 1 (the field is described only as a minimum
+ // fade value; originals are logged and restored).
+ let ok_trees=catch_unwind(AssertUnwindSafe(||{let mut out=Vec::new();
+  if let Some(cap)=repo.params_mut().find(|p|p.struct_name()==SPEEDTREE_MODEL_PARAM_ST::NAME){for (id,row) in unsafe{cap.data.rows_mut::<SPEEDTREE_MODEL_PARAM_ST>()}{
+   out.push((id,row.min_fade_leaf(),row.min_fade_frond(),row.min_fade_branch()));row.set_min_fade_leaf(1.0);row.set_min_fade_frond(1.0);row.set_min_fade_branch(1.0);}}out}));
  let mut grass_hist=std::collections::BTreeMap::<u8,u32>::new();
  let ok_grass=catch_unwind(AssertUnwindSafe(||{let mut out=Vec::new();
   for (id,row) in repo.rows_mut::<GrassTypeParam>(){let v=row.dithering();*grass_hist.entry(v).or_default()+=1;if v!=0{out.push((0u8,id,v));row.set_dithering(0);}}
@@ -68,6 +76,11 @@ pub fn tick(active:bool,now:u64){
  if let Ok(v)=ok_fades{state.fades=v;}
  if let Ok(v)=ok_models{state.models=v;}
  if let Ok(v)=ok_grass{state.grass=v;}
+ if let Ok(v)=&ok_trees{state.trees=v.clone();}
+ crate::log_game(&format!("CAMERA_FADE: speedtree rows changed {} ({}); original (leaf,frond,branch) of the first rows {:?}",state.trees.len(),why(&ok_trees),state.trees.iter().take(6).map(|t|(t.1,t.2,t.3)).collect::<Vec<_>>()));
+ // Which parameter tables exist that look related (camera fade is not in the solo list the SDK knows).
+ let names:Vec<String>=repo.params().map(|p|p.struct_name().to_string()).filter(|n|{let u=n.to_ascii_uppercase();u.contains("FADE")||u.contains("SPEEDTREE")||u.contains("GRASS")||u.contains("CAMERA")}).collect();
+ crate::log_game(&format!("CAMERA_FADE: related parameter tables in the repository: {names:?}"));
  if state.sections.iter().any(|s|*s){
   state.applied=true;state.failures=0;
   crate::log_game(&format!("CAMERA_FADE: no near-camera fade; tables processed [assets,camera-fade,models,grass] = {:?}; {} asset rows set to 'never disappears', {} camera-fade rows set to opaque, {} model rows set to 'never disappears', {} grass rows cleared; original asset camera-near values {near_hist:?}; original grass dithering values {grass_hist:?}",state.sections,state.assets.len(),state.fades.len(),state.models.len(),state.grass.len()));

@@ -145,9 +145,9 @@ fn torrent_census(){
 // ------------------------------------------------------------------------------------------ record
 /// Per-recording identities and rate control; lives while the host records.
 struct Identity{info:ActorInfo,announced:bool,category:u32,seen:u64,skeleton:Option<crate::skeleton::Definition>}
-pub struct Recorder{omission_at:u64,hist:crate::omission::Histogram,ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64,observations:HashMap<u32,Observation>}
+pub struct Recorder{masks:HashMap<u32,[u8;16]>,mask_logs:u32,omission_at:u64,hist:crate::omission::Histogram,ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64,observations:HashMap<u32,Observation>}
 impl Recorder{
- pub fn new()->Self{Self{omission_at:0,hist:Default::default(),ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0,observations:HashMap::new()}}
+ pub fn new()->Self{Self{masks:HashMap::new(),mask_logs:0,omission_at:0,hist:Default::default(),ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0,observations:HashMap::new()}}
  /// Samples nearby characters; `player` is the main player's ChrIns, `tx` the world file writer.
  pub fn sample(&mut self,now:u64,player:usize,tx:&SyncSender<Message>){
   self.frame+=1;
@@ -181,6 +181,12 @@ impl Recorder{
    let flags=c.chr_flags1c5;let data=c.modules.data.as_ptr();
    let (hp,max_hp)=if data.is_null(){(None,None)}else{(crate::companions::dword(unsafe{&raw const (*data).hp as usize}),crate::companions::dword(unsafe{&raw const (*data).max_hp as usize}))};
    let hp_known=if hp.is_some()&&max_hp.is_some(){lifetime::KNOWN_HP}else{0};
+   // Research probe: the 16 bytes at ChrIns+0x2C0 changed together with the flask / whistle state of the player and look like a
+   // model display mask (which meshes, for example a weapon, are shown). Logged when they change, to learn whether enemy weapons
+   // are switched there; not recorded into the file yet.
+   {let mut m=[0u8;16];if crate::companions::copy(chr+0x2C0,&mut m)&&self.masks.get(&id)!=Some(&m)&&self.mask_logs<400{self.mask_logs+=1;
+    let hex:String=m.iter().map(|b|format!("{b:02X}")).collect();
+    crate::log_game(&format!("ACTOR_MASK: id={id} npc_param={} chr={} mask@2C0={hex}{}",c.npc_param_id,c.character_id,if self.masks.contains_key(&id){" (changed)"}else{""}));self.masks.insert(id,m);}}
    observed.insert(id,Observation{time:now,id,character_id:c.character_id,npc_id:c.npc_id,model_id:c.character_id,known:lifetime::KNOWN_BODY|lifetime::KNOWN_FLAGS|hp_known,flags:(flags.death_flag() as u32)*lifetime::DEAD|(flags.enable_render() as u32)*lifetime::RENDER_ENABLED,backread:c.backread_state,cleanup:c.chr_set_cleanup,hp:hp.unwrap_or(0)as i32,max_hp:max_hp.unwrap_or(0)as i32,reason:2,..Default::default()});
    let (Some(n),Some((local,model)),Some(transform))=(bone_count(chr),pose_arrays(chr),read_transform(chr)) else {
     if !self.warned{self.warned=true;crate::log_game("ACTORS: a character's skeleton could not be read (counts disagree); it is skipped");}continue};
@@ -235,7 +241,7 @@ struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,tr
 #[derive(Clone)]
 struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32,chr_id:i32,pos:[f32;3],before:HashSet<(usize,u64)>}
 pub struct Player{tracks:Vec<(ActorInfo,ActorTrack,Vec<i16>)>,controlled:HashMap<u32,Controlled>,next_match:u64,local:Vec<u8>,model:Vec<u8>,logged:bool,categories:HashMap<u32,u32>,warned:HashSet<u32>,skeletons:HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,
- meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>,failed:bool,frozen:HashMap<usize,(u64,u32)>,next_scan:u64,whistled:bool,whistle_time:u64}
+ meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>,failed:bool,frozen:HashMap<usize,(u64,u32)>,next_scan:u64,whistled:bool,whistle_time:u64,corpses:HashMap<usize,u64>}
 const MAX_PUPPETS:usize=8;
 impl Player{
  pub fn new(actors:Vec<(ActorInfo,ActorTrack)>,context:&[EntityContext],skeletons:&HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,meta:HashMap<u32,ActorMeta>)->Self{
@@ -243,7 +249,7 @@ impl Player{
   let tracks=actors.into_iter().map(|(info,mut t)|{
    let n=t.len();let picks:Vec<PlayerFrame>=(0..3).filter_map(|k|t.get(k*(n.saturating_sub(1))/2).map(|f|f.body.clone())).collect();
    let parents=skeletons.get(&info.id).map(|d|d.parents.clone()).unwrap_or_else(||crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..]))));(info,t,parents)}).collect();
-  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new(),failed:false,frozen:HashMap::new(),next_scan:0,whistled:false,whistle_time:0}}
+  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new(),failed:false,frozen:HashMap::new(),next_scan:0,whistled:false,whistle_time:0,corpses:HashMap::new()}}
  pub fn len(&self)->usize{self.tracks.len()}
  pub fn set_options(&mut self,options:u32){self.options=options;}
  /// Freezes the AI of every live character the replay does not drive (option bit 8 switches it off): the documented
@@ -350,8 +356,14 @@ impl Player{
     let unposable=cat!=0&&found.is_some_and(|c|crate::skeleton::read(c,info.id).is_none());
     if unposable&&self.warned.insert(info.id|0x8000_0000){crate::log_game(&format!("ACTOR_NO_SKELETON: id={} (category {cat}) has a live body but no loaded skeleton (Torrent must be summoned to be driven); treating it as missing",info.id));}
     let live_state=if unposable{None}else{found.and_then(live_state)};
+    // The recording says this character is alive now but its real body is a corpse (it died in the game after the recording):
+    // the ragdoll must not lie in the scene. It is hidden, never changed otherwise, and shown again when the replay ends
+    // or when the recording reaches the character's own death (the body is then driven).
+    if existence[&info.id]==Existence::Alive&&cat==0{if let (Some(chr),Some((true,_)))=(found,live_state){
+     if !self.corpses.contains_key(&chr){let h=handle_of(unsafe{&*(chr as *const ChrIns)});set_render(chr,false);self.corpses.insert(chr,h);
+      crate::log_game(&format!("CORPSE_HIDDEN: id={} body 0x{chr:X} is dead in the game but alive in the recording; hidden until the replay ends",info.id));}}}
     match plan(existence[&info.id],live_state){
-     Plan::Drive=>{let chr=found.unwrap();let c=unsafe{&*(chr as *const ChrIns)};
+     Plan::Drive=>{let chr=found.unwrap();if self.corpses.remove(&chr).is_some(){set_render(chr,true);}let c=unsafe{&*(chr as *const ChrIns)};
       let Some(transform)=read_transform(chr) else {continue};
       let flags=debug_flags(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)});let flags=self.original_flags(chr,flags);
       let gravity=gravity_flag(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);
@@ -399,7 +411,11 @@ impl Player{
    // Recording says it does not exist right now: a puppet is hidden (never deleted mid-replay, so a seek
    // back can show it again); a live body is given back.
    let ex=existence[&info.id];
+   // A companion (Torrent) is never hidden: when the recording has no pose for him (ridden, not yet summoned) the real horse is
+   // given back to the game instead of vanishing from the scene.
+   let companion=!is_puppet&&self.categories.get(&info.id).copied().unwrap_or(0)!=0;
    if matches!(ex,Existence::NotYet|Existence::Gone|Existence::Left|Existence::Unknown){
+    if companion{if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}
     if is_puppet{set_render(chr,false);}else{set_render(chr,false);if let Some(c)=self.controlled.get_mut(&info.id){c.hidden=true;}}continue;}
    if is_puppet{set_render(chr,true);}
    else if was_hidden&&saved_render{set_render(chr,true);}
@@ -420,6 +436,7 @@ impl Player{
      if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
      if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} skeleton identity differs (recorded model {} / {} bones / fingerprint {:08X}; live model {} / {} bones / fingerprint {:08X}); no pose applied",info.id,d.model_id,d.parents.len(),d.fingerprint,x.model_id,x.parents.len(),x.fingerprint));}continue;}}}
    let n=track.len();if !active_at(&track.times,t){
+    if companion{if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}
     if is_puppet{set_render(chr,false);}else{set_render(chr,false);if let Some(c)=self.controlled.get_mut(&info.id){c.hidden=true;}}continue;}
    let i=track.times.partition_point(|x|*x<=t).saturating_sub(1).min(n-1);
    let (Some(a),Some(b))=(track.get(i).cloned(),track.get((i+1).min(n-1)).cloned()) else {continue};
@@ -456,6 +473,7 @@ impl Player{
  pub fn release(&mut self){
   let alive=live();let n=self.controlled.len();let mut puppets=0;
   self.request=None;self.unfreeze_all();
+  for (chr,h) in self.corpses.drain(){if alive.contains(&chr)&&handle_of(unsafe{&*(chr as *const ChrIns)})==h{set_render(chr,true);}}
   for (_,c) in self.controlled.drain(){
    if c.puppet{if safe_handle(c.chr)==Some(c.handle){puppets+=1;unload_puppet(c.chr);}continue;}
    if !alive.contains(&c.chr)||handle_of(unsafe{&*(c.chr as *const ChrIns)})!=c.handle{continue;}
