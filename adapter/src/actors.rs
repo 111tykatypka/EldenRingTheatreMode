@@ -83,6 +83,11 @@ fn live_state(chr:usize)->Option<(bool,bool)>{let a=flag_byte(chr,5)?;let v=read
  let data=unsafe{&*(chr as *const ChrIns)}.modules.data.as_ptr();
  let spent=!data.is_null()&&match(crate::companions::dword(unsafe{&raw const (*data).hp as usize}),crate::companions::dword(unsafe{&raw const (*data).max_hp as usize})){(Some(h),Some(m))=>(m as i32)>0&&(h as i32)<=0,_=>false};
  Some((v&(1<<7)!=0||spent,v&RENDER!=0))}
+/// The documented `is_invincible` flag (chr_flags1c5 bit 4) of any body; HP is never edited.
+pub fn invincible(chr:usize)->Option<bool>{flag_byte(chr,5).map(|a|read_byte(a)&INVINCIBLE!=0)}
+pub fn set_invincible(chr:usize,on:bool){if on{write_bits(chr,5,INVINCIBLE,0)}else{write_bits(chr,5,0,INVINCIBLE)}}
+/// Death flag set or HP spent.
+pub fn body_dead(chr:usize)->bool{live_state(chr).is_some_and(|(d,_)|d)}
 fn set_render(chr:usize,on:bool){if on{write_bits(chr,5,RENDER,0)}else{write_bits(chr,5,0,RENDER)}}
 /// What represents a recorded actor at replay time T.
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]

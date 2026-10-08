@@ -53,7 +53,9 @@ const POSE_BYTES:usize=BONES*48;
 const KEYS_GROUP:usize=0;
 const WRITE_GROUP:usize=2;
 const DRAW_GROUP:usize=4;
-const RESTORE_FRAMES:u32=10;
+/// Frames the return position is held (gravity still off) so the ground around the return spot can stream back
+/// in before the body is released to physics; 4 s at 60 fps.
+const RESTORE_FRAMES:u32=240;
 // Older sidecar format, read only: "<replay>.erplay.bones".
 const MAGIC:&[u8;8]=b"ERBONES1";
 const FRAME_BYTES_V1:usize=8+48+64+POSE_BYTES*2;
@@ -108,10 +110,10 @@ struct State{
  // Reserved root-rebase value; remains zero until cross-origin conversion is verified.
  now_offset:[f32;3],
  replay_blocked:bool,
- mount_note:u8,
+ mount_note:u8,saved_place:Option<Place>,inv_saved:Option<bool>,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -255,6 +257,23 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
  let (shift,w)=(s.shift,s.pose_alpha as f32);s.expected=std::array::from_fn(|k|a.matrix[12+k]+(b.matrix[12+k]-a.matrix[12+k])*w+shift[k]);
  s.evaluated_root.is_some()}
 
+/// The saved return position in today's physics frame: the physics origin may have moved since it was read
+/// (the same anchor shift that playback corrects), and writing it unchanged put the body under the map.
+fn saved_for_now(s:&State,chr:usize)->Option<Transform>{
+ let mut t=s.saved?;
+ if let Some(p)=s.saved_place{let now=arrival::place(chr);
+  if p.block!=-1&&now.block!=-1{if let Some(sh)=crate::replay_interpolation::rebase(p.space(),p.global,now.space(),now.global){for k in 0..3{t[2][k]+=sh[k];}}}}
+ Some(t)}
+/// The player died while the replay held the body: give everything back at once (no return teleport onto a
+/// dead body) so the game's own revival menu works.
+fn abandon_on_death(s:&mut State,chr:usize){
+ s.saved=None;s.restore_left=0;s.replay_blocked=true;
+ release(s,chr,"player died");
+ s.restore_left=0;if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}
+ if let Some(b)=s.inv_saved.take(){crate::actors::set_invincible(chr,b);}
+ unsafe{tm_render_lock_game_input(0)};
+ crate::log_game("BONE_REPLAY: PLAYER_DEATH while the replay owned the body; ownership, gravity, invincibility and input lock returned");
+ status("REPLAY STOPPED: your character died. Controls are back; use the game's revival menu.");}
 fn release(s:&mut State,chr:usize,reason:&str){
  if !s.owning{return;}s.owning=false;s.restore_left=RESTORE_FRAMES;
  let a=&s.accuracy;
@@ -262,7 +281,7 @@ fn release(s:&mut State,chr:usize,reason:&str){
   a.frames,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64),s.fallback_bones));
  // After a grace warp the saved spot is in another map; the player stays where the replay was.
  if s.warped{s.saved=None;status("BONE REPLAY: you stay at the replay's location (the replay travelled there by grace warp)");}
- if let Some(t)=s.saved{write_transform(chr,&t);}
+ if let Some(t)=saved_for_now(s,chr){write_transform(chr,&t);}
  if s.equip_frames>0{crate::log_game(&format!("EQUIPMENT: written {} frames; the game replaced it before drawing on {} of them",s.equip_frames,s.equip_lost));}
  if let Some(e)=s.equip_saved.take(){if equipment::write(chr,&e){crate::log_game("EQUIPMENT: your own equipment restored");}}
  if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.release();}
@@ -405,9 +424,11 @@ pub fn tick(group:usize,now:u64){
     if s.mount_note!=key{s.mount_note=key;
      let msg=if recorded_mounted{"MOUNT: this was recorded mounted and you are on foot. Replaying the rider pose; Torrent is shown only if he is in the world (whistle for him first)."}else{"MOUNT: this was recorded on foot and you are mounted. Replaying the on-foot pose; dismounting first gives the cleanest result."};
      crate::log_game(&format!("MOUNT_STATE_MISMATCH: recorded_mounted={recorded_mounted} live_ride={live_ride:?} mount_id={}; replay continues (not blocked)",required.mount_id));status(msg);}}}}
+  if let Some(chr)=chr{if s.owning&&crate::actors::body_dead(chr){abandon_on_death(s,chr);}}
   if let Some(chr)=chr{
    if want&&!s.owning{
     s.saved=read_transform(chr);if s.saved.is_some(){
+     s.saved_place=Some(arrival::place(chr));s.inv_saved=crate::actors::invincible(chr);crate::actors::set_invincible(chr,true);
      s.owning=true;s.written=None;s.evaluated_root=None;s.accuracy=Accuracy::default();s.settle=3;s.fallback_bones=0;s.warped=false;
      s.equip_saved=equipment::read(chr);s.equip_written=None;s.equip_lost=0;s.equip_frames=0;
      // The clock may also be save-backed. Capture it, but do not override before save isolation.
@@ -420,8 +441,8 @@ pub fn tick(group:usize,now:u64){
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
    else if !want&&s.owning{release(s,chr,if s.loaded.is_none(){"replay unloaded"}else{"timeline idle and overlay closed"});}
    if !s.owning&&s.restore_left>0{
-    if let Some(t)=s.saved{write_transform(chr,&t);}set_flag(proxy_flag(chr),true);
-    s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
+    if let Some(t)=saved_for_now(s,chr){write_transform(chr,&t);}set_flag(proxy_flag(chr),true);
+    s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}if let Some(b)=s.inv_saved.take(){crate::actors::set_invincible(chr,b);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
   }
   s.host=(l.playing!=0,l.timescale,l.play_source_ns,l.received_ns);
   // Update-LOD override (STEP A): on while recording, or while a replay with recorded actors owns the body.
