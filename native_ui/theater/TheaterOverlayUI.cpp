@@ -170,6 +170,7 @@ void Overlay::LoadSettings()
         else if(key=="shake_speed") effects.shake_speed=std::clamp(double(value),0.,10.);
         else if(key=="shake_smoothing") effects.shake_smoothing_seconds=std::clamp(double(value),0.,2.);
         else if(key=="shake_dolly") effects.shake_dolly=value!=0;
+        else if(key=="high_quality_lods")effects.high_quality_lods=value!=0;
         else if(key=="prevent_asset_fade")effects.prevent_asset_fade=value!=0;
         else if(key=="camera_near_plane")effects.near_plane=std::clamp(double(value),.001,1.);
         else if (key == "language") language = value >= 1 ? Lang::Russian : Lang::English;
@@ -185,6 +186,7 @@ void Overlay::LoadSettings()
     }
     camera_runtime::dolly_smoothing(effects.dolly_smoothing_seconds);
     camera_runtime::close_up(effects.prevent_asset_fade,effects.near_plane);
+    camera_runtime::high_quality_lods(effects.high_quality_lods);
     camera_runtime::shake(effects.shake_position,effects.shake_rotation,effects.shake_frequency,effects.shake_speed,effects.shake_smoothing_seconds,effects.shake_dolly);
 }
 
@@ -198,6 +200,7 @@ void Overlay::SaveSettings() const
     out << "curve_fraction " << curveFraction_ << "\n";
     out << "game_view_fit " << gameViewFit_ << "\n";
     out << "compact_tracks " << compactTracks_ << "\n" << "actor_tracks " << expandActorTracks_ << "\n";
+    out << "high_quality_lods " << effects.high_quality_lods << "\n";
     out << "light_markers " << showLightMarkers_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
         << "dolly_visibility_key " << enableDollyVisibilityKey_ << "\n"
@@ -1177,7 +1180,15 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::TextWrapped("Overrides turn off on loading, lost connection or game focus loss. Weather is not stored in replays yet.");
         break;
     }
-    case Tool::Look: section(T(Str::NotYetAvailable)); note(Str::LookNotes); break;
+    case Tool::Look: {
+        section("Quality");
+        bool quality=camera_runtime::view(false).high_quality_lods;
+        if(checkbox("High quality LODs (character updates)",&quality)){camera_runtime::high_quality_lods(quality);SaveSettings();}
+        ImGui::TextWrapped("Experimental: requests normal updates for loaded characters in Free / Dolly camera, including offscreen NPCs.");
+        ImGui::TextDisabled("May increase CPU usage. Off by default.");
+        ImGui::TextWrapped("Does not force mesh LODs or load distant actors. In-game validation required.");
+        break;
+    }
     case Tool::Export: section(T(Str::NotYetAvailable)); note(Str::ExportNotes); break;
     case Tool::Replays:
         DrawLibrary(f);
