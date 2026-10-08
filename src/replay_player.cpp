@@ -105,8 +105,14 @@ void Player::advance(Clock::time_point now) {
     const long double delta=static_cast<long double>(ns_between(anchor_,now))*state_.timescale+fractional_ns_;
     const auto scaled=delta>=static_cast<long double>(UINT64_MAX)?UINT64_MAX:static_cast<std::uint64_t>(delta);
     fractional_ns_=delta>=static_cast<long double>(UINT64_MAX)?0:delta-static_cast<long double>(scaled);
-    clock_ns_=scaled>summary().duration_ns-clock_ns_?summary().duration_ns:clock_ns_+scaled;anchor_=now;update_state();
-    if(clock_ns_>=summary().duration_ns)state_.status=Status::paused;
+    const auto duration=summary().duration_ns;
+    if(!duration){clock_ns_=0;state_.status=Status::paused;}
+    else {
+        const auto remaining=duration-clock_ns_;
+        if(scaled>=remaining){clock_ns_=(scaled-remaining)%duration;action_cursor_valid_=false;}
+        else clock_ns_+=scaled;
+    }
+    anchor_=now;update_state();
 }
 void BookmarkStore::load(){timestamps_.clear();std::ifstream in(path_,std::ios::binary);if(!in)return;std::uint64_t t{};while(in>>t)timestamps_.push_back(t);if(!in.eof())throw std::runtime_error("invalid bookmark sidecar");std::sort(timestamps_.begin(),timestamps_.end());timestamps_.erase(std::unique(timestamps_.begin(),timestamps_.end()),timestamps_.end());}
 void BookmarkStore::save() const {if(!path_.parent_path().empty())std::filesystem::create_directories(path_.parent_path());auto temp=path_;temp+=L".tmp";{std::ofstream out(temp,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("cannot write bookmark sidecar");for(auto t:timestamps_)out<<t<<"\n";if(!out)throw std::runtime_error("failed writing bookmark sidecar");}std::error_code ec;std::filesystem::rename(temp,path_,ec);if(ec){std::filesystem::remove(path_,ec);ec.clear();std::filesystem::rename(temp,path_,ec);}if(ec)throw std::runtime_error("cannot finalize bookmark sidecar");}

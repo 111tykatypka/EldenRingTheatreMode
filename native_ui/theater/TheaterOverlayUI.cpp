@@ -166,6 +166,8 @@ void Overlay::LoadSettings()
         else if(key=="shake_speed") effects.shake_speed=std::clamp(double(value),0.,10.);
         else if(key=="shake_smoothing") effects.shake_smoothing_seconds=std::clamp(double(value),0.,2.);
         else if(key=="shake_dolly") effects.shake_dolly=value!=0;
+        else if(key=="prevent_asset_fade")effects.prevent_asset_fade=value!=0;
+        else if(key=="camera_near_plane")effects.near_plane=std::clamp(double(value),.001,1.);
         else if (key == "language") language = value >= 1 ? Lang::Russian : Lang::English;
         else if (key == "ui_scale") ui_.layout.uiScaleUser = std::clamp(value, 0.75f, 1.5f);
         else if (key == "panel_open") ui_.layout.panelOpen = value != 0;
@@ -177,6 +179,7 @@ void Overlay::LoadSettings()
         else if (key == "replay_options") gReplayOptions = (std::uint32_t)value;
     }
     camera_runtime::dolly_smoothing(effects.dolly_smoothing_seconds);
+    camera_runtime::close_up(effects.prevent_asset_fade,effects.near_plane);
     camera_runtime::shake(effects.shake_position,effects.shake_rotation,effects.shake_frequency,effects.shake_speed,effects.shake_smoothing_seconds,effects.shake_dolly);
 }
 
@@ -200,6 +203,7 @@ void Overlay::SaveSettings() const
         << "shake_speed " << effects.shake_speed << "\n"
         << "shake_smoothing " << effects.shake_smoothing_seconds << "\n"
         << "shake_dolly " << effects.shake_dolly << "\n";
+    out << "prevent_asset_fade " << effects.prevent_asset_fade << "\n" << "camera_near_plane " << effects.near_plane << "\n";
     out << "language " << (language == Lang::Russian ? 1 : 0) << "\n"
         << "ui_scale " << ui_.layout.uiScaleUser << "\n"
         << "panel_open " << (ui_.layout.panelOpen ? 1 : 0) << "\n"
@@ -866,7 +870,12 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         bool shakeDolly=runtime.shake_dolly;shakeChanged|=checkbox("Apply shake to Dolly cameras",&shakeDolly);
         if(shakeChanged){camera_runtime::shake(shakePosition,shakeRotation,shakeFrequency,shakeSpeed,shakeSmooth,shakeDolly);cameraSettingsDirty_=true;cameraSettingsChangedAt_=f.now;}
         ImGui::TextDisabled("Mouse wheel: smooth FOV; Shift fine, Ctrl very fine (overlay hidden). Ctrl+click sliders for exact values.");
-        ImGui::TextDisabled("Shake is deterministic at ReplayTime and does not modify saved nodes.");
+        ImGui::TextDisabled("Shake uses real time: active during pause, independent of timescale. Saved nodes stay unshaken.");
+        double nearPlane=runtime.near_plane;bool preventFade=runtime.prevent_asset_fade;
+        bool closeChanged=doubleSlider("Camera near-Z (units)",&nearPlane,.001,1.,"%.4f",.01);
+        closeChanged|=checkbox("Prevent nearby asset fade (temporary in-memory override)",&preventFade);
+        if(closeChanged){camera_runtime::close_up(preventFade,nearPlane);SaveSettings();}
+        ImGui::TextDisabled("Native near-Z: %.4f. Asset override is restored outside Free/Dolly. Grass shader fading remains under investigation.",runtime.native_near_plane);
         int boneIndex=runtime.bone_index;double offset[3]={runtime.bone_offset[0],runtime.bone_offset[1],runtime.bone_offset[2]};
         labelAbove("Player bone index (-1 disabled)");bool boneChanged=ImGui::InputInt("##bone-index",&boneIndex);
         for(int i=0;i<3;++i){const char*labels[]={"Bone offset right","Bone offset up","Bone offset forward"};boneChanged|=number(labels[i],&offset[i],.01,.1,"%.3f");}

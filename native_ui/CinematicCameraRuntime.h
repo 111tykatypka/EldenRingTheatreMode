@@ -18,6 +18,8 @@ struct View {
  double dolly_smoothing_seconds=0;
  double shake_position=0,shake_rotation=0,shake_frequency=1,shake_speed=1,shake_smoothing_seconds=0;
  bool shake_dolly=true;
+ bool prevent_asset_fade=true;
+ double near_plane=.01,native_near_plane=0;
  bool cuts_enabled=false;std::vector<cinematic::CameraCut> cuts;
 };
 View view(bool include_keys=true);
@@ -41,6 +43,7 @@ void preview(bool enabled);
 void bone(int index,cinematic::Vec offset);
 void dolly_smoothing(double seconds);
 void shake(double position_units,double rotation_degrees,double frequency_hz,double speed=1,double smoothing=0,bool dolly=true);
+void close_up(bool prevent_asset_fade,double near_plane);
 std::optional<cinematic::State> bone_world(const float* root_matrix,const float* model_qs);
 void timeline(std::uint64_t time,std::uint64_t duration,std::uint64_t anchor,bool playing,double speed,bool linked,const char* replay_path=nullptr);
 bool owns_input();

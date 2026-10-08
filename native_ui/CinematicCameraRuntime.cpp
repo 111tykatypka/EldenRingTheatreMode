@@ -37,6 +37,7 @@ std::atomic<std::uint64_t> hook_calls=0,lock_skips=0,hook_cost_ns=0;
 std::atomic<std::uint64_t> read_cost_ns=0,write_cost_ns=0,write_calls=0,hook_max_ns=0,interval_calls=0,interval_cost_ns=0;
 std::uint64_t clock_now(){ULONGLONG t=0;QueryInterruptTimePrecise(&t);return t*100;}
 std::uint64_t timeline_ns=0,duration_ns=0,anchor_ns=0,host_heartbeat=0,last_tick=0,probe_until=0,next_id=1;
+std::uint64_t shake_epoch=0;
 bool playing=false,linked=false,reset=true;
 double speed=1;
 std::string replay_path,keys_replay_path;
@@ -62,7 +63,7 @@ std::uint64_t bone_time=0;
 bool read(std::uintptr_t address,void*out,std::size_t bytes){SIZE_T n=0;return address>=0x10000&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes;}
 std::uint64_t time_at(std::uint64_t now){
  auto time=timeline_ns;
- if(playing&&now>=anchor_ns){auto delta=static_cast<long double>(now-anchor_ns)*speed;auto remaining=duration_ns>time?duration_ns-time:0;time+=static_cast<std::uint64_t>(std::min<long double>(delta,remaining));}
+ if(playing&&duration_ns&&now>=anchor_ns){const auto delta=static_cast<long double>(now-anchor_ns)*speed;const auto step=static_cast<std::uint64_t>(std::min<long double>(delta,UINT64_MAX));const auto remaining=duration_ns>time?duration_ns-time:0;time=step>=remaining?(step-remaining)%duration_ns:time+step;}
  return std::min(time,duration_ns);
 }
 void release(const char*reason){state.enabled=false;state.writing=false;input_owned=false;free_input=false;reset=true;probe_until=0;mouse_x=0;mouse_y=0;fov_wheel=0;velocity={};state.status=reason;}
@@ -123,7 +124,7 @@ bool update(void* output,void* source){
  auto read_start=clock_now();bool memory_ok=camera_local_read(source,native.matrix);read_cost_ns.fetch_add(clock_now()-read_start,std::memory_order_relaxed);
  if(!memory_ok){state.observed=false;release("Camera output unavailable; native control restored");return false;}
  auto pose=decode(native);if(!pose){state.observed=false;release("Invalid matrix/FOV; native control restored");return false;}
- state.observed=true;state.timestamp_ns=now;
+ state.observed=true;state.timestamp_ns=now;state.native_near_plane=native.near_plane;
  auto effective_mode=state.cuts_enabled?static_cast<unsigned>(cut_track.evaluate(time_at(now))):state.mode;
  if(!state.enabled||effective_mode==0){state.pose=*pose;state.writing=false;input_owned=false;free_input=false;reset=true;last_tick=now;return false;}
  // RegisterHotKey can route F6 to the host instead of the game window. Poll the
@@ -156,17 +157,19 @@ bool update(void* output,void* source){
   } else {release("Dolly cut has no path; native camera restored");return false;}
  }
  auto rendered=state.pose;
- // Pure timeline-based oscillation: seek/pause produce the same result and
- // shake never accumulates into the editable pose or captured camera nodes.
+ // Real-time shake continues during pause and ignores world/replay timescale.
+ // It never accumulates into the editable pose or captured camera nodes.
  if(!probe_until&&(effective_mode!=2||state.shake_dolly)&&state.shake_frequency>0&&(state.shake_position>0||state.shake_rotation>0)){
-  double t=double(time_at(now))/1e9;
+  if(!shake_epoch)shake_epoch=now;
+  double t=double(now-shake_epoch)/1e9;
   for(int i=0;i<3;++i){double phase=t*state.shake_frequency*6.283185307179586*(1+i*.173)+i*2.1;
    if(!std::isfinite(phase)){release("Shake phase overflow; native camera restored");return false;}double wave=cinematic::shake_wave(t,i,state.shake_frequency,state.shake_speed,state.shake_smoothing_seconds);
    rendered.position[i]+=wave*state.shake_position;cinematic::Quat q{0,0,0,1};double angle=wave*(state.shake_rotation*(3.141592653589793/180));q[i]=std::sin(angle/2);q[3]=std::cos(angle/2);auto rotation=cinematic::normalized(product(rendered.orientation,q));if(!rotation){release("Invalid shake orientation; native camera restored");return false;}rendered.orientation=*rotation;}
  }
  float matrix[16];encode(rendered,matrix);float fov=static_cast<float>(rendered.fov_degrees*3.141592653589793/180);
  if(!cinematic::valid(state.pose)||!std::all_of(matrix,matrix+16,[](float v){return std::isfinite(v);})) {release("Invalid camera output; native control restored");return false;}
- auto write_start=clock_now();bool written=camera_local_write(output,matrix,fov);write_cost_ns.fetch_add(clock_now()-write_start,std::memory_order_relaxed);++write_calls;
+ const float near_plane=std::isfinite(native.far_plane)&&native.far_plane>state.near_plane?float(state.near_plane):0;
+ auto write_start=clock_now();bool written=camera_local_write(output,matrix,fov,near_plane);write_cost_ns.fetch_add(clock_now()-write_start,std::memory_order_relaxed);++write_calls;
  if(!written){release("Camera write failed; native control restored on next native copy");return false;}
  if(!state.writing)state.status=probe_until?"Two-second offset probe active":"Experimental camera override active (runtime unverified)";
  state.writing=true;input_owned=true;free_input=(effective_mode==1||(effective_mode==2&&!state.dolly_preview&&!state.cuts_enabled))&&!probe_until;
@@ -251,6 +254,7 @@ void preview(bool enabled){std::lock_guard lock(mutex);
 }
 void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
 void dolly_smoothing(double seconds){std::lock_guard lock(mutex);if(std::isfinite(seconds)&&seconds>=0&&seconds<=2)state.dolly_smoothing_seconds=seconds;}
+void close_up(bool prevent,double near_plane){std::lock_guard lock(mutex);if(std::isfinite(near_plane)&&near_plane>=.001&&near_plane<=1){state.prevent_asset_fade=prevent;state.near_plane=near_plane;}}
 void shake(double position,double rotation,double frequency,double speed,double smoothing,bool dolly){std::lock_guard lock(mutex);if(std::isfinite(position)&&position>=0&&position<=5&&std::isfinite(rotation)&&rotation>=0&&rotation<=30&&std::isfinite(frequency)&&frequency>=0&&frequency<=30&&std::isfinite(speed)&&speed>=0&&speed<=10&&std::isfinite(smoothing)&&smoothing>=0&&smoothing<=2){state.shake_position=position;state.shake_rotation=rotation;state.shake_frequency=frequency;state.shake_speed=speed;state.shake_smoothing_seconds=smoothing;state.shake_dolly=dolly;}}
 std::optional<cinematic::State> bone_world(const float*root,const float*qs){
  if(!root||!qs)return {};theater_camera::Slot slot;std::copy(root,root+16,slot.matrix);slot.fov=1;slot.aspect=1;slot.near_plane=.1f;slot.far_plane=1000;
@@ -277,6 +281,11 @@ void fov(double value){std::lock_guard lock(mutex);if(state.enabled&&std::isfini
 void cuts(bool enabled,std::vector<cinematic::CameraCut> values){std::lock_guard lock(mutex);if(enabled&&(track.keys().empty()||keys_replay_path!=replay_path)){state.status="Create this replay's Dolly path before enabling cuts";return;}if(!cut_track.replace(std::move(values),duration_ns)){state.status="Invalid cut: overlaps, duplicate IDs or outside replay";return;}state.cuts_enabled=enabled;state.writing=false;reset=true;state.status="Camera cuts updated; explicitly arm camera writes";}
 }
 extern "C" int tm_camera_bone_index(){return camera_runtime::selected_bone.load();}
+extern "C" int tm_camera_asset_fade_requested(){
+ using namespace camera_runtime;std::unique_lock lock(mutex,std::try_to_lock);if(!lock.owns_lock())return -1;
+ const auto now=clock_now();const auto focused=GetForegroundWindow(),game=game_window.load();
+ return state.prevent_asset_fade&&state.enabled&&state.writing&&(state.mode==1||state.mode==2)&&game_allowed&&linked&&now-host_heartbeat<1000000000ULL&&game&&focused&&GetAncestor(focused,GA_ROOT)==GetAncestor(game,GA_ROOT)?1:0;
+}
 extern "C" void tm_camera_bone_publish(const float* root,const float*qs){
  auto value=camera_runtime::bone_world(root,qs);std::unique_lock lock(camera_runtime::mutex,std::try_to_lock);if(!lock.owns_lock())return;
  camera_runtime::bone_pose=value;camera_runtime::bone_time=camera_runtime::clock_now();camera_runtime::state.bone_available=value.has_value();

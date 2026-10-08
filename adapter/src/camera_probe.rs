@@ -10,6 +10,7 @@ struct Telemetry { timestamp_ns:u64, mask:u32, available:u32, slots:[Slot;4] }
 const _:()=assert!(std::mem::size_of::<Telemetry>()==352);
 const _:()=assert!(std::mem::offset_of!(CSCam,fov)==std::mem::offset_of!(CSCam,matrix)+64);
 const _:()=assert!(std::mem::offset_of!(CSCam,far_plane)==std::mem::offset_of!(CSCam,matrix)+76);
+const _:()=assert!(std::mem::offset_of!(CSCam,near_plane)==crate::game_profile::OFF_CAMERA_NEAR_PLANE);
 unsafe extern "C" { fn tm_camera_publish(snapshot:*const Telemetry); fn tm_camera_probe_enabled()->bool;fn tm_camera_runtime_diagnostic(out:*mut i8,size:usize)->i32;fn tm_world_timing_diagnostic(out:*mut i8,size:usize)->i32; }
 pub fn tick(now:u64) {
  static LAST_RUNTIME_LOG:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);

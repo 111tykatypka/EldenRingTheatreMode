@@ -15,6 +15,7 @@ use pelite::pe64::{Pe, PeView};
 mod game_profile { include!(concat!(env!("OUT_DIR"), "/game_profile.rs")); }
 mod control_protocol;
 mod camera_probe;
+mod foliage;
 mod control_link;
 mod player_action;
 mod character_capture;
@@ -180,6 +181,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     unsafe extern "C"{fn tm_hud_game_context(active:i32);}
                     unsafe{tm_hud_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
                     camera_probe::tick(now);
+                    foliage::tick(PRESENT.load(Ordering::Acquire)!=0&&offline_allowed());
                     characters.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}
                     bone_replay::world_timing_tick(now);
