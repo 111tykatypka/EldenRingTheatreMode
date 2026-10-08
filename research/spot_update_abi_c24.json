@@ -1,0 +1,116 @@
+[
+  {
+    "address": "0x141a46320",
+    "bytes": "40 55",
+    "mnemonic": "push",
+    "operands": "rbp"
+  },
+  {
+    "address": "0x141a46322",
+    "bytes": "57",
+    "mnemonic": "push",
+    "operands": "rdi"
+  },
+  {
+    "address": "0x141a46323",
+    "bytes": "48 8d 6c 24 b1",
+    "mnemonic": "lea",
+    "operands": "rbp, [rsp - 0x4f]"
+  },
+  {
+    "address": "0x141a46328",
+    "bytes": "48 81 ec d8 00 00 00",
+    "mnemonic": "sub",
+    "operands": "rsp, 0xd8"
+  },
+  {
+    "address": "0x141a4632f",
+    "bytes": "0f 29 b4 24 c0 00 00 00",
+    "mnemonic": "movaps",
+    "operands": "xmmword ptr [rsp + 0xc0], xmm6"
+  },
+  {
+    "address": "0x141a46337",
+    "bytes": "48 8b f9",
+    "mnemonic": "mov",
+    "operands": "rdi, rcx"
+  },
+  {
+    "address": "0x141a4633a",
+    "bytes": "0f 28 f1",
+    "mnemonic": "movaps",
+    "operands": "xmm6, xmm1"
+  },
+  {
+    "address": "0x141a4633d",
+    "bytes": "e8 ce 7b 0a 00",
+    "mnemonic": "call",
+    "operands": "0x141aedf10"
+  },
+  {
+    "address": "0x141a46342",
+    "bytes": "80 bf 30 03 00 00 00",
+    "mnemonic": "cmp",
+    "operands": "byte ptr [rdi + 0x330], 0"
+  },
+  {
+    "address": "0x141a46349",
+    "bytes": "0f 84 50 01 00 00",
+    "mnemonic": "je",
+    "operands": "0x141a4649f"
+  },
+  {
+    "address": "0x141a4634f",
+    "bytes": "48 8b 0d 8a d0 da 02",
+    "mnemonic": "mov",
+    "operands": "rcx, qword ptr [rip + 0x2dad08a]"
+  },
+  {
+    "address": "0x141a46356",
+    "bytes": "33 d2",
+    "mnemonic": "xor",
+    "operands": "edx, edx"
+  },
+  {
+    "address": "0x141a46358",
+    "bytes": "48 89 9c 24 00 01 00 00",
+    "mnemonic": "mov",
+    "operands": "qword ptr [rsp + 0x100], rbx"
+  },
+  {
+    "address": "0x141a46360",
+    "bytes": "48 8b 9f 68 03 00 00",
+    "mnemonic": "mov",
+    "operands": "rbx, qword ptr [rdi + 0x368]"
+  },
+  {
+    "address": "0x141a46367",
+    "bytes": "e8 24 34 fa ff",
+    "mnemonic": "call",
+    "operands": "0x1419e9790"
+  },
+  {
+    "address": "0x141a4636c",
+    "bytes": "48 3b d8",
+    "mnemonic": "cmp",
+    "operands": "rbx, rax"
+  },
+  {
+    "address": "0x141a4636f",
+    "bytes": "74 0e",
+    "mnemonic": "je",
+    "operands": "0x141a4637f"
+  },
+  {
+    "address": "0x141a46371",
+    "bytes": "48 83 bf 68 03 00 00 00",
+    "mnemonic": "cmp",
+    "operands": "qword ptr [rdi + 0x368], 0"
+  },
+  {
+    "address": "0x141a46379",
+    "bytes": "0f 85 18 01 00 00",
+    "mnemonic": "jne",
+    "operands": "0x141a46497"
+  }
+]

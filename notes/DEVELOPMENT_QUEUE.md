@@ -3,7 +3,7 @@
 ## Priority: native custom light illumination
 
 Requested: point/spot definitions must illuminate the scene, not only show editor icons.
-Status: QUEUED — not implemented. C22 light handles and serialization are authoring only.
+Status: QUEUED вЂ” not implemented. C22 light handles and serialization are authoring only.
 
 Reuse the existing LightEditor definitions and viewport manipulation. Keep the user-verified day/night slider unchanged.
 
@@ -24,3 +24,5 @@ Evidence and unresolved items: research/CUSTOM_LIGHTS_RESEARCH.md.
 C23 adds an opt-in Look-tab transient normal-character-update request. Exact executable consumer verified statically; implementation compiled separately. Visual benefit and callback timing still require an in-game check.
 
 Separate follow-up: render/model LOD override and camera-based relevance/streaming. Do not represent grass LOD params as animation controls. CameraTools' higher-LOD hook is a render-quality mechanism, not proof of NPC update quality.
+
+C24 progress and remaining runtime/ownership risks: notes/CUSTOM_LIGHTS_C24.md. Do not mark illumination or lifecycle verified before live checks.

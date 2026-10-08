@@ -105,3 +105,7 @@ Next backend step: verify native update caller/lock ownership and x64 factory/re
 ## C22 — viewport authoring
 
 The user reports the manual day/night slider works perfectly; its implementation/UI remain unchanged in C22. Light definitions now have projected point/spot icons and dolly-style world-axis translation/rotation handles. The camera projection, rotation-plane intersection and quaternion world-axis rotation math are reused, including viewport resize mapping and clean-preview clipping. No new native lighting calls are made. Icons edit persisted definitions only; actual renderer creation/shadow application remain unimplemented. New UI/interaction is compile verified but not yet visually/runtime verified. Details: notes/CUSTOM_LIGHTS_C22.md.
+
+## C24 — first native illumination backend
+
+Native factories, owned-reference retention, setters and removal/release are now bound and connected to LightEditor on Draw_Pre. Prefix byte guards and full executable version/hash guards remain. See notes/CUSTOM_LIGHTS_C24.md for ABI evidence, nonrecursive-lock rules, field mapping, prototype limits and the rejected padding caller. No new native hook was installed. This is implemented but runtime/visual validation required; thread affinity is not claimed proven from compilation. Shadow allocation and cone softness remain unavailable. Day/night implementation unchanged.

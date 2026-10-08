@@ -1,3 +1,4 @@
+#include "../NativeLightBackend.h"
 #include "TheaterOverlayUI.h"
 #include "TheaterSounds.h"
 #include "imgui_internal.h"
@@ -1104,13 +1105,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::TextWrapped("Changes native world time and its sun/shadows where supported by the area. World time may be autosaved.");
         ImGui::Separator();
         section("Custom lights");
+        auto native=native_lights::view();bool renderLights=native.enabled;
+        if(checkbox("Render lights",&renderLights))native_lights::enable(renderLights);
         if(checkbox("Show light handles",&showLightMarkers_)){lightGizmoDragging_=false;SaveSettings();}
         auto camera=camera_runtime::view(false);
         ImGui::BeginDisabled(!camera.observed);
-        if(ImGui::Button("Create point light",ImVec2(-FLT_MIN,0))){light_editor::create(light_editor::Type::Point,camera.pose);viewportLightSelected_=true;gizmoDragging_=false;}
-        if(ImGui::Button("Create spot light",ImVec2(-FLT_MIN,0))){light_editor::create(light_editor::Type::Spot,camera.pose);viewportLightSelected_=true;gizmoDragging_=false;}
+        if(ImGui::Button("Create point light",ImVec2(-FLT_MIN,0))){light_editor::create(light_editor::Type::Point,camera.pose);native_lights::enable(true);viewportLightSelected_=true;gizmoDragging_=false;}
+        if(ImGui::Button("Create spot light",ImVec2(-FLT_MIN,0))){light_editor::create(light_editor::Type::Spot,camera.pose);native_lights::enable(true);viewportLightSelected_=true;gizmoDragging_=false;}
         ImGui::EndDisabled();
-        ImGui::TextColored(ImVec4(1,.7f,.25f,1),"Definitions only - NOT rendered yet");
+        ImGui::TextDisabled("Native lights: %u",native.rendered);
+        if(!native.status.empty())ImGui::TextWrapped("%s",native.status.c_str());
         auto editor=light_editor::view();
         const auto selected=std::find_if(editor.lights.begin(),editor.lights.end(),[&](const auto& l){return l.id==editor.selected;});
         const char* name=selected==editor.lights.end()?"Select light":selected->name.c_str();
@@ -1130,20 +1134,24 @@ void Overlay::DrawPanel(const OverlayFrame& f)
                 labelAbove("Rotation pitch / yaw / roll");if(ImGui::DragFloat3("##light_rotation",degrees,.2f)){
                     if(auto rotation=cinematic::mouse_look({0,0,0,1},degrees[1]*3.141592653589793/180,degrees[0]*3.141592653589793/180,degrees[2]*3.141592653589793/180)){light.transform.orientation=*rotation;changed=true;}}
                 changed|=slider("Cone angle",&light.cone_degrees,1,179,"%.1f deg",0,45);
-                changed|=slider("Cone softness",&light.softness,0,1,"%.2f",0,.25f);
+                ImGui::BeginDisabled();slider("Cone softness",&light.softness,0,1,"%.2f",0,.25f);ImGui::EndDisabled();
             }
             changed|=slider("Radius",&light.radius,.01f,500,"%.2f",ImGuiSliderFlags_Logarithmic,5);
             changed|=slider("Intensity",&light.intensity,0,100,"%.3f",ImGuiSliderFlags_Logarithmic,1);
             labelAbove("Light color RGB");ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x,Px(170,s)));changed|=ImGui::ColorPicker3("##light_color",light.rgb,ImGuiColorEditFlags_PickerHueWheel|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
-            changed|=checkbox("Shadows",&light.shadows);
+            ImGui::BeginDisabled();
+            checkbox("Shadows (not supported yet)",&light.shadows);
             ImGui::BeginDisabled(!light.shadows);
             int quality=int(light.shadow_level);labelAbove("Shadow quality level");if(ImGui::SliderInt("##shadow_quality",&quality,1,5)){light.shadow_level=quality;changed=true;}
             changed|=slider("Shadow strength",&light.shadow_strength,0,1,"%.2f",0,1);
             ImGui::EndDisabled();
+            ImGui::EndDisabled();
             if(ImGui::CollapsingHeader("Advanced light properties")){
                 changed|=slider("Source radius",&light.source_radius,0,500,"%.2f",ImGuiSliderFlags_Logarithmic,.1f);
+                ImGui::BeginDisabled();
                 labelAbove("Shadow depth bias");changed|=ImGui::SliderInt("##shadow_bias",&light.shadow_bias,-7,7);
                 changed|=slider("Scattering scale",&light.scattering,0,10,"%.2f",0,1);
+                ImGui::EndDisabled();
                 labelAbove("Specular color RGB");changed|=ImGui::ColorEdit3("##specular_color",light.specular_rgb,ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
             }
             if(changed)light_editor::edit(light);
@@ -1151,7 +1159,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         }
         if(ImGui::Button("Save light setup"))light_editor::save();ImGui::SameLine();if(ImGui::Button("Load setup")){light_editor::load();viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}
         if(!editor.status.empty())ImGui::TextWrapped("%s",editor.status.c_str());
-        ImGui::TextDisabled("Native light rendering: not implemented.");
+        ImGui::TextDisabled("Native illumination prototype. Shadows / softness unavailable.");
         break;
     }
     case Tool::Weather:

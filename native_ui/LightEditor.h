@@ -9,7 +9,7 @@ struct Light {
  std::uint64_t id=0;Type type=Type::Point;std::string name;
  cinematic::State transform;
  float rgb[3]{1,1,1},radius=5,intensity=1,cone_degrees=45,softness=.25f;
- // Draft properties only: native application is a separate capability.
+ // Native illumination applies core fields; shadow/scattering remain drafts.
  bool enabled=true,shadows=false;
  unsigned shadow_level=2;
  float shadow_strength=1,source_radius=.1f,scattering=1;
@@ -18,6 +18,7 @@ struct Light {
 };
 struct View {std::vector<Light> lights;std::uint64_t selected=0;std::string status;};
 View view();
+bool snapshot(View& out); // Nonblocking game-task copy; no native pointers.
 void create(Type type,const cinematic::State& camera);
 void select(std::uint64_t id);
 void edit(Light light);

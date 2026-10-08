@@ -9,6 +9,7 @@ add_library(TheaterRenderBackend STATIC
  native_ui/EldenRingTimingAdapter.cpp
  native_ui/EldenRingWeatherAdapter.cpp
  native_ui/EldenRingLightAdapter.cpp
+ native_ui/NativeLightBackend.cpp
  native_ui/LightEditor.cpp
  native_ui/EldenRingHudAdapter.cpp
 
