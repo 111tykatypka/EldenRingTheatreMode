@@ -80,7 +80,9 @@ unsafe extern "C"{fn tm_render_event(text:*const c_char);fn tm_render_lock_game_
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
 pub fn world_timing_tick(now:u64){
  unsafe extern "C"{fn tm_world_timing_tick(active:i32,speed:f64);}
- let (active,rate)=match STATE.try_lock(){Ok(s)=>(s.owning&&s.host.0&&!s.replay_blocked,s.host.1),Err(_)=>(false,1.0)};
+ // While the replay owns the body, a pause does not stop the engine: the world runs at the slowest allowed rate (0.001), so effects
+ // and particles hold their look instead of burning out at normal speed.
+ let (active,rate)=match STATE.try_lock(){Ok(s)=>(s.owning&&!s.replay_blocked,if s.host.0{s.host.1}else{0.001}),Err(_)=>(false,1.0)};
  let mut link:Link=unsafe{std::mem::zeroed()};unsafe{tm_overlay_bone_link(&mut link)};
  let fresh=link.linked!=0&&link.loaded!=0&&link.recording!=RECORD_RECORDING&&link.recording!=RECORD_PAUSED&&now>=link.received_ns&&now-link.received_ns<250_000_000;
  unsafe{tm_world_timing_tick((active&&fresh&&crate::offline_allowed()&&player_chr().is_some()) as i32,rate);}
@@ -166,6 +168,18 @@ fn bone_world(chr:usize,root:&[f32;16],bone:usize)->Option<[f32;3]>{
  let t:[f32;3]=std::array::from_fn(|i|f32::from_le_bytes(raw[i*4..i*4+4].try_into().unwrap()));
  if !t.iter().all(|v|v.is_finite()){return None;}
  Some(std::array::from_fn(|i|root[12+i]+(0..3).map(|j|root[j*4+i]*t[j]).sum::<f32>()))}
+/// Same as `nearest_weapon_bone` but on a recorded frame: the weapon bone nearest to the recorded effect position `p` (within 1.3 m,
+/// a sword is long) and `p` along the recorded character axes from that bone. This ties a trail effect to the sword, not to the room.
+fn recorded_weapon_attach(f:&Frame,p:[f32;3])->Option<(usize,[f32;3],f32)>{
+ let bones=WEAPON_BONES.lock().unwrap().clone();if bones.is_empty()||f.model.len()<48{return None;}
+ let root=f.matrix;if !root.iter().all(|v|v.is_finite()){return None;}
+ let mut best:Option<(usize,[f32;3],f32)>=None;
+ for b in bones{if (b+1)*48>f.model.len(){continue;}
+  let t:[f32;3]=std::array::from_fn(|i|f32::from_le_bytes(f.model[b*48+i*4..b*48+i*4+4].try_into().unwrap()));
+  let w:[f32;3]=std::array::from_fn(|i|root[12+i]+(0..3).map(|j|root[j*4+i]*t[j]).sum::<f32>());
+  let d=[p[0]-w[0],p[1]-w[1],p[2]-w[2]];let dist=(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]).sqrt();
+  if dist<=1.3&&best.is_none_or(|x|dist<x.2){best=Some((b,std::array::from_fn(|j|(0..3).map(|i|root[j*4+i]*d[i]).sum::<f32>()),dist));}}
+ best}
 fn read_root(chr:usize)->Option<[f32;16]>{
  let mut raw=[0u8;64];if !crate::companions::copy(matrix_address(chr),&mut raw){return None;}
  let m:[f32;16]=std::array::from_fn(|i|f32::from_le_bytes(raw[i*4..i*4+4].try_into().unwrap()));m.iter().all(|v|v.is_finite()).then_some(m)}
@@ -672,6 +686,9 @@ pub fn tick(group:usize,now:u64){
    // a jump of more than half a second) the cursor is only moved, so scrubbing never fires a burst; playing on from there creates
    // the effects again, which is how they reappear after a rewind.
    effects::tick(t);
+   let fx_due=s.loaded.as_ref().map(|l|{let e=&l.world.effects;s.fx_cursor<e.len()&&e[s.fx_cursor].time<=t}).unwrap_or(false);
+   let rec_frame:Option<Frame>=if fx_due&&s.options&256==0{s.loaded.as_mut().and_then(|l|{let i=l.store.index_at(t);l.store.get(i)})}else{None};
+   let live_root=if fx_due{read_root(chr)}else{None};
    if s.options&256==0&&effects::ready(){if let Some(loaded)=&s.loaded{let ev=&loaded.world.effects;
     // Pause re-evaluates the same moment and can step back a frame or two: only a real seek (back more than a quarter of a second,
     // or forward more than half a second) clears the effects.
@@ -679,8 +696,13 @@ pub fn tick(group:usize,now:u64){
     if jumped{effects::release_all();}
     let mut i=if jumped{ev.partition_point(|e|e.time<=t)}else{s.fx_cursor.min(ev.len())};
     if !jumped{let mut made=0;while i<ev.len()&&ev[i].time<=t&&made<16{
-     if let Some(sh)=if loaded.anchors.is_empty(){Some([0.0f32;3])}else{loaded.anchors.translation(ev[i].time,live.0,live.1)}{let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];let code=effects::spawn_scene(ev[i].id,p,ev[i].time.saturating_add(20_000_000_000),ev[i].time);let ok=code==1||code==2;if ok{made+=1;if loaded.world.effect_tracks.contains_key(&(ev[i].time,ev[i].id)){s.fx_live.push((ev[i].time,ev[i].id));}
-       else if s.fx_attach.len()<256{if let Some((bone,offset,dist))=nearest_weapon_bone(chr,p){s.fx_attach.push((ev[i].time,ev[i].id,bone,offset));
+     if let Some(sh)=if loaded.anchors.is_empty(){Some([0.0f32;3])}else{loaded.anchors.translation(ev[i].time,live.0,live.1)}{let mut p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];
+      let tracked=loaded.world.effect_tracks.contains_key(&(ev[i].time,ev[i].id));
+      // Effects born near a weapon bone are tied to that bone (offset measured on the recording, applied to the live sword).
+      let sword=if tracked||s.fx_attach.len()>=256{None}else{match (&rec_frame,&live_root){(Some(rf),Some(lr))=>recorded_weapon_attach(rf,ev[i].pos).and_then(|(b,off,d)|bone_world(chr,lr,b).map(|w|(b,off,d,std::array::from_fn::<f32,3,_>(|k|w[k]+(0..3).map(|j|lr[j*4+k]*off[j]).sum::<f32>())))),_=>None}};
+      if let Some((_,_,_,live_p))=&sword{p=*live_p;}
+      let code=effects::spawn_scene(ev[i].id,p,ev[i].time.saturating_add(20_000_000_000),ev[i].time);let ok=code==1||code==2;if ok{made+=1;if loaded.world.effect_tracks.contains_key(&(ev[i].time,ev[i].id)){s.fx_live.push((ev[i].time,ev[i].id));}
+       else if let Some((bone,offset,dist,_))=sword{{s.fx_attach.push((ev[i].time,ev[i].id,bone,offset));
         static ATT:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);if ATT.fetch_add(1,std::sync::atomic::Ordering::Relaxed)<30{crate::log_game(&format!("EFFECT_ATTACH: effect {} follows weapon bone {bone} ({dist:.2} m from it)",ev[i].id));}}}}let (before,after)=(code,code);
       static LOGGED:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);if LOGGED.fetch_add(1,std::sync::atomic::Ordering::Relaxed)<40{crate::log_game(&format!("EFFECT_REPLAY: id {} at t={:.2}s -> ({:.1},{:.1},{:.1}) called={} scene-create result {:?} (1 created, 2 created but empty handle, -1 FXR not resident, -4 check failed, -5 no scene, -7 no CSSfxImp) {:?} shift=({:.1},{:.1},{:.1}) replayed player at {:?}, recorded effect at {:?}",ev[i].id,ev[i].time as f64/1e9,p[0],p[1],p[2],ok,before,after,sh[0],sh[1],sh[2],read_transform(chr).map(|t|t[2]),ev[i].pos));}}
      i+=1;}}
