@@ -546,6 +546,7 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
     ImGui::SetNextWindowSizeConstraints(ImVec2(0,0),ImVec2(pictureMax.x-pictureMin.x,std::max(1.f,pictureMax.y-pictureMin.y-Px(8,s))));
     ImGuiWindowFlags flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus;
     if(!shown)flags|=ImGuiWindowFlags_NoInputs;
+    if(cameraModesGrip_||cameraModesResizing_)flags|=ImGuiWindowFlags_NoMove; // the corner grip resizes, it must not drag the window
     ImGui::PushStyleColor(ImGuiCol_WindowBg,Color::OverlayBg.Alpha(235).Vec4());
     const bool visible=ImGui::Begin("##camera-modes",nullptr,flags);
     if(visible){
@@ -554,14 +555,14 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
             const ImVec2 g=ImGui::GetCursorScreenPos();const float gw=Px(72,s)*4+ImGui::GetStyle().ItemSpacing.x*3;
             ImGui::Dummy(ImVec2(gw,Px(9,s)));
             auto*gd=ImGui::GetWindowDrawList();for(int d=-3;d<=3;++d)gd->AddCircleFilled(ImVec2(g.x+gw*.5f+d*Px(7,s),g.y+Px(4,s)),Px(1.6f,s),Color::TextSecondary.U32());
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("Drag to move. Ctrl + mouse wheel or right-click to resize.");
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("Drag to move. Drag the lower right corner, use Ctrl + mouse wheel, or right-click to resize.");
             const auto&io=ImGui::GetIO();
             if(ImGui::IsWindowHovered()&&io.KeyCtrl&&io.MouseWheel!=0){cameraModesScale_=std::clamp(cameraModesScale_+io.MouseWheel*.1f,.5f,3.f);cameraModesDirty_=true;}
             if(ImGui::BeginPopupContextWindow("##camera-modes-menu")){
                 if(ImGui::SliderFloat("Size",&cameraModesScale_,.5f,3.f,"%.2f"))cameraModesDirty_=true;
                 if(ImGui::MenuItem("Reset position")){cameraModesX_=-1;cameraModesY_=-1;cameraModesDirty_=true;}
                 ImGui::EndPopup();}
-            const bool dragNow=ImGui::IsWindowHovered()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left,3.f)&&!ImGui::IsAnyItemActive();
+            const bool dragNow=ImGui::IsWindowHovered()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left,3.f)&&!ImGui::IsAnyItemActive()&&!cameraModesGrip_&&!cameraModesResizing_;
             if(dragNow)cameraModesDragging_=true;
             if(cameraModesDragging_){const ImVec2 p=ImGui::GetWindowPos();cameraModesX_=p.x;cameraModesY_=p.y;
                 if(!ImGui::IsMouseDown(ImGuiMouseButton_Left)){cameraModesDragging_=false;cameraModesDirty_=true;}}
@@ -603,6 +604,19 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
                 if(ImGui::Button(clear.c_str()))clearDollyDialog_=true;
             }
         }
+    }
+    if(visible&&shown){
+        // Resize grip in the lower right corner: drag it to make the whole widget bigger or smaller.
+        const ImVec2 wp=ImGui::GetWindowPos(),ws=ImGui::GetWindowSize();const float g=Px(16,s);
+        const ImVec2 a(wp.x+ws.x-g,wp.y+ws.y-g),b(wp.x+ws.x,wp.y+ws.y);auto&io=ImGui::GetIO();
+        cameraModesGrip_=io.MousePos.x>=a.x&&io.MousePos.x<=b.x&&io.MousePos.y>=a.y&&io.MousePos.y<=b.y;
+        if(cameraModesGrip_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left))cameraModesResizing_=true;
+        if(!ImGui::IsMouseDown(ImGuiMouseButton_Left)){if(cameraModesResizing_)cameraModesDirty_=true;cameraModesResizing_=false;}
+        if(cameraModesResizing_){cameraModesScale_=std::clamp(cameraModesScale_*(1.f+io.MouseDelta.x/std::max(40.f,ws.x)),.5f,3.f);}
+        if(cameraModesGrip_||cameraModesResizing_)ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+        const ImU32 col=(cameraModesGrip_||cameraModesResizing_?Color::AccentAmber:Color::TextSecondary).U32();auto*d=ImGui::GetWindowDrawList();
+        for(int i=0;i<3;++i){const float o=Px(4.f+i*4.f,s);d->AddLine(ImVec2(b.x-o,b.y-Px(2,s)),ImVec2(b.x-Px(2,s),b.y-o),col,Px(1.4f,s));}
+        if(cameraModesDirty_&&!cameraModesResizing_&&!cameraModesDragging_){cameraModesDirty_=false;SaveSettings();}
     }
     ImGui::End();ImGui::PopStyleColor();
 }
