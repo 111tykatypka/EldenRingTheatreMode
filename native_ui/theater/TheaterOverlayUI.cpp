@@ -599,6 +599,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
+            // Freeze every character that is not part of the replay (adapter actors.rs freeze_others), on by default: bit 8 = off.
+            bool freezeAi = (gReplayOptions.load() & 8) == 0;
+            if (ImGui::Checkbox(T(Str::ReplayFreezeAi), &freezeAi)) { gReplayOptions = freezeAi ? (gReplayOptions & ~8u) : (gReplayOptions | 8u); SaveSettings(); }
+            PushFont(Font::Meta);
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(T(Str::ReplayFreezeAiNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);

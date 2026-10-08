@@ -37,7 +37,7 @@ namespace TheaterUI
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
         UiSounds, UiSoundsOn,
-        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote,
+        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote,
         Count
     };
 
@@ -111,6 +111,9 @@ namespace TheaterUI
         { "Full update rate for distant characters", "Полная частота обновления дальних персонажей" },
         { "The game updates far or off-screen characters less often (they lag and stutter). While recording or replaying, force every character to update each frame. Untick to use the game's own savings.",
           "Игра реже обновляет дальних персонажей и тех, кого не видно (лаги и рывки). При записи и повторе обновлять всех каждый кадр. Снимите флажок, чтобы вернуть экономию игры." },
+        { "Freeze other characters during replay", "Останавливать остальных персонажей при повторе" },
+        { "While a replay plays, every character that is not part of it stops moving and attacking (no one gets in the way or hits your replayed body). Their behaviour comes back when the replay ends.",
+          "Пока идёт повтор, все персонажи, не входящие в запись, не двигаются и не атакуют (никто не мешает и не бьёт воспроизводимое тело). Поведение возвращается после повтора." },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

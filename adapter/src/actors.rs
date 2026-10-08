@@ -212,7 +212,7 @@ struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,tr
 #[derive(Clone)]
 struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32,chr_id:i32,pos:[f32;3],before:HashSet<(usize,u64)>}
 pub struct Player{tracks:Vec<(ActorInfo,ActorTrack,Vec<i16>)>,controlled:HashMap<u32,Controlled>,next_match:u64,local:Vec<u8>,model:Vec<u8>,logged:bool,categories:HashMap<u32,u32>,warned:HashSet<u32>,skeletons:HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,
- meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>,failed:bool}
+ meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>,failed:bool,frozen:HashMap<usize,(u64,u32)>,next_scan:u64}
 const MAX_PUPPETS:usize=8;
 impl Player{
  pub fn new(actors:Vec<(ActorInfo,ActorTrack)>,context:&[EntityContext],skeletons:&HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,meta:HashMap<u32,ActorMeta>)->Self{
@@ -220,9 +220,33 @@ impl Player{
   let tracks=actors.into_iter().map(|(info,mut t)|{
    let n=t.len();let picks:Vec<PlayerFrame>=(0..3).filter_map(|k|t.get(k*(n.saturating_sub(1))/2).map(|f|f.body.clone())).collect();
    let parents=skeletons.get(&info.id).map(|d|d.parents.clone()).unwrap_or_else(||crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..]))));(info,t,parents)}).collect();
-  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new(),failed:false}}
+  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new(),failed:false,frozen:HashMap::new(),next_scan:0}}
  pub fn len(&self)->usize{self.tracks.len()}
  pub fn set_options(&mut self,options:u32){self.options=options;}
+ /// Freezes the AI of every live character the replay does not drive (option bit 8 switches it off): the documented
+ /// debug no-move/no-attack flags, their original values kept and put back exactly. Without it, real enemies
+ /// walk into the replay, attack the player's body and block recorded characters.
+ fn freeze_others(&mut self,on:bool,now:u64){
+  let mask=(profile::VAL_DEBUG_FLAG_NO_MOVE|profile::VAL_DEBUG_FLAG_NO_ATTACK) as u32;
+  if !on{self.unfreeze_all();return;}
+  if now>=self.next_scan{self.next_scan=now+500_000_000;
+   let alive=live();let player=live_player();
+   self.frozen.retain(|a,(h,_)|alive.contains(a)&&handle_of(unsafe{&*(*a as *const ChrIns)})==*h);
+   let mut added=0;
+   for a in alive{if Some(a)==player||self.frozen.contains_key(&a)||self.controlled.values().any(|c|c.chr==a){continue;}
+    let c=unsafe{&*(a as *const ChrIns)};if c.field_ins_handle.is_empty(){continue;}
+    let Some(f)=debug_flags(a) else {continue};
+    self.frozen.insert(a,(handle_of(c),unsafe{std::ptr::read_volatile(f as *const u32)}));added+=1;}
+   if added>0{crate::log_game(&format!("AI_FREEZE: {} other characters held (no move, no attack) while the replay plays; {added} new",self.frozen.len()));}}
+  for a in self.frozen.keys(){if let Some(f)=debug_flags(*a){unsafe{let v=std::ptr::read_volatile(f as *const u32);if v&mask!=mask{std::ptr::write_volatile(f as *mut u32,v|mask);}}}}}
+ fn unfreeze_all(&mut self){
+  if self.frozen.is_empty(){return;}
+  let mask=(profile::VAL_DEBUG_FLAG_NO_MOVE|profile::VAL_DEBUG_FLAG_NO_ATTACK) as u32;let alive=live();let n=self.frozen.len();
+  for (a,(h,orig)) in self.frozen.drain(){if !alive.contains(&a)||handle_of(unsafe{&*(a as *const ChrIns)})!=h{continue;}
+   if let Some(f)=debug_flags(a){unsafe{let v=std::ptr::read_volatile(f as *const u32);std::ptr::write_volatile(f as *mut u32,(v&!mask)|(orig&mask));}}}
+  crate::log_game(&format!("AI_FREEZE: {n} other characters given back their own behaviour"));}
+ /// A body about to be controlled keeps its true original flags, not our freeze bits.
+ fn original_flags(&mut self,chr:usize,flags:Option<u32>)->Option<u32>{match self.frozen.remove(&chr){Some((_,orig))=>Some(orig),None=>flags}}
  fn find(info:&ActorInfo,taken:&[usize],category:u32,unique_recorded:bool)->Option<usize>{
   let (bodies,buddies)=live_snapshot(false);let mut candidates=Vec::new();
   for a in bodies.into_iter().filter(|a|!taken.contains(a)){let c=unsafe{&*(a as *const ChrIns)};if c.npc_param_id!=info.npc_param{continue;}
@@ -276,6 +300,7 @@ impl Player{
   let c=unsafe{&*(last as *const ChrIns)};
   let (Some(transform),Some(flags),Some(gravity))=(read_transform(last),debug_flags(last).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)}),gravity_flag(last).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1)) else {
    crate::log_game(&format!("PUPPET_REJECTED: id={} control flags could not be validated; the body is left alone",r.id));self.request=None;return;};
+  let flags=self.original_flags(last,Some(flags)).unwrap_or(flags);
   // Safety first: invincible (it cannot be killed, so it cannot reward), rewards already marked as given.
   write_bits(last,5,INVINCIBLE,0);write_bits(last,6,DROPPED_ITEM|DROPPED_RUNES,0);
   self.controlled.insert(r.id,Controlled{chr:last,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:true,saved_1c5:0,hidden:false});
@@ -298,7 +323,7 @@ impl Player{
     match plan(existence[&info.id],live_state){
      Plan::Drive=>{let chr=found.unwrap();let c=unsafe{&*(chr as *const ChrIns)};
       let Some(transform)=read_transform(chr) else {continue};
-      let flags=debug_flags(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)});
+      let flags=debug_flags(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)});let flags=self.original_flags(chr,flags);
       let gravity=gravity_flag(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);
       if flags.is_none()||gravity.is_none(){if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} control flags/gravity could not be validated; no pose/root writes",info.id));}continue;}
       let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0); // a held body cannot be hurt or killed meanwhile
@@ -311,11 +336,13 @@ impl Player{
      // one, is held and hidden instead of standing in the scene; it is given back when the replay ends.
      Plan::Absent=>{if let Some(chr)=found{let c=unsafe{&*(chr as *const ChrIns)};
       let (Some(transform),Some(flags),Some(gravity))=(read_transform(chr),debug_flags(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)}),gravity_flag(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1)) else {continue};
+      let flags=self.original_flags(chr,Some(flags));let flags=flags.unwrap_or(0);
       let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0);set_render(chr,false);
       self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:false,saved_1c5:saved,hidden:true});taken.push(chr);newly+=1;}}}}
    if newly>0||!self.logged{self.logged=true;crate::log_game(&format!("ACTORS: {} of {} recorded characters held by the replay ({} puppets)",self.controlled.len(),self.tracks.len(),self.controlled.values().filter(|c|c.puppet).count()));}}
   if now>=self.next_log&&!self.controlled.is_empty(){self.next_log=now+5_000_000_000;
    for (id,c) in &self.controlled{crate::log_game(&format!("ACTOR_DIAG: id={id} representation={:?} existence={:?} body=0x{:X} omission={} ai_isolation=no-move+no-attack+invincible",if c.puppet{Representation::Puppet}else{Representation::Live},existence.get(id),c.chr,crate::omission::describe(crate::omission::mode_of(c.chr))));}}
+  self.freeze_others(self.options&8==0,now);
   for (info,track,parents) in &mut self.tracks{
    let Some(ctl)=self.controlled.get_mut(&info.id) else {continue};let chr=ctl.chr;let is_puppet=ctl.puppet;let was_hidden=std::mem::replace(&mut ctl.hidden,false);let saved_render=ctl.saved_1c5&RENDER!=0;
    // The character must still be the same one (a reload can reuse the address).
@@ -374,7 +401,7 @@ impl Player{
  /// Gives every held live body its flags, gravity and position back, and asks the game to unload puppets.
  pub fn release(&mut self){
   let alive=live();let n=self.controlled.len();let mut puppets=0;
-  self.request=None;
+  self.request=None;self.unfreeze_all();
   for (_,c) in self.controlled.drain(){
    if !alive.contains(&c.chr)||handle_of(unsafe{&*(c.chr as *const ChrIns)})!=c.handle{continue;}
    if c.puppet{puppets+=1;unload_puppet(c.chr);}else{restore(&c);}}
