@@ -29,6 +29,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc,Mutex};
 use crate::weapon_loc;
+use crate::effects;
 use crate::camera_fade;
 use std::sync::mpsc::SyncSender;
 use crate::world_file::{self,Message};
@@ -86,7 +87,7 @@ type Frame=world_file::PlayerFrame;
 // a time (cached). Compressed file bytes and the timestamp index still reside in RAM.
 enum Store{Memory(Vec<Frame>),Chunked(world_file::PlayerTrack)}
 // World state of the loaded replay (Phase 2.1); empty for older files.
-#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>,context:Vec<world_file::EntityContext>,skeletons:std::collections::HashMap<u32,crate::skeleton::Definition>,module:Vec<world_file::ModuleSample>}
+#[derive(Default)]struct WorldData{samples:Vec<world_file::WorldSample>,flags_start:Option<(u64,world_file::FlagGroups)>,events:Vec<world_file::FlagEvent>,touched:Vec<u32>,context:Vec<world_file::EntityContext>,skeletons:std::collections::HashMap<u32,crate::skeleton::Definition>,module:Vec<world_file::ModuleSample>,effects:Vec<world_file::EffectEvent>}
 impl Store{
  fn len(&self)->usize{match self{Store::Memory(v)=>v.len(),Store::Chunked(t)=>t.len()}}
  fn time(&self,i:usize)->u64{match self{Store::Memory(v)=>v[i].time,Store::Chunked(t)=>t.times[i]}}
@@ -119,11 +120,11 @@ struct State{
  // Reserved root-rebase value; remains zero until cross-origin conversion is verified.
  now_offset:[f32;3],
  replay_blocked:bool,
- mount_note:u8,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,virt:Option<Virt>,
+ mount_note:u8,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,virt:Option<Virt>,fx_cursor:usize,fx_t:u64,
  module_saved:Option<[u8;weapon_loc::BYTES]>,module_written:Option<[u8;weapon_loc::BYTES]>,module_lost:u64,module_frames:u64,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None,eval_place:None,virt:None,module_saved:None,module_written:None,module_lost:0,module_frames:0});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None,eval_place:None,virt:None,fx_cursor:0,fx_t:0,module_saved:None,module_written:None,module_lost:0,module_frames:0});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -190,6 +191,9 @@ fn load(path:&PathBuf)->Result<Vec<Frame>,String>{
 
 fn finish_recording(s:&mut State){
  let Some(r)=s.recording.take() else {return;};
+ // Effects: stop capturing and hand the last ones to the writer before the channel closes.
+ effects::capture(false);{let rest=effects::drain();let (seen,dropped,_)=effects::stats();if !rest.is_empty(){let _=r.tx.try_send(Message::Effects(rest));}
+  crate::log_game(&format!("EFFECTS: {seen} effect creations seen so far this session ({dropped} dropped by the queue)"));}
  let seconds=r.last.saturating_sub(r.first) as f64/1e9;
  crate::log_game(&format!("BONE_REPLAY: recording stopped; {} frames over {seconds:.2} s ({} dropped while the disk was busy), {} characters; finishing {}",r.frames,r.dropped,r.actors.count(),world_path(&r.path).display()));
  crate::log_game(&format!("COMPANIONS_SUMMARY: {} companion identities, {} dropped actor samples (no lost catalog announcements)",r.actors.companions(),r.actors.drops()));
@@ -220,7 +224,7 @@ fn follow_loaded(s:&mut State,l:&Link){
   let opened=if world.is_file(){world_file::open(&world).map(|w|{
     let mut touched:Vec<u32>=w.flag_events.iter().map(|e|e.flag).collect();touched.sort_unstable();touched.dedup();
     let actors=(!w.actors.is_empty()).then(||crate::actors::Player::new(w.actors,&w.context,&w.skeletons,w.actor_lifetime,w.meta));
-    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context,skeletons:w.skeletons,module:w.module},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
+    (Store::Chunked(w.player),WorldData{samples:w.world,flags_start:w.flags_start,events:w.flag_events,touched,context:w.context,skeletons:w.skeletons,module:w.module,effects:w.effects},actors)})}else{load(&file).map(|f|(Store::Memory(f),WorldData::default(),None))};
   let result=opened.map(|(mut store,world_data,actors)|{
    // Learn the skeleton hierarchy from a few frames spread over the recording (see replay_interpolation).
    let n=store.len();let picks:Vec<Frame>=(0..5).filter_map(|k|store.get(k*(n-1)/4)).collect();
@@ -451,6 +455,7 @@ pub fn tick(group:usize,now:u64){
      Ok(tx)=>{
       let flags=world_state::read_flags();let _=tx.send(Message::Flags(now,flags.clone()));
       crate::log_game(&format!("BONE_REPLAY: recording started for {path} ({} event flag groups)",flags.len()));
+      effects::capture(true);let _=effects::drain();
       s.recording=Some(Recorder{path,tx,frames:0,first:0,last:0,dropped:0,next_world:now,flags,actors:crate::actors::Recorder::new(),skeleton:None,skeleton_warned:false,module:None,probe:Default::default()});s.last_second=0;}
      Err(e)=>{crate::log_game(&format!("BONE_REPLAY_ERROR: cannot create the world file for {path}: {e}"));status("BONE REPLAY ERROR: cannot write the recording file (see log)");}}}}
   if !recording&&s.recording.is_some(){finish_recording(s);}
@@ -531,6 +536,7 @@ pub fn tick(group:usize,now:u64){
    }
    let first_definition=if r.frames==0{definition.clone()}else{None};
    match r.tx.try_send(Message::PlayerPose(frame,first_definition)){Ok(())=>{if r.frames==0{r.first=now;r.skeleton=definition;}r.frames+=1;r.last=now;}Err(_)=>r.dropped+=1}
+   {let fx=effects::drain();if !fx.is_empty(){let _=r.tx.try_send(Message::Effects(fx));}}
    r.probe.sample(chr,now.saturating_sub(r.first) as f64/1e9);
    if let Some(m)=weapon_loc::read(chr){if r.module!=Some(m){r.module=Some(m);let _=r.tx.try_send(Message::PlayerModule(vec![world_file::ModuleSample{time:now,data:m}]));}}
    r.actors.sample(now,chr,&r.tx);}}
@@ -576,7 +582,17 @@ pub fn tick(group:usize,now:u64){
    // Recorded enemies/NPCs/bosses at the same replay time (Phase 2.2).
    let (t,live)=(s.last_t,(here.frame(),here.global));
    let anchors=s.loaded.as_ref().map(|l|l.anchors.clone());
-   if let (Some(anchors),Some(a))=(anchors,s.loaded.as_mut().and_then(|l|l.actors.as_mut())){a.set_options(s.options);a.write(t,now,live,&anchors,interpolated_pose_enabled());}}
+   if let (Some(anchors),Some(a))=(anchors,s.loaded.as_mut().and_then(|l|l.actors.as_mut())){a.set_options(s.options);a.write(t,now,live,&anchors,interpolated_pose_enabled());}
+   // Recorded one-shot effects (option bit 256): created at their recorded time while the replay plays forward. After a seek (or
+   // a jump of more than half a second) the cursor is only moved, so scrubbing never fires a burst; playing on from there creates
+   // the effects again, which is how they reappear after a rewind.
+   if s.options&256!=0&&effects::ready(){if let Some(loaded)=&s.loaded{let ev=&loaded.world.effects;
+    let jumped=s.fx_t==0||t<s.fx_t||t-s.fx_t>500_000_000;
+    let mut i=if jumped{ev.partition_point(|e|e.time<=t)}else{s.fx_cursor.min(ev.len())};
+    if !jumped{let mut made=0;while i<ev.len()&&ev[i].time<=t&&made<16{
+     if let Some(sh)=loaded.anchors.translation(ev[i].time,live.0,live.1){let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];if effects::spawn(ev[i].id,p){made+=1;}}
+     i+=1;}}
+    s.fx_cursor=i;s.fx_t=t;}}}
   DRAW_GROUP=>{
    let Some((local,model))=pose_arrays(chr) else {return;};let drawn=read_matrix(matrix_address(chr));
    if let Some(e)=s.equip_written{if equipment::read(chr)!=Some(e){s.equip_lost+=1;}}
