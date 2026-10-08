@@ -499,7 +499,7 @@ void Overlay::PlayDollyPath(const OverlayFrame& f)
 // Small camera readout in the lower left corner of the picture: mode, FOV, roll, speed and the keys that matter right now.
 void Overlay::DrawCameraInfo(const OverlayFrame& f)
 {
-    if(!showCameraInfo_||ui_.visibility==UiVisibility::HiddenClean)return;
+    if(!showCameraInfo_||ui_.visibility!=UiVisibility::Shown)return; // only while the F4 menu is open
     const auto camera=camera_runtime::view(false);
     if(camera.mode==0||!camera.enabled||!camera.observed)return;
     const bool shown=ui_.visibility==UiVisibility::Shown;
