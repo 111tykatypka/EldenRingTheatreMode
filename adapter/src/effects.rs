@@ -6,7 +6,7 @@ use crate::world_file::EffectEvent;
 #[repr(C)]#[derive(Clone,Copy,Default)]struct Raw{time_ns:u64,id:u32,pos:[f32;3]}
 unsafe extern "C"{
  fn tm_effect_initialize()->i32;fn tm_effect_capture(on:i32);fn tm_effect_drain(out:*mut Raw,max:u32)->u32;
- fn tm_effect_scene_spawn(manager:usize,id:u32,pos:*const f32,life_ms:u32)->i32;fn tm_effect_scene_tick();fn tm_effect_scene_release_all();
+ fn tm_effect_scene_spawn(manager:usize,id:u32,pos:*const f32,life_ms:u32)->i32;fn tm_effect_scene_tick();fn tm_effect_scene_stats(c:*mut u64,nr:*mut u64,f:*mut u64,ns:*mut u64);fn tm_effect_scene_release_all();
  fn tm_effect_spawn(id:u32,pos:*const f32)->i32;fn tm_effect_stats(seen:*mut u64,dropped:*mut u64,replayed:*mut u64);
 }
 static READY:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
@@ -32,5 +32,8 @@ pub fn spawn_scene(id:u32,pos:[f32;3],life_ms:u32)->i32{
 /// Stops and releases effects whose lifetime has ended.
 pub fn tick(){unsafe{tm_effect_scene_tick()}}
 /// Stops and releases every effect the replay created (seek, unload, end).
-pub fn release_all(){unsafe{tm_effect_scene_release_all()}}
+pub fn release_all(){unsafe{tm_effect_scene_release_all()}
+ static LAST:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+ let (mut c,mut nr,mut f,mut ns)=(0u64,0u64,0u64,0u64);unsafe{tm_effect_scene_stats(&mut c,&mut nr,&mut f,&mut ns)}
+ if c+nr+f+ns!=LAST.swap(c+nr+f+ns,std::sync::atomic::Ordering::Relaxed){crate::log_game(&format!("EFFECT_REPLAY_SUMMARY: {c} created, {nr} skipped because the effect resource was not loaded, {ns} recycled when the pool was full, {f} failed"));}}
 pub fn stats()->(u64,u64,u64){let (mut a,mut b,mut c)=(0u64,0u64,0u64);if ready(){unsafe{tm_effect_stats(&mut a,&mut b,&mut c)}}(a,b,c)}

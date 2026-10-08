@@ -102,7 +102,7 @@ extern "C" int tm_effect_spawn(std::uint32_t id,const float*pos){
 // stopped and released after a fixed real-time lifetime or when the replay ends.
 namespace game_effects { namespace {
 struct Slot{alignas(16) unsigned char handle[TM_VAL_VFX_HANDLE_SIZE];bool used=false;ULONGLONG expires=0;};
-Slot slots[32];
+Slot slots[128];
 std::atomic<std::uint64_t> created{0},not_resident{0},failed{0},no_slot{0};
 bool read_mem(std::uintptr_t p,void*out,std::size_t n){SIZE_T got=0;return p>=0x10000&&p<=0x00007FFFFFFFFFFFULL-n&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(p),out,n,&got)&&got==n;}
 bool scene_guard(std::uintptr_t b){
@@ -136,7 +136,8 @@ extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,con
  if(!scene_guard_passed)return -4;
  std::uintptr_t scene=0;if(!read_mem(manager+TM_OFF_SFX_SCENE_CTRL,&scene,8)||!scene)return -5;
  if(!resident(scene,id)){++not_resident;return -1;}
- Slot*slot=nullptr;for(auto&s:slots)if(!s.used){slot=&s;break;}if(!slot){++no_slot;return -2;}
+ Slot*slot=nullptr;for(auto&s:slots)if(!s.used){slot=&s;break;}
+ if(!slot){++no_slot;slot=&slots[0];for(auto&s:slots)if(s.expires<slot->expires)slot=&s;release_slot(*slot);} // pool full: recycle the oldest effect
  alignas(16) float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, pos[0],pos[1],pos[2],1};
  memset(slot->handle,0,sizeof(slot->handle));
  replaying=true;const bool made=seh_create(base,scene,*slot,id,m);replaying=false;
