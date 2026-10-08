@@ -51,3 +51,16 @@ HUD hiding, default OFF; in-game coverage remains UNVERIFIED. O combines this wi
 Theater Clean Preview. Space controls a loaded replay outside F4, game focus only.
 Middle-click in the shown game picture switches Move/Rotate gizmos. No new camera
 engine addresses or actor replay changes were introduced.
+
+## C18 deterministic channel foundation
+
+The editor now uses cached, independent position/rotation/FOV/roll/focus/target
+channels. New keys default to centripetal Catmull-Rom and time-aware SQUAD.
+Global arc-length timing, specified world-unit speed, timing Bezier inversion,
+parallel-transport path aim and original recorded-player target brackets are
+implemented. Overlay IPC is version 12; ERTCAM sidecars are version 2 with v1
+migration. Native camera discovery/write/restoration is unchanged.
+
+See `notes/CINEMATIC_C18_CHANNEL_CAMERA.md` for math, channel masks, compatibility,
+controls, limitations and the exact in-game checklist. New behavior is
+IMPLEMENTED — RUNTIME VALIDATION REQUIRED, not claimed visually verified.

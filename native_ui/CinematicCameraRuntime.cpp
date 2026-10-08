@@ -40,12 +40,13 @@ std::uint64_t clock_now(){ULONGLONG t=0;QueryInterruptTimePrecise(&t);return t*1
 std::uint64_t timeline_ns=0,duration_ns=0,anchor_ns=0,host_heartbeat=0,last_tick=0,probe_until=0,next_id=1;
 std::uint64_t shake_epoch=0;
 bool playing=false,linked=false,reset=true;
+std::vector<TargetSample> recorded_player_targets;
 double speed=1;
 std::string replay_path,keys_replay_path;
-struct HistoryEntry {std::string replay,keys_replay;std::vector<cinematic::Key> keys;std::vector<cinematic::CameraCut> cuts;};
+struct HistoryEntry {std::string replay,keys_replay;std::vector<cinematic::Key> keys;std::vector<cinematic::CameraCut> cuts;cinematic::TrackSettings settings;};
 std::vector<HistoryEntry> undo_stack,redo_stack;
 bool edit_group=false,edit_saved=false;
-HistoryEntry history_entry(){return {replay_path,keys_replay_path,track.keys(),cut_track.cuts()};}
+HistoryEntry history_entry(){return {replay_path,keys_replay_path,track.keys(),cut_track.cuts(),state.track_settings};}
 void remember(bool edit=false){
  if(edit&&edit_group&&edit_saved)return;
  if(!edit){edit_group=false;edit_saved=false;}
@@ -150,7 +151,13 @@ bool update(void* output,void* source){
    for(int i=0;i<3;++i)for(int j=0;j<3;++j)state.pose.position[i]+=basis[j*4+i]*state.bone_offset[j];
   }
   else if(!track.keys().empty()&&keys_replay_path!=replay_path){release("Dolly keys belong to another replay; clear them before creating a new path");return false;}
-  else if(auto value=cinematic::dolly_evaluate(track,time_at(now),state.dolly_smoothing_seconds)){
+  else if(auto value=cinematic::dolly_evaluate(track,time_at(now),state.dolly_smoothing_seconds,[](cinematic::TargetType type,std::uint64_t,std::uint64_t time)->std::optional<cinematic::Vec>{
+   if(type!=cinematic::TargetType::RecordedPlayer||recorded_player_targets.empty())return {};
+   const auto& samples=recorded_player_targets;if(time<samples.front().time_ns||time>samples.back().time_ns)return {};
+   auto hi=std::lower_bound(samples.begin(),samples.end(),time,[](const auto&s,auto t){return s.time_ns<t;});
+   if(hi==samples.begin()||hi->time_ns==time)return hi->position;auto lo=hi-1;
+   return cinematic::mix(lo->position,hi->position,double(time-lo->time_ns)/double(hi->time_ns-lo->time_ns));
+  },&state.evaluation)){
    // An explicitly selected path preview may jump the camera to its authored
    // pose. It never moves the player. Keep the displacement guard for automatic
    // camera-cut ownership changes, plus all native/finite/context guards.
@@ -187,21 +194,54 @@ void enable(bool value){std::lock_guard lock(mutex);if(!value){release("Camera o
  if(!state.enabled)reset=true;state.enabled=true;state.status="Experimental writes armed";}
 void stop(){std::lock_guard lock(mutex);release("Camera stopped; native control restored");state.mode=0;state.cuts_enabled=false;state.dolly_preview=false;}
 void probe(){enable(true);std::lock_guard lock(mutex);if(state.enabled){state.mode=1;probe_until=clock_now()+2000000000ULL;}}
-void add_key(){std::lock_guard lock(mutex);if(state.mode!=2||!state.enabled||!state.writing){state.status="Select and activate Dolly camera before capturing a key";return;}const auto now=clock_now();if(!state.observed||now-state.timestamp_ns>500000000ULL||!linked||now-host_heartbeat>1000000000ULL){state.status="Cannot add key: fresh native camera and host timeline required";return;}
+void add_key(unsigned channels){std::lock_guard lock(mutex);if(!channels||(channels&~cinematic::AllChannels))return;if(state.mode!=2||!state.enabled||!state.writing){state.status="Select and activate Dolly camera before capturing a key";return;}const auto now=clock_now();if(!state.observed||now-state.timestamp_ns>500000000ULL||!linked||now-host_heartbeat>1000000000ULL){state.status="Cannot add key: fresh native camera and host timeline required";return;}
  if(!duration_ns||replay_path.empty()){state.status="Load a replay before adding Dolly keys";return;}
  if(!track.keys().empty()&&keys_replay_path!=replay_path){state.status="Keys belong to another replay; confirm deletion first";return;}
  if(keys_replay_path!=replay_path)++state.project_generation;keys_replay_path=replay_path;
  auto keys=track.keys();auto time=time_at(now);auto found=std::find_if(keys.begin(),keys.end(),[&](const auto&k){return k.time_ns==time;});
- if(found!=keys.end())found->state=state.pose;else{cinematic::Key k;k.id=next_id++;k.time_ns=time;k.state=state.pose;keys.push_back(k);}
- cinematic::Track next;if(next.replace(std::move(keys))){remember();track=std::move(next);++state.project_generation;state.status="Dolly key captured from camera at current ReplayTime";}
+ auto captured=state.pose;auto [base,roll]=cinematic::split_roll(captured.orientation);
+ captured.orientation=base;captured.roll_degrees=roll;
+ for(auto at=keys.rbegin();at!=keys.rend();++at)if(at->time_ns<time&&(at->channels&cinematic::Roll)){captured.roll_degrees+=360*std::round((at->state.roll_degrees-captured.roll_degrees)/360);break;}
+ if(found!=keys.end()){
+  if(channels&cinematic::Position)found->state.position=state.pose.position;
+  if(channels&cinematic::Rotation)found->state.orientation=captured.orientation;
+  if(channels&cinematic::Fov)found->state.fov_degrees=state.pose.fov_degrees;
+  if(channels&cinematic::Roll)found->state.roll_degrees=captured.roll_degrees;
+  if(channels&cinematic::Focus)found->state.focus_distance=state.pose.focus_distance;
+  if(channels&cinematic::Target)found->state.look_at_target=state.track_settings.target_position;
+  found->channels|=channels;
+ }else{cinematic::Key k;k.id=next_id++;k.time_ns=time;k.state=(channels&cinematic::Roll)?captured:state.pose;if(channels&cinematic::Rotation)k.state.orientation=captured.orientation;k.channels=channels;k.state.look_at_target=state.track_settings.target_position;keys.push_back(k);}
+ cinematic::Track next=track;if(next.replace(std::move(keys),state.track_settings)){remember();track=std::move(next);++state.project_generation;state.status="Dolly key captured from camera at current ReplayTime";}
+}
+void duplicate_key(std::uint64_t id,std::uint64_t time){
+ std::lock_guard lock(mutex);if(keys_replay_path!=replay_path||time>duration_ns)return;
+ auto keys=track.keys();auto at=std::find_if(keys.begin(),keys.end(),[&](const auto&k){return k.id==id;});if(at==keys.end())return;
+ auto key=*at;key.id=next_id;key.time_ns=time;keys.push_back(key);cinematic::Track next=track;
+ if(!next.replace(std::move(keys),state.track_settings)){state.status="Duplicate rejected: overlapping channel at this timestamp";return;}
+ remember();++next_id;track=std::move(next);++state.project_generation;state.status="Camera key duplicated at timeline cursor";
+}
+void track_settings(cinematic::TrackSettings settings){
+ std::lock_guard lock(mutex);cinematic::Track next=track;
+ if(!next.replace(track.keys(),settings)){state.status="Invalid motion settings, or constant-speed track contains a cut";return;}
+ remember();state.track_settings=settings;track=std::move(next);++state.project_generation;state.status="Dolly motion settings updated";
+}
+void player_targets(const std::vector<TargetSample>& samples){
+ std::lock_guard lock(mutex);if(samples.empty())return;if(samples.size()>64){recorded_player_targets.clear();return;}
+ for(std::size_t i=0;i<samples.size();++i)if(!cinematic::finite(samples[i].position)||(i&&samples[i].time_ns<=samples[i-1].time_ns)){recorded_player_targets.clear();return;}
+ recorded_player_targets=samples;
+}
+std::optional<std::uint64_t> player_target_query(){
+ std::lock_guard lock(mutex);
+ if(!linked||state.track_settings.target!=cinematic::TargetType::RecordedPlayer||(state.track_settings.rotation!=cinematic::RotationMode::LookAt&&state.track_settings.rotation!=cinematic::RotationMode::LookAtRoll))return {};
+ return time_at(clock_now());
 }
 void clear_keys(){std::lock_guard lock(mutex);if(!track.keys().empty()||!cut_track.cuts().empty())remember();track.replace({});keys_replay_path.clear();++state.project_generation;if(state.mode==2){release("Dolly track deleted; native control restored");state.mode=0;}state.dolly_preview=false;state.cuts_enabled=false;cut_track.replace({},duration_ns);state.status="All dolly keys and camera cuts deleted";}
 void edit_key(cinematic::Key key){
- std::vector<cinematic::Key> keys;std::string identity;std::uint64_t duration,generation;
- {std::lock_guard lock(mutex);keys=track.keys();identity=keys_replay_path;duration=duration_ns;generation=state.project_generation;}
+ std::vector<cinematic::Key> keys;std::string identity;std::uint64_t duration,generation;cinematic::TrackSettings settings;cinematic::Track source;
+ {std::lock_guard lock(mutex);source=track;keys=track.keys();identity=keys_replay_path;duration=duration_ns;generation=state.project_generation;settings=state.track_settings;}
  auto at=std::find_if(keys.begin(),keys.end(),[&](const auto&k){return k.id==key.id;});
- cinematic::Track next;bool ok=at!=keys.end()&&key.time_ns<=duration;
- if(ok){*at=key;ok=next.replace(std::move(keys));}
+ cinematic::Track next=std::move(source);bool ok=at!=keys.end()&&key.time_ns<=duration;
+ if(ok){*at=key;ok=next.replace(std::move(keys),settings);}
  std::lock_guard lock(mutex);if(ok&&identity==keys_replay_path&&identity==replay_path&&generation==state.project_generation){remember(true);track=std::move(next);++state.project_generation;state.status="Dolly key updated";}else state.status="Invalid key, duplicate timestamp, or track changed; edit rejected";
 }
 void delete_key(std::uint64_t id){delete_keys({id});}
@@ -210,7 +250,7 @@ void delete_keys(const std::vector<std::uint64_t>& ids){
  auto keys=track.keys();const auto before=keys.size();
  std::erase_if(keys,[&](const auto&k){return std::find(ids.begin(),ids.end(),k.id)!=ids.end();});
  if(keys.size()==before)return;
- cinematic::Track next;if(!next.replace(std::move(keys)))return;
+ cinematic::Track next=track;if(!next.replace(std::move(keys),state.track_settings))return;
  remember();track=std::move(next);++state.project_generation;
  if(track.keys().empty()&&state.mode==2){state.dolly_preview=false;state.cuts_enabled=false;release("Last Dolly key deleted; native camera restored");}
  state.status="Selected Dolly keys deleted";
@@ -220,9 +260,13 @@ void set_interpolation(const std::vector<std::uint64_t>& ids,cinematic::Interpol
  if(ids.empty()||keys_replay_path!=replay_path||static_cast<unsigned>(mode)>static_cast<unsigned>(cinematic::Interpolation::Step))return;
  const std::unordered_set<std::uint64_t> selected(ids.begin(),ids.end());
  auto keys=track.keys();bool changed=false;
- for(auto&key:keys)if(key.outgoing!=mode&&selected.contains(key.id)){key.outgoing=mode;changed=true;}
+ for(auto&key:keys)if(selected.contains(key.id)){
+  auto rotation=mode==cinematic::Interpolation::Linear?cinematic::RotationInterpolation::Slerp:mode==cinematic::Interpolation::Step?cinematic::RotationInterpolation::Step:cinematic::RotationInterpolation::Squad;
+  auto scalar=mode==cinematic::Interpolation::Linear?cinematic::ScalarInterpolation::Linear:mode==cinematic::Interpolation::Step?cinematic::ScalarInterpolation::Step:cinematic::ScalarInterpolation::Smooth;
+  if(key.outgoing!=mode||key.rotation_interpolation!=rotation||key.scalar_interpolation!=scalar){key.outgoing=mode;key.rotation_interpolation=rotation;key.scalar_interpolation=scalar;changed=true;}
+ }
  if(!changed)return;
- cinematic::Track next;if(!next.replace(std::move(keys)))return;
+ cinematic::Track next=track;if(!next.replace(std::move(keys),state.track_settings)){state.status="Interpolation rejected: Step cuts require keyframe-time timing";return;}
  remember();track=std::move(next);++state.project_generation;state.status="Dolly interpolation updated for selected keys";
 }
 void begin_edit(){std::lock_guard lock(mutex);edit_group=true;edit_saved=false;}
@@ -232,9 +276,9 @@ void restore_history(std::vector<HistoryEntry>&from,std::vector<HistoryEntry>&to
  if(from.empty()){state.status="No camera edit to restore";return;}
  const auto&entry=from.back();if(entry.replay!=replay_path){state.status="Camera history belongs to another replay";return;}
  cinematic::Track restored;cinematic::CameraCutTrack restored_cuts;
- if(!restored.replace(entry.keys)||!restored_cuts.replace(entry.cuts,duration_ns)){state.status="Camera history validation failed";return;}
+ if(!restored.replace(entry.keys,entry.settings)||!restored_cuts.replace(entry.cuts,duration_ns)){state.status="Camera history validation failed";return;}
  if(to.size()>=64)to.erase(to.begin());to.push_back(history_entry());
- keys_replay_path=entry.keys_replay;track=std::move(restored);cut_track=std::move(restored_cuts);from.pop_back();
+ keys_replay_path=entry.keys_replay;state.track_settings=entry.settings;track=std::move(restored);cut_track=std::move(restored_cuts);from.pop_back();
  for(const auto&key:track.keys())next_id=std::max(next_id,key.id+1);
  edit_group=edit_saved=false;state.dolly_preview=state.cuts_enabled=false;++state.project_generation;++state.history_generation;
  if(track.keys().empty()&&state.mode==2)release("Empty restored track; native camera restored");
@@ -243,19 +287,19 @@ void restore_history(std::vector<HistoryEntry>&from,std::vector<HistoryEntry>&to
 }
 void undo(){std::lock_guard lock(mutex);restore_history(undo_stack,redo_stack,"Camera edit undone (Alt+Z)");}
 void redo(){std::lock_guard lock(mutex);restore_history(redo_stack,undo_stack,"Camera edit redone (Alt+Shift+Z)");}
-void save_path(){std::string identity,text;{std::lock_guard lock(mutex);identity=keys_replay_path;if(identity.empty()||identity!=replay_path){state.status="No camera track for the loaded replay";return;}text=cinematic::save_project(identity,track.keys());}
+void save_path(){std::string identity,text;{std::lock_guard lock(mutex);identity=keys_replay_path;if(identity.empty()||identity!=replay_path){state.status="No camera track for the loaded replay";return;}text=cinematic::save_project(identity,track.keys(),state.track_settings);}
  bool ok=false;try{auto path=std::filesystem::u8path(identity+".ercam");auto temp=path;temp+=L".tmp";
   {std::ofstream file(temp,std::ios::binary|std::ios::trunc);file.write(text.data(),text.size());file.flush();ok=bool(file);}
   if(ok)ok=MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
  }catch(...){ok=false;}std::lock_guard lock(mutex);state.status=ok?"Camera path saved beside replay (.ercam)":"Camera path save failed";
 }
 void load_path(){std::string identity;std::uint64_t duration;{std::lock_guard lock(mutex);identity=replay_path;duration=duration_ns;}
- bool ok=false;cinematic::Track next;try{if(!identity.empty()){auto path=std::filesystem::u8path(identity+".ercam");auto size=std::filesystem::file_size(path);
+ bool ok=false;cinematic::Track next;cinematic::TrackSettings settings;try{if(!identity.empty()){auto path=std::filesystem::u8path(identity+".ercam");auto size=std::filesystem::file_size(path);
   // Resource guard for untrusted text import, not a recording duration limit.
   if(size<=16*1024*1024){std::ifstream file(path,std::ios::binary);std::string text(static_cast<std::size_t>(size),'\0');file.read(text.data(),text.size());std::vector<cinematic::Key> keys;
-   ok=bool(file)&&cinematic::load_project(text,identity,keys)&&std::all_of(keys.begin(),keys.end(),[&](const auto&k){return k.time_ns<=duration&&k.id<UINT64_MAX;});if(ok)ok=next.replace(std::move(keys));}}
+   ok=bool(file)&&cinematic::load_project(text,identity,keys,&settings)&&std::all_of(keys.begin(),keys.end(),[&](const auto&k){return k.time_ns<=duration&&k.id<UINT64_MAX;});if(ok)ok=next.replace(std::move(keys),settings);}}
  }catch(...){ok=false;}
- std::lock_guard lock(mutex);if(ok&&identity==replay_path){remember();release("Camera track loaded; writes OFF");track=std::move(next);keys_replay_path=identity;++state.project_generation;next_id=1;for(auto&k:track.keys())next_id=std::max(next_id,k.id+1);}else state.status="Camera load failed: missing, invalid, oversized or incompatible .ercam";
+ std::lock_guard lock(mutex);if(ok&&identity==replay_path){remember();release("Camera track loaded; writes OFF");state.track_settings=settings;track=std::move(next);keys_replay_path=identity;++state.project_generation;next_id=1;for(auto&k:track.keys())next_id=std::max(next_id,k.id+1);}else state.status="Camera load failed: missing, invalid, oversized or incompatible .ercam";
 }
 void movement(double value,double sensitivity,double smoothing,double rotation_smoothing){std::lock_guard lock(mutex);if(std::isfinite(value)&&value>0&&std::isfinite(sensitivity)&&sensitivity>0&&std::isfinite(smoothing)&&smoothing>=0&&std::isfinite(rotation_smoothing)&&rotation_smoothing>=0){state.rotation_smoothing_seconds=rotation_smoothing;state.movement_speed=value;state.mouse_sensitivity=sensitivity;state.smoothing_seconds=smoothing;}}
 void preview(bool enabled){std::lock_guard lock(mutex);
@@ -281,6 +325,7 @@ void timeline(std::uint64_t time,std::uint64_t duration,std::uint64_t anchor,boo
  timeline_ns=time;duration_ns=duration;anchor_ns=anchor;playing=play;speed=rate;linked=link;
  auto identity=path?std::string(path,strnlen_s(path,260)):std::string{};
  if(identity!=replay_path){undo_stack.clear();redo_stack.clear();edit_group=edit_saved=false;state.dolly_preview=false;state.cuts_enabled=false;cut_track.replace({},duration);release("Replay changed; camera writes and cuts disabled");}
+ if(identity!=replay_path)recorded_player_targets.clear();
  replay_path=std::move(identity);host_heartbeat=clock_now();if(!link)release("Host disconnected; native control restored");
 }
 bool owns_input(){return input_owned.load();}

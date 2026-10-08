@@ -534,7 +534,7 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
     auto projectPoint=[&](Vec p){auto result=project(camera.pose,p,display.x,display.y);if(result&&scaled){result->x=pictureMin.x+result->x/display.x*(pictureMax.x-pictureMin.x);result->y=pictureMin.y+result->y/display.y*(pictureMax.y-pictureMin.y);}return result;};
     auto mousePoint=[&](){return ImVec2((io.MousePos.x-pictureMin.x)*display.x/(pictureMax.x-pictureMin.x),(io.MousePos.y-pictureMin.y)*display.y/(pictureMax.y-pictureMin.y));};
     auto line=[&](Vec a,Vec b,ImU32 color,float width=1.f){auto pa=projectPoint(a),pb=projectPoint(b);if(pa&&pb)draw->AddLine(ImVec2(float(pa->x),float(pa->y)),ImVec2(float(pb->x),float(pb->y)),color,width);};
-    if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys);curveGeneration_=camera.project_generation;}
+    if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys,camera.track_settings);curveGeneration_=camera.project_generation;}
     if(camera.keys.size()>1){
         auto first=camera.keys.front().time_ns,last=camera.keys.back().time_ns;auto previous=cinematic::dolly_evaluate(curveTrack_,first,camera.dolly_smoothing_seconds);
         for(int i=1;i<=128;++i){auto t=first+std::uint64_t(double(last-first)*i/128);auto current=cinematic::dolly_evaluate(curveTrack_,t,camera.dolly_smoothing_seconds);if(previous&&current)line(previous->position,current->position,Color::AccentBlue.Alpha(140).U32());previous=current;}
@@ -832,6 +832,8 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(Px(4,s),Px(2,s)));
         section("CAMERA");
         auto runtime=camera_runtime::view();
+        if(runtime.status.find("rejected")!=std::string::npos||runtime.status.find("Invalid")!=std::string::npos||runtime.status.find("failed")!=std::string::npos)
+            ImGui::TextColored(Color::AccentAmber.Vec4(),"%s",runtime.status.c_str());
         auto compactSlider=[&](const char* label,float* value,float min,float max,const char* format="%.3f",ImGuiSliderFlags flags=0,float resetValue=0){
             ImGui::PushID(label);ImGui::SetNextItemWidth(std::max(Px(85,s),ImGui::GetContentRegionAvail().x*.55f));
             bool changed=ImGui::SliderFloat("##value",value,min,max,format,flags);
@@ -864,7 +866,28 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         changed|=compactSlider("Rotate smooth",&rotationSmooth,0.f,2.f,"%.3f");
         if(changed)camera_runtime::movement(movement,sensitivity,smooth,rotationSmooth);
         double dollySmooth=runtime.dolly_smoothing_seconds;
-        if(compactDouble("Path smooth",&dollySmooth,0.,2.)){camera_runtime::dolly_smoothing(dollySmooth);cameraSettingsDirty_=true;cameraSettingsChangedAt_=f.now;}
+        if(compactDouble("Path filter",&dollySmooth,0.,2.)){camera_runtime::dolly_smoothing(dollySmooth);cameraSettingsDirty_=true;cameraSettingsChangedAt_=f.now;}
+        if(ImGui::CollapsingHeader("Dolly motion",ImGuiTreeNodeFlags_DefaultOpen)){
+            auto settings=runtime.track_settings;bool edited=false;
+            int timing=int(settings.timing);if(combo("Timing",&timing,"Keyframe time\0Constant world speed\0Time remap\0")){settings.timing=cinematic::TimingMode(timing);edited=true;}
+            if(settings.timing==cinematic::TimingMode::ConstantSpeed)edited|=number("Speed (units/s, 0 = fit duration)",&settings.world_units_per_second,.1,1,"%.4f");
+            int rotation=int(settings.rotation);if(combo("Aim",&rotation,"Keyframed\0Look at target\0Look along path\0Target + roll\0")){settings.rotation=cinematic::RotationMode(rotation);edited=true;}
+            if(settings.rotation==cinematic::RotationMode::LookAt||settings.rotation==cinematic::RotationMode::LookAtRoll){
+                int target=int(settings.target);if(combo("Target",&target,"World point\0Recorded player\0Recorded actor (API only)\0Target keys\0")){settings.target=cinematic::TargetType(target);edited=true;}
+                if(settings.target==cinematic::TargetType::RecordedActor)ImGui::TextDisabled("Actor target transport not implemented.");
+                if(settings.target==cinematic::TargetType::World||settings.target==cinematic::TargetType::Keyframed)for(int i=0;i<3;++i){ImGui::PushID(i);edited|=number("Target XYZ",&settings.target_position[i],.1,1,"%.3f");ImGui::PopID();}
+                for(int i=0;i<3;++i){ImGui::PushID(i);edited|=number("Target offset",&settings.target_offset[i],.1,1,"%.3f");ImGui::PopID();}
+            }
+            if(settings.timing==cinematic::TimingMode::TimeRemap){
+                int ease=int(settings.time_remap.mode);if(combo("Distance easing",&ease,"Linear\0Ease in\0Ease out\0Ease in/out\0Smoothstep\0Smootherstep\0Cubic Bezier\0")){settings.time_remap.mode=cinematic::Easing(ease);edited=true;}
+                if(settings.time_remap.mode==cinematic::Easing::CubicBezier){edited|=number("Time X1",&settings.time_remap.x1,.01,.1,"%.4f");edited|=number("Distance Y1",&settings.time_remap.y1,.01,.1,"%.4f");edited|=number("Time X2",&settings.time_remap.x2,.01,.1,"%.4f");edited|=number("Distance Y2",&settings.time_remap.y2,.01,.1,"%.4f");}
+            }
+            if(edited)camera_runtime::track_settings(settings);
+            static int capture=0;combo("Capture channel",&capture,"Pose (K)\0Position\0Rotation\0FOV\0Roll\0Focus metadata\0Target point\0");
+            const unsigned channels[]={cinematic::PoseChannels,cinematic::Position,cinematic::Rotation,cinematic::Fov,cinematic::Roll,cinematic::Focus,cinematic::Target};
+            if(ImGui::Button("Add channel key"))camera_runtime::add_key(channels[capture]);
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("Keys use the replay cursor. Different channels may have different key times.");
+        }
         if(ImGui::CollapsingHeader("Shake")){
         double shakePosition=runtime.shake_position,shakeRotation=runtime.shake_rotation,shakeFrequency=runtime.shake_frequency,shakeSpeed=runtime.shake_speed,shakeSmooth=runtime.shake_smoothing_seconds;
         bool shakeChanged=compactDouble("Position",&shakePosition,0.,5.);
@@ -919,14 +942,37 @@ void Overlay::DrawPanel(const OverlayFrame& f)
                 if(rotationChanged)if(auto rotation=cinematic::mouse_look({0,0,0,1},angles[1]*3.141592653589793/180,angles[0]*3.141592653589793/180,angles[2]*3.141592653589793/180))draft.state.orientation=*rotation;
                 if(ImGui::TreeNode("Raw quaternion (advanced)")){for(int i=0;i<4;++i){const char* names[]={"Quaternion X","Quaternion Y","Quaternion Z","Quaternion W"};number(names[i],&draft.state.orientation[i],.001,.01,"%.6f");}ImGui::TreePop();}
                 number("FOV degrees",&draft.state.fov_degrees,.1,1,"%.3f");
+                number("Roll (degrees)",&draft.state.roll_degrees,.1,1,"%.3f");
+                number("Focus (metadata only)",&draft.state.focus_distance,.1,1,"%.3f");
+                if(ImGui::TreeNode("Channels")){
+                    const char* labels[]={"Position","Rotation","FOV","Roll","Focus","Target"};
+                    for(int i=0;i<6;++i){bool on=(draft.channels&(1u<<i))!=0;if(checkbox(labels[i],&on)){if(on)draft.channels|=1u<<i;else draft.channels&=~(1u<<i);}}
+                    for(int i=0;i<3;++i){ImGui::PushID(i);number("Target coordinate",&draft.state.look_at_target[i],.1,1,"%.3f");ImGui::PopID();}
+                    ImGui::TreePop();
+                }
+                int rotationMode=int(draft.rotation_interpolation);if(combo("Rotation interpolation",&rotationMode,"SLERP\0Smooth SQUAD\0Step\0"))draft.rotation_interpolation=cinematic::RotationInterpolation(rotationMode);
+                int scalarMode=int(draft.scalar_interpolation);if(combo("FOV / roll curve",&scalarMode,"Linear\0Smooth cubic\0Step\0"))draft.scalar_interpolation=cinematic::ScalarInterpolation(scalarMode);
+                auto editEase=[&](const char* label,cinematic::EaseCurve& curve){
+                    if(!ImGui::TreeNode(label))return;
+                    int mode=int(curve.mode);if(combo("Easing",&mode,"Linear\0Ease in\0Ease out\0Ease in/out\0Smoothstep\0Smootherstep\0Cubic Bezier\0"))curve.mode=cinematic::Easing(mode);
+                    if(curve.mode==cinematic::Easing::CubicBezier){number("X1",&curve.x1,.01,.1,"%.4f");number("Y1",&curve.y1,.01,.1,"%.4f");number("X2",&curve.x2,.01,.1,"%.4f");number("Y2",&curve.y2,.01,.1,"%.4f");}
+                    ImGui::TreePop();
+                };
+                editEase("Position timing",draft.position_ease);editEase("Rotation timing",draft.rotation_ease);editEase("FOV / roll timing",draft.scalar_ease);
                 int interpolation=static_cast<int>(draft.outgoing);if(combo("Outgoing interpolation",&interpolation,"Linear\0Smooth\0Bezier\0Ease curve\0Catmull-Rom spline\0Step\0"))draft.outgoing=cinematic::Interpolation(interpolation);
                 checkbox("Constant position speed",&draft.constant_speed);
                 compactDouble("Ease in",&draft.ease_in,0.,1.);compactDouble("Ease out",&draft.ease_out,0.,1.);
-                for(int i=0;i<3;++i){ImGui::PushID(i);number("Bezier handle in",&draft.tangent_in[i],.1,1);number("Bezier handle out",&draft.tangent_out[i],.1,1);ImGui::PopID();}
+                int tangentMode=std::min(2,int(draft.tangent_mode));if(combo("Bezier tangents",&tangentMode,"Auto\0Linear\0Free\0"))draft.tangent_mode=cinematic::TangentMode(tangentMode);
+                if(draft.tangent_mode==cinematic::TangentMode::Free)for(int i=0;i<3;++i){ImGui::PushID(i);number("Bezier handle in",&draft.tangent_in[i],.1,1);number("Bezier handle out",&draft.tangent_out[i],.1,1);ImGui::PopID();}
+                if(ImGui::Button("Duplicate at cursor"))camera_runtime::duplicate_key(key.id,f.snapshot.time_ns);
                 if(ImGui::Button("Apply key edit"))camera_runtime::edit_key(draft);ImGui::NewLine();if(ImGui::Button("Delete this key")){camera_runtime::delete_key(key.id);drafts.erase(key.id);}
                 ImGui::TreePop();}ImGui::PopID();}
         }
         if(ImGui::CollapsingHeader("Diagnostics")){
+        const auto& evaluation=runtime.evaluation;
+        ImGui::Text("Segment %zu | t %.3f | u %.3f",evaluation.segment,evaluation.normalized_time,evaluation.parameter);
+        ImGui::Text("Distance %.3f / %.3f",evaluation.distance,evaluation.total_distance);
+        ImGui::Text("Target: %s",evaluation.target_resolved?"resolved":"none / waiting");
         ImGui::Text("Native interception: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
         ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
         if(ImGui::Button("2-second +0.25 X camera probe"))camera_runtime::probe();
@@ -1502,7 +1548,7 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     const float s=ui_.rects.uiScale;auto camera=camera_runtime::view();
     ImGui::SetCursorScreenPos(ImVec2(min.x+Px(8,s),min.y+Px(4,s)));
     ImGui::TextUnformatted("Dolly curves");ImGui::SameLine();ImGui::SetNextItemWidth(Px(65,s));
-    const char* channels[]={"X","Y","Z","FOV"};ImGui::Combo("##dolly-channel",&curveChannel_,channels,4);
+    const char* channels[]={"X","Y","Z","FOV","Roll","Focus"};ImGui::Combo("##dolly-channel",&curveChannel_,channels,6);
     ImGui::SameLine();if(ImGui::SmallButton("Fit")){curveZoom_=1;curvePan_=0;}
     if(ImGui::IsItemHovered())ImGui::SetTooltip("Wheel: value zoom. Ctrl+wheel: time zoom. Shift+wheel: value pan.");
     ImGui::SameLine();if(ImGui::SmallButton("Select all")){
@@ -1526,14 +1572,15 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     }
     ImGui::EndDisabled();ImGui::SameLine();ImGui::TextDisabled("%zu selected",selectedDollyKeys_.size());
     if(!camera.track_current||camera.keys.empty()){curveDragging_=false;ImGui::TextDisabled("Load a replay and capture Dolly keys to edit its spline.");return;}
-    if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys);curveGeneration_=camera.project_generation;}
+    if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys,camera.track_settings);curveGeneration_=camera.project_generation;}
     const ImVec2 a(min.x+Px(8,s),ImGui::GetCursorScreenPos().y+Px(3,s)),b(max.x-Px(8,s),max.y-Px(4,s));
     if(b.y-a.y<Px(20,s)||b.x<=a.x)return;
     // Match timeline zoom/pan exactly, including its left track tree width.
     const float lane=min.x+Px(ui_.layout.trackTreeWidth,s);
     auto timeAt=[&](float x){return std::clamp(ui_.timeline.viewStart+(x-lane)/ui_.timeline.pixelsPerSecond,0.,f.snapshot.duration_ns/1e9);};
     auto xAt=[&](std::uint64_t t){return lane+float((t/1e9-ui_.timeline.viewStart)*ui_.timeline.pixelsPerSecond);};
-    auto value=[&](const cinematic::State& pose){return curveChannel_<3?pose.position[curveChannel_]:pose.fov_degrees;};
+    const unsigned curveMask=curveChannel_<3?cinematic::Position:curveChannel_==3?cinematic::Fov:curveChannel_==4?cinematic::Roll:cinematic::Focus;
+    auto value=[&](const cinematic::State& pose){return curveChannel_<3?pose.position[curveChannel_]:curveChannel_==3?pose.fov_degrees:curveChannel_==4?pose.roll_degrees:pose.focus_distance;};
     auto&curveIo=ImGui::GetIO();
     if(!curveDragging_&&!curveBoxSelecting_&&ImGui::IsWindowHovered()&&curveIo.MousePos.x>=a.x&&curveIo.MousePos.x<=b.x&&curveIo.MousePos.y>=a.y&&curveIo.MousePos.y<=b.y&&curveIo.MouseWheel){
         if(curveIo.KeyCtrl){const auto anchor=timeAt(curveIo.MousePos.x);ui_.timeline.pixelsPerSecond=std::clamp(ui_.timeline.pixelsPerSecond*std::pow(1.2,curveIo.MouseWheel),.1,2000.*s);ui_.timeline.viewStart=anchor-(curveIo.MousePos.x-lane)/ui_.timeline.pixelsPerSecond;}
@@ -1544,7 +1591,7 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     if(!curveDragging_&&!curveBoxSelecting_){
         double lo=1e300,hi=-1e300;
         for(int n=0;n<=192;++n)if(auto pose=cinematic::dolly_evaluate(curveTrack_,std::uint64_t((t0+(t1-t0)*n/192)*1e9),camera.dolly_smoothing_seconds)){lo=std::min(lo,value(*pose));hi=std::max(hi,value(*pose));}
-        for(auto&key:camera.keys)if(xAt(key.time_ns)>=a.x&&xAt(key.time_ns)<=b.x){lo=std::min(lo,value(key.state));hi=std::max(hi,value(key.state));}
+        for(auto&key:camera.keys)if((key.channels&curveMask)&&xAt(key.time_ns)>=a.x&&xAt(key.time_ns)<=b.x){lo=std::min(lo,value(key.state));hi=std::max(hi,value(key.state));}
         const double padding=std::max(.1,(hi-lo)*.15),center=(lo+hi)*.5+curvePan_,half=((hi-lo)*.5+padding)/curveZoom_;curveMin_=float(center-half);curveMax_=float(center+half);
     }
     auto yAt=[&](double v){return b.y-float((v-curveMin_)/(curveMax_-curveMin_))*(b.y-a.y);};
@@ -1556,7 +1603,7 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     for(int n=0;n<=192;++n){auto t=std::uint64_t((t0+(t1-t0)*n/192)*1e9);if(auto pose=cinematic::dolly_evaluate(curveTrack_,t,camera.dolly_smoothing_seconds)){ImVec2 point(xAt(t),yAt(value(*pose)));if(has)draw->AddLine(last,point,Color::AccentBlue.U32(),Px(2,s));last=point;has=true;}}
     const float playhead=xAt(f.snapshot.time_ns);draw->AddLine(ImVec2(playhead,a.y),ImVec2(playhead,b.y),Color::AccentAmber.U32());
     bool pointHit=false;
-    for(auto&key:camera.keys){ImVec2 point(xAt(key.time_ns),yAt(value(key.state)));draw->AddCircleFilled(point,Px(5,s),(selectedDollyKeys_.contains(key.id)?Color::AccentAmber:Color::TextPrimary).U32());
+    for(auto&key:camera.keys){if(!(key.channels&curveMask))continue;ImVec2 point(xAt(key.time_ns),yAt(value(key.state)));draw->AddCircleFilled(point,Px(5,s),(selectedDollyKeys_.contains(key.id)?Color::AccentAmber:Color::TextPrimary).U32());
         if(!pointHit&&!curveDragging_&&!curveBoxSelecting_&&ImGui::IsItemHovered()&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(ImGui::GetIO().MousePos.x-point.x,ImGui::GetIO().MousePos.y-point.y)<Px(9,s)){
             pointHit=true;SelectDollyKey(key.id,io.KeyCtrl,io.KeyShift);curveStart_=key;curveDragging_=!io.KeyCtrl&&!io.KeyShift;if(curveDragging_)camera_runtime::begin_edit();gizmoDragging_=false;gizmoLastCommit_=f.now;}
     }
@@ -1567,7 +1614,7 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
         ImVec2 mouse(std::clamp(io.MousePos.x,a.x,b.x),std::clamp(io.MousePos.y,a.y,b.y));
         ImVec2 lo(std::min(curveBoxStart_.x,mouse.x),std::min(curveBoxStart_.y,mouse.y)),hi(std::max(curveBoxStart_.x,mouse.x),std::max(curveBoxStart_.y,mouse.y));
         selectedDollyKeys_=curveBoxBase_;
-        for(const auto&key:camera.keys){auto x=xAt(key.time_ns),y=yAt(value(key.state));if(x>=lo.x&&x<=hi.x&&y>=lo.y&&y<=hi.y)selectedDollyKeys_.insert(key.id);}
+        for(const auto&key:camera.keys){if(!(key.channels&curveMask))continue;auto x=xAt(key.time_ns),y=yAt(value(key.state));if(x>=lo.x&&x<=hi.x&&y>=lo.y&&y<=hi.y)selectedDollyKeys_.insert(key.id);}
         selectedDollyKey_=selectedDollyKeys_.empty()?0:*selectedDollyKeys_.begin();
         draw->AddRectFilled(lo,hi,Color::AccentBlue.Alpha(35).U32());draw->AddRect(lo,hi,Color::AccentBlue.U32());
         if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){selectedDollyKeys_=curveBoxBase_;curveBoxSelecting_=false;}
@@ -1577,7 +1624,7 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     draw->PopClipRect();
     if(curveDragging_){auto draft=curveStart_;auto&io=ImGui::GetIO();
         if(io.KeyCtrl)draft.time_ns=std::uint64_t(timeAt(io.MousePos.x)*1e9);
-        else {double v=curveMin_+(b.y-io.MousePos.y)/(b.y-a.y)*(curveMax_-curveMin_);if(curveChannel_<3)draft.state.position[curveChannel_]=v;else draft.state.fov_degrees=std::clamp(v,1.,178.);}
+        else {double v=curveMin_+(b.y-io.MousePos.y)/(b.y-a.y)*(curveMax_-curveMin_);if(curveChannel_<3)draft.state.position[curveChannel_]=v;else if(curveChannel_==3)draft.state.fov_degrees=std::clamp(v,1.,178.);else if(curveChannel_==4)draft.state.roll_degrees=v;else draft.state.focus_distance=std::max(0.,v);}
         if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){camera_runtime::edit_key(curveStart_);curveDragging_=false;}
         else if(f.now-gizmoLastCommit_>=1./30||!io.MouseDown[0]){camera_runtime::edit_key(draft);gizmoLastCommit_=f.now;}
         if(!io.MouseDown[0])curveDragging_=false;

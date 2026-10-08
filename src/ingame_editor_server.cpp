@@ -23,12 +23,15 @@ void shutdown(){running=false;if(worker.joinable()){CancelSynchronousIo(worker.n
 // Called on the host UI thread, never on Present or a game callback.
 void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);batch.swap(commands);}
  static std::uint32_t offset=0,replay_offset=0;
+ std::optional<std::uint64_t> target_query;
+ static std::array<theater_ui::Snapshot::TargetPoint,64> target_cache{};static unsigned target_count=0;static fs::path target_file;
  for(const auto&r:batch){switch(r.command){
  case theater_ui::play:play_replay();break;case theater_ui::pause:pause_replay();break;case theater_ui::stop:emergency_stop();break;case theater_ui::restart:restart_replay();break;
  case theater_ui::toggle_playback:toggle_replay();break;
  case theater_ui::replay_unload:unload_replay();break;
  case theater_ui::seek:seek_replay(r.value);break;case theater_ui::previous:step_replay(-1);break;case theater_ui::next:step_replay(1);break;
  case theater_ui::timescale:{std::lock_guard lock(app.replay_mutex);if(app.replay_player)app.replay_player->set_timescale(theater_timescale::decode(r.value));break;}
+ case theater_ui::camera_target_window:target_query=r.value;break;
  case theater_ui::select:app.selected_replay_actor=r.value;break;
  case theater_ui::page:offset=static_cast<std::uint32_t>(std::min<std::uint64_t>(r.value,UINT32_MAX));break;
  // Same recorder path as F5 and the host Start button; post_command refuses while a replay is active.
@@ -87,6 +90,14 @@ void poll(){std::deque<theater_ui::Request> batch;{std::lock_guard lock(mutex);b
   copy(s.loaded_path,sizeof(s.loaded_path),game_launcher::utf8(app.opened_replay.wstring()));
   const auto& st=app.replay_player->state();s.host_playing=st.status==replay::Status::playing;
   s.time_ns=st.timestamp_ns;s.timescale=st.timescale;
+  if(target_file==app.opened_replay){s.target_count=target_count;std::copy(target_cache.begin(),target_cache.end(),s.target_points);}
+  if(target_query){try{
+   const auto&reader=app.replay_player->reader();auto index=reader.lower_sample(std::min(std::max(*target_query,st.timestamp_ns),s.duration_ns));
+   auto start=index>16?index-16:0;const auto count=std::min<std::uint64_t>(64,reader.summary().sample_count-start);
+   for(std::uint64_t i=0;i<count;++i){auto sample=reader.sample(start+i);auto&point=s.target_points[i];point.time_ns=sample.replay_time_ns;point.position[0]=sample.position.x;point.position[1]=sample.position.y;point.position[2]=sample.position.z;}
+   s.target_count=static_cast<std::uint32_t>(count);
+  }catch(...){s.target_count=0;}
+   target_file=app.opened_replay;target_count=s.target_count;std::copy(std::begin(s.target_points),std::end(s.target_points),target_cache.begin());}
   if (!s.active) s.phase=s.host_playing?2u:(st.status==replay::Status::paused?3u:0u);
   try{const auto sample=app.replay_player->reader().sample(st.sample_index);s.play_source_ns=sample.source_time_ns+(st.timestamp_ns>sample.replay_time_ns?st.timestamp_ns-sample.replay_time_ns:0);}catch(...){s.play_source_ns=0;}}}
  {std::lock_guard lock(mutex);cached=s;}

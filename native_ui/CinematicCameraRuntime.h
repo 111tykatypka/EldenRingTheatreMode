@@ -21,13 +21,20 @@ struct View {
  bool prevent_asset_fade=true;
  double near_plane=.01,native_near_plane=0;
  bool cuts_enabled=false;std::vector<cinematic::CameraCut> cuts;
+ cinematic::TrackSettings track_settings;
+ cinematic::EvaluationDebug evaluation;
 };
 View view(bool include_keys=true);
 void mode(unsigned value);
 void enable(bool value);
 void stop();
 void probe(); // +0.25 X, automatically releases after two real seconds
-void add_key();
+void add_key(unsigned channels=cinematic::PoseChannels);
+void duplicate_key(std::uint64_t id,std::uint64_t time_ns);
+void track_settings(cinematic::TrackSettings settings);
+struct TargetSample {std::uint64_t time_ns;cinematic::Vec position;};
+void player_targets(const std::vector<TargetSample>& samples);
+std::optional<std::uint64_t> player_target_query();
 void clear_keys();
 void edit_key(cinematic::Key key);
 void delete_key(std::uint64_t id);
