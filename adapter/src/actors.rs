@@ -328,10 +328,14 @@ impl Player{
    else if was_hidden&&saved_render{set_render(chr,true);}
    else if let Some((dead,render))=live_state(chr){ // a live body that stopped matching the recording is released, never revived
     if plan(ex,Some((dead,render)))!=Plan::Drive&&ex==Existence::Alive{if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}}
-   if self.skeletons.get(&info.id).is_some_and(|d|crate::skeleton::read(chr,info.id).as_ref()!=Some(d)){
-    if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
-    if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} skeleton identity differs; no pose applied",info.id));}continue;
-   }
+   // A skeleton that cannot be read right now (body not updated or still loading) is skipped for this frame;
+   // only a skeleton that reads fine and differs is a real mismatch.
+   if let Some(d)=self.skeletons.get(&info.id){match crate::skeleton::read(chr,info.id){
+    None=>{continue;}
+    Some(x) if &x==d=>{}
+    Some(x)=>{
+     if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
+     if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} skeleton identity differs (recorded model {} / {} bones / fingerprint {:08X}; live model {} / {} bones / fingerprint {:08X}); no pose applied",info.id,d.model_id,d.parents.len(),d.fingerprint,x.model_id,x.parents.len(),x.fingerprint));}continue;}}}
    let n=track.len();if !active_at(&track.times,t){
     if is_puppet{set_render(chr,false);}else{set_render(chr,false);if let Some(c)=self.controlled.get_mut(&info.id){c.hidden=true;}}continue;}
    let i=track.times.partition_point(|x|*x<=t).saturating_sub(1).min(n-1);
