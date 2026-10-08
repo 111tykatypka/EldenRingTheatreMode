@@ -59,6 +59,10 @@ const DRAW_GROUP:usize=4;
 /// Frames the return position is held (gravity still off) so the ground around the return spot can stream back
 /// in before the body is released to physics; 4 s at 60 fps.
 const RESTORE_FRAMES:u32=240;
+/// Where the player really was before a replay sent them across the map by grace warp (place and body transform). Survives the
+/// loading screens, which release the replay's ownership; used to bring the player back when the replay ends.
+static ORIGIN:Mutex<Option<(Place,Transform)>>=Mutex::new(None);
+static LAST_WARP_NS:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
 // Older sidecar format, read only: "<replay>.erplay.bones".
 const MAGIC:&[u8;8]=b"ERBONES1";
 const FRAME_BYTES_V1:usize=8+48+64+POSE_BYTES*2;
@@ -120,11 +124,11 @@ struct State{
  // Reserved root-rebase value; remains zero until cross-origin conversion is verified.
  now_offset:[f32;3],
  replay_blocked:bool,
- mount_note:u8,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,virt:Option<Virt>,fx_cursor:usize,fx_t:u64,fx_live:Vec<(u64,u32)>,
+ mount_note:u8,returning:Option<(u64,u32)>,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,virt:Option<Virt>,fx_cursor:usize,fx_t:u64,fx_live:Vec<(u64,u32)>,
  module_saved:Option<[u8;weapon_loc::BYTES]>,module_written:Option<[u8;weapon_loc::BYTES]>,module_lost:u64,module_frames:u64,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None,eval_place:None,virt:None,fx_cursor:0,fx_t:0,fx_live:Vec::new(),module_saved:None,module_written:None,module_lost:0,module_frames:0});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,returning:None,saved_place:None,inv_saved:None,eval_place:None,virt:None,fx_cursor:0,fx_t:0,fx_live:Vec::new(),module_saved:None,module_written:None,module_lost:0,module_frames:0});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -362,8 +366,19 @@ fn release(s:&mut State,chr:usize,reason:&str){
  crate::log_game(&format!("BONE_REPLAY: released the body ({reason}); accuracy over {} settled frames: written bones retained to draw {:.1}%, drawn position error vs interpolated recording max {:.2} cm mean {:.3} cm; bones kept at the earlier frame because interpolation was invalid: {}",
   a.frames,100.0*a.exact_bones as f64/(a.frames.max(1) as f64),a.max_drawn_cm,a.sum_drawn_cm/(a.frames.max(1) as f64),s.fallback_bones));
  // After a grace warp the saved spot is in another map; the player stays where the replay was.
- if s.warped{s.saved=None;status("BONE REPLAY: you stay at the replay's location (the replay travelled there by grace warp)");}
- if let Some(t)=saved_for_now(s,chr){write_transform(chr,&t);}
+ // The replay may have sent the player across the map by grace warp: bring them back to where they started, the same way.
+ if let Some((place,transform))=ORIGIN.lock().unwrap().take(){
+  let here=arrival::place(chr);
+  if here.block!=-1&&arrival::needs_warp(&here,&place){
+   match arrival::nearest_grace(&place){
+    Some((grace,name))=>match arrival::warp_to_grace(grace){
+     Ok(())=>{LAST_WARP_NS.store(crate::monotonic_ns().max(1),std::sync::atomic::Ordering::Relaxed);
+      s.saved=Some(transform);s.saved_place=Some(place);s.restore_left=0;s.returning=Some((crate::monotonic_ns(),0));
+      crate::log_game(&format!("RETURN: warping back to {name} near where you started ({})",arrival::block_name(place.block)));status("BONE REPLAY: taking you back to where you started...");}
+     Err(e)=>{s.saved=None;crate::log_game(&format!("RETURN_ERROR: could not warp back ({e}); you stay where the replay ended"));status("BONE REPLAY: could not take you back automatically; use a grace to travel");}},
+    None=>{s.saved=None;crate::log_game("RETURN_ERROR: no grace near your starting point; you stay where the replay ended");status("BONE REPLAY: could not take you back automatically; use a grace to travel");}}}
+ }
+ if s.returning.is_none(){if let Some(t)=saved_for_now(s,chr){write_transform(chr,&t);}}
  if s.module_frames>0{crate::log_game(&format!("WEAPON_LOCATION: written {} frames; the game replaced it before drawing on {} of them",s.module_frames,s.module_lost));}
  if let Some(m)=s.module_saved.take(){weapon_loc::write(chr,&m);}
  crate::item_probe::clear_hide(chr);effects::release_all();
@@ -414,7 +429,6 @@ fn begin_arrival(s:&mut State,chr:usize){
  // A grace warp ends the game session of the body (loading screen), which releases ownership; the replay then starts again from
  // scratch. When the nearest grace is itself more than the direct-placement limit away from the recorded start, that would warp
  // again and again. So after a warp in the last two minutes the body is placed directly instead of travelling a second time.
- static LAST_WARP_NS:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
  let last=LAST_WARP_NS.load(std::sync::atomic::Ordering::Relaxed);
  if last!=0&&crate::monotonic_ns().saturating_sub(last)<120_000_000_000&&convertible{crate::log_game(&format!("ARRIVAL: already travelled by grace {:.0} s ago; placing the body directly ({far_m:.0} m) instead of warping again",crate::monotonic_ns().saturating_sub(last) as f64/1e9));return;}
  let far=far_m>FAR_DIRECT_M;
@@ -424,7 +438,7 @@ fn begin_arrival(s:&mut State,chr:usize){
   None if convertible=>{crate::log_game(&format!("ARRIVAL: no grace found for {}; placing the body directly ({far_m:.0} m)",arrival::block_name(target.block)));}
   None=>{crate::log_game(&format!("ARRIVAL_ERROR: no grace found for {}; cannot travel there",arrival::block_name(target.block)));status("BONE REPLAY ERROR: the replay was recorded where no grace can take you. Travel there first, then play it");reject(s,chr,"no grace to travel to");}
   Some((grace,name))=>match arrival::warp_to_grace(grace){
-   Ok(())=>{LAST_WARP_NS.store(crate::monotonic_ns().max(1),std::sync::atomic::Ordering::Relaxed);s.warped=true;s.arrival=Arrival::Warping{target,since:crate::monotonic_ns(),stable:0};crate::log_game(&format!("ARRIVAL: warping to {name} for {}",arrival::block_name(target.block)));status("BONE REPLAY: travelling to the replay's location...");}
+   Ok(())=>{LAST_WARP_NS.store(crate::monotonic_ns().max(1),std::sync::atomic::Ordering::Relaxed);{let mut o=ORIGIN.lock().unwrap();if o.is_none(){if let (Some(t),Some(p))=(s.saved,s.saved_place){*o=Some((p,t));crate::log_game(&format!("ARRIVAL: origin remembered ({} {:?}) so you can be brought back",arrival::block_name(p.block),&p.global[..3]));}}}s.warped=true;s.arrival=Arrival::Warping{target,since:crate::monotonic_ns(),stable:0};crate::log_game(&format!("ARRIVAL: warping to {name} for {}",arrival::block_name(target.block)));status("BONE REPLAY: travelling to the replay's location...");}
    Err(e) if convertible=>{crate::log_game(&format!("ARRIVAL: grace warp unavailable ({e}); placing the body directly ({far_m:.0} m)"));}
    Err(e)=>{crate::log_game(&format!("ARRIVAL_ERROR: grace warp failed: {e}"));status("BONE REPLAY ERROR: could not travel to the replay's location (see log)");reject(s,chr,"grace warp failed");}}}}
 // Each frame while owning: finish a warp once the map has loaded, then confirm the body is on the spot.
@@ -534,7 +548,17 @@ pub fn tick(group:usize,now:u64){
      let g=gravity_flag(chr);s.gravity_saved=g.map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);set_flag(g,true);
      unsafe{tm_render_lock_game_input(1)};crate::log_game("BONE_REPLAY: the replay owns the body; controls locked, return spot saved");}}
    else if !want&&s.owning{release(s,chr,if s.loaded.is_none(){"replay unloaded"}else{"timeline idle and overlay closed"});}
-   if !s.owning&&s.restore_left>0{
+   if let (Some((since,stable)),false)=(s.returning,s.owning){
+    let here=arrival::place(chr);let target=s.saved_place.unwrap_or_default();let elapsed=crate::monotonic_ns().saturating_sub(since);
+    let settled=!arrival::loading()&&here.block!=-1&&BlockArea::same(here.block,target.block)&&elapsed>4_000_000_000;
+    let stable=if settled{stable+1}else{0};
+    if stable>=90{
+     s.returning=None;s.restore_left=RESTORE_FRAMES;s.gravity_saved=gravity_flag(chr).map(|_|false);set_flag(gravity_flag(chr),true);
+     crate::log_game(&format!("RETURN: map loaded ({}); placing you back at your starting spot",arrival::block_name(here.block)));}
+    else if elapsed>60_000_000_000{
+     s.returning=None;s.saved=None;s.restore_left=0;crate::log_game("RETURN_ERROR: the map did not finish loading within 60 s; you stay where you are");status("BONE REPLAY: could not take you back automatically; use a grace to travel");unsafe{tm_render_lock_game_input(0)};}
+    else{s.returning=Some((since,stable));}}
+   if !s.owning&&s.restore_left>0&&s.returning.is_none(){
     if let Some(t)=saved_for_now(s,chr){write_transform(chr,&t);}set_flag(proxy_flag(chr),true);
     s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}if let Some(b)=s.inv_saved.take(){crate::actors::set_invincible(chr,b);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
   }
