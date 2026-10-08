@@ -129,7 +129,7 @@ bool update(void* output,void* source){
  double dt=std::min(double(now-last_tick)/1e9,.05);last_tick=now;
  if(!probe_until){
   if(effective_mode==1||(effective_mode==2&&!state.dolly_preview&&!state.cuts_enabled)){
-   if(effective_mode==2&&!playing&&dolly_seek&&keys_replay_path==replay_path){if(auto value=track.evaluate(time_at(now))){state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;velocity={};}}
+   if(effective_mode==2&&!playing&&dolly_seek&&keys_replay_path==replay_path){if(auto value=cinematic::dolly_evaluate(track,time_at(now),state.dolly_smoothing_seconds)){state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;velocity={};}}
    dolly_seek=false;move(dt);
   }
   else if(effective_mode==3){
@@ -138,17 +138,17 @@ bool update(void* output,void* source){
    for(int i=0;i<3;++i)for(int j=0;j<3;++j)state.pose.position[i]+=basis[j*4+i]*state.bone_offset[j];
   }
   else if(!track.keys().empty()&&keys_replay_path!=replay_path){release("Dolly keys belong to another replay; clear them before creating a new path");return false;}
-  else if(auto value=track.evaluate(time_at(now))){
+  else if(auto value=cinematic::dolly_evaluate(track,time_at(now),state.dolly_smoothing_seconds)){
    if(!state.writing&&cinematic::length(cinematic::sub(value->position,state.pose.position))>20){release("Dolly start exceeds 20 units; move camera near the path first");return false;}state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;
   } else {release("Dolly cut has no path; native camera restored");return false;}
  }
  auto rendered=state.pose;
  // Pure timeline-based oscillation: seek/pause produce the same result and
  // shake never accumulates into the editable pose or captured camera nodes.
- if(!probe_until&&state.shake_frequency>0&&(state.shake_position>0||state.shake_rotation>0)){
+ if(!probe_until&&(effective_mode!=2||state.shake_dolly)&&state.shake_frequency>0&&(state.shake_position>0||state.shake_rotation>0)){
   double t=double(time_at(now))/1e9;
   for(int i=0;i<3;++i){double phase=t*state.shake_frequency*6.283185307179586*(1+i*.173)+i*2.1;
-   if(!std::isfinite(phase)){release("Shake phase overflow; native camera restored");return false;}double wave=std::sin(phase);
+   if(!std::isfinite(phase)){release("Shake phase overflow; native camera restored");return false;}double wave=cinematic::shake_wave(t,i,state.shake_frequency,state.shake_speed,state.shake_smoothing_seconds);
    rendered.position[i]+=wave*state.shake_position;cinematic::Quat q{0,0,0,1};double angle=wave*(state.shake_rotation*(3.141592653589793/180));q[i]=std::sin(angle/2);q[3]=std::cos(angle/2);auto rotation=cinematic::normalized(product(rendered.orientation,q));if(!rotation){release("Invalid shake orientation; native camera restored");return false;}rendered.orientation=*rotation;}
  }
  float matrix[16];encode(rendered,matrix);float fov=static_cast<float>(rendered.fov_degrees*3.141592653589793/180);
@@ -190,7 +190,7 @@ void edit_key(cinematic::Key key){
 void delete_key(std::uint64_t id){std::vector<cinematic::Key> keys;std::string identity;
  {std::lock_guard lock(mutex);keys=track.keys();identity=keys_replay_path;}
  keys.erase(std::remove_if(keys.begin(),keys.end(),[&](const auto&k){return k.id==id;}),keys.end());cinematic::Track next;if(!next.replace(std::move(keys)))return;
- std::lock_guard lock(mutex);if(identity!=keys_replay_path)return;track=std::move(next);if(track.keys().empty()&&state.mode==2)release("Last Dolly key deleted; native camera restored");state.status="Dolly key deleted";
+ std::lock_guard lock(mutex);if(identity!=keys_replay_path)return;track=std::move(next);++state.project_generation;if(track.keys().empty()&&state.mode==2)release("Last Dolly key deleted; native camera restored");state.status="Dolly key deleted";
 }
 void save_path(){std::string identity,text;{std::lock_guard lock(mutex);identity=keys_replay_path;if(identity.empty()||identity!=replay_path){state.status="No camera track for the loaded replay";return;}text=cinematic::save_project(identity,track.keys());}
  bool ok=false;try{auto path=std::filesystem::u8path(identity+".ercam");auto temp=path;temp+=L".tmp";
@@ -209,7 +209,8 @@ void load_path(){std::string identity;std::uint64_t duration;{std::lock_guard lo
 void movement(double value,double sensitivity,double smoothing,double rotation_smoothing){std::lock_guard lock(mutex);if(std::isfinite(value)&&value>0&&std::isfinite(sensitivity)&&sensitivity>0&&std::isfinite(smoothing)&&smoothing>=0&&std::isfinite(rotation_smoothing)&&rotation_smoothing>=0){state.rotation_smoothing_seconds=rotation_smoothing;state.movement_speed=value;state.mouse_sensitivity=sensitivity;state.smoothing_seconds=smoothing;}}
 void preview(bool enabled){std::lock_guard lock(mutex);state.dolly_preview=enabled;rotation_pending={};velocity={};}
 void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
-void shake(double position,double rotation,double frequency){std::lock_guard lock(mutex);if(std::isfinite(position)&&position>=0&&std::isfinite(rotation)&&rotation>=0&&std::isfinite(frequency)&&frequency>=0){state.shake_position=position;state.shake_rotation=rotation;state.shake_frequency=frequency;}}
+void dolly_smoothing(double seconds){std::lock_guard lock(mutex);if(std::isfinite(seconds)&&seconds>=0&&seconds<=2)state.dolly_smoothing_seconds=seconds;}
+void shake(double position,double rotation,double frequency,double speed,double smoothing,bool dolly){std::lock_guard lock(mutex);if(std::isfinite(position)&&position>=0&&position<=5&&std::isfinite(rotation)&&rotation>=0&&rotation<=30&&std::isfinite(frequency)&&frequency>=0&&frequency<=30&&std::isfinite(speed)&&speed>=0&&speed<=10&&std::isfinite(smoothing)&&smoothing>=0&&smoothing<=2){state.shake_position=position;state.shake_rotation=rotation;state.shake_frequency=frequency;state.shake_speed=speed;state.shake_smoothing_seconds=smoothing;state.shake_dolly=dolly;}}
 std::optional<cinematic::State> bone_world(const float*root,const float*qs){
  if(!root||!qs)return {};theater_camera::Slot slot;std::copy(root,root+16,slot.matrix);slot.fov=1;slot.aspect=1;slot.near_plane=.1f;slot.far_plane=1000;
  auto world=decode(slot);if(!world||!std::all_of(qs,qs+12,[](float x){return std::isfinite(x);}))return {};

@@ -1,4 +1,5 @@
 #include "../shared/CinematicCamera.h"
+#include "../shared/CameraEffects.h"
 #include "../shared/CameraViewport.h"
 #include "../shared/CameraTelemetry.h"
 #include "../shared/CameraProject.h"
@@ -38,6 +39,7 @@ int main(){using namespace cinematic;
  }
  {using namespace theater_hotkeys;std::array<std::uint32_t,static_cast<std::size_t>(Action::Count)> keys{};
   std::istringstream ok("THEATER_KEYBINDS_V1\ncycle_camera=119\n");check(DecodeBindings(ok,keys));check(keys[static_cast<std::size_t>(Action::CycleCamera)]==119);
+  std::istringstream legacy("THEATER_KEYBINDS_V1\ncycle_camera=80\n");check(DecodeBindings(legacy,keys));check(keys[static_cast<std::size_t>(Action::CycleCamera)]==80);check(keys[static_cast<std::size_t>(Action::ToggleDollyControls)]!=80);
   for(auto text:{"BAD\n","THEATER_KEYBINDS_V1\ncycle_camera=87\n","THEATER_KEYBINDS_V1\ncycle_camera=0\n","THEATER_KEYBINDS_V1\ncycle_camera=256\n","THEATER_KEYBINDS_V1\ncycle_camera=119xx\n","THEATER_KEYBINDS_V1\ncycle_camera=119\ncycle_camera=118\n","THEATER_KEYBINDS_V1\nunknown=119\n"}){auto saved=keys;std::istringstream bad(text);check(!DecodeBindings(bad,keys));check(keys==saved);}}
 
  CameraCutTrack cuts;check(cuts.replace({{1,0,5,CutMode::Player},{2,5,14,CutMode::Dolly}},20));check(cuts.evaluate(4)==CutMode::Player);check(cuts.evaluate(5)==CutMode::Dolly);check(cuts.evaluate(13)==CutMode::Dolly);check(cuts.evaluate(14)==CutMode::Player);check(cuts.evaluate(0)==CutMode::Player);
@@ -51,6 +53,15 @@ int main(){using namespace cinematic;
  a.outgoing=Interpolation::Linear;a.constant_speed=false;b.state.orientation={0,0,0,-1};check(track.replace({a,b}));check(std::abs(track.evaluate(500000000)->orientation[3]-1)<1e-6);
  a.outgoing=Interpolation::Step;check(track.replace({a,b}));check(track.evaluate(999999999)->position==a.state.position);check(track.evaluate(1000000000)->position==b.state.position);
  b.id=1;check(!track.replace({a,b}));b.id=2;b.time_ns=0;check(!track.replace({a,b}));b.time_ns=1000000000;b.state.fov_degrees=std::numeric_limits<double>::quiet_NaN();check(!track.replace({a,b}));
+ {Track filtered;Key k0,k1,k2;k0.id=10;k1.id=11;k2.id=12;k1.time_ns=1000000000;k2.time_ns=2000000000;k0.state.position={0,0,0};k1.state.position={1,2,0};k2.state.position={2,0,0};check(filtered.replace({k0,k1,k2}));
+  for(auto&k:filtered.keys()){auto p=dolly_evaluate(filtered,k.time_ns,.4);check(p&&p->position==k.state.position);}
+  auto p=dolly_evaluate(filtered,500000000,.4);check(p&&valid(*p));check(length(sub(p->position,filtered.evaluate(500000000)->position))>1e-6);check(p->position==dolly_evaluate(filtered,500000000,.4)->position);
+  check(dolly_evaluate(filtered,500000000,0)->position==filtered.evaluate(500000000)->position);
+  k0.outgoing=Interpolation::Step;check(filtered.replace({k0,k1}));check(dolly_evaluate(filtered,999999999,.4)->position==k0.state.position);
+  check(!dolly_evaluate(Track{},1000000,.4));
+  double unfiltered=shake_wave(.37,0,3,1,0),smooth=shake_wave(.37,0,3,1,.2);check(std::abs(smooth)<std::abs(unfiltered));
+  check(shake_wave(.37,1,3,2,0)==shake_wave(.74,1,3,1,0));check(shake_wave(.37,2,3,1,.2)==shake_wave(.37,2,3,1,.2));
+ }
  check(finite(spline({0,0,0},{0,0,0},{1,0,0},{1,0,0},.5)));
  check(frame_time(0,10000000000ULL,599,60)==9983333333ULL);check(!frame_time(0,10000000000ULL,600,60));check(!frame_time(0,1,0,0));
  check(frame_time(0,10000000000ULL,1,24000,1001)==41708333ULL);check(!frame_time(0,10000000000ULL,UINT64_MAX,60));

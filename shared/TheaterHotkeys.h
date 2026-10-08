@@ -24,6 +24,7 @@ enum class Action : std::uint32_t {
     AddDollyKey,
     ClearDollyKeys,
     Forward,Backward,Left,Right,Up,Down,YawLeft,YawRight,PitchUp,PitchDown,RollLeft,RollRight,Fast,Slow,SpeedUp,SpeedDown,ResetRoll,FovUp,FovDown,ResetFov,
+    ToggleDollyControls,
     Count
 };
 
@@ -68,6 +69,7 @@ inline constexpr Binding kDefaults[] = {
     { Action::FovUp,"fov_up","Increase FOV",0x6B,Scope::GameWindow },
     { Action::FovDown,"fov_down","Decrease FOV",0x6D,Scope::GameWindow },
     { Action::ResetFov,"reset_fov","Reset FOV",0x6A,Scope::GameWindow },
+    { Action::ToggleDollyControls,"toggle_dolly_controls","Show / hide Dolly viewport controls",'P',Scope::GameWindow },
 };
 static_assert(sizeof(kDefaults) / sizeof(kDefaults[0]) == static_cast<std::size_t>(Action::Count), "one row per action");
 
@@ -81,7 +83,11 @@ inline bool DecodeBindings(std::istream&in,std::array<std::uint32_t,static_cast<
  std::array<std::uint32_t,static_cast<std::size_t>(Action::Count)> keys{};std::array<bool,static_cast<std::size_t>(Action::Count)> seen{};for(auto&b:kDefaults)keys[static_cast<std::size_t>(b.action)]=b.vk;
  while(std::getline(in,line)){auto equal=line.find('=');if(equal==std::string::npos)return false;auto name=line.substr(0,equal),num=line.substr(equal+1);unsigned v=0;auto parsed=std::from_chars(num.data(),num.data()+num.size(),v);if(parsed.ec!=std::errc{}||parsed.ptr!=num.data()+num.size()||!v||v>255)return false;
   bool known=false;for(auto&b:kDefaults)if(name==b.id){auto i=static_cast<std::size_t>(b.action);if(seen[i])return false;seen[i]=true;keys[i]=v;known=true;}if(!known)return false;}
- if(!in.eof())return false;for(auto&a:kDefaults)for(auto&b:kDefaults)if(a.action<b.action&&!retired(a.action)&&!retired(b.action)&&keys[static_cast<std::size_t>(a.action)]==keys[static_cast<std::size_t>(b.action)])return false;
+ if(!in.eof())return false;
+ const auto added=static_cast<std::size_t>(Action::ToggleDollyControls);
+ if(!seen[added]){bool conflict=false;for(std::size_t i=0;i<added;++i)if(!retired(kDefaults[i].action)&&keys[i]==keys[added])conflict=true;
+  if(conflict){for(unsigned candidate=0x7B;candidate<=0x87;++candidate){bool used=false;for(std::size_t i=0;i<added;++i)if(!retired(kDefaults[i].action)&&keys[i]==candidate)used=true;if(!used){keys[added]=candidate;break;}}}}
+ for(auto&a:kDefaults)for(auto&b:kDefaults)if(a.action<b.action&&!retired(a.action)&&!retired(b.action)&&keys[static_cast<std::size_t>(a.action)]==keys[static_cast<std::size_t>(b.action)])return false;
  result=keys;return true;
 }
 void Reload(); // IPC/host worker only: never called by the camera hook

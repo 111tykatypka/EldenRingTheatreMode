@@ -229,7 +229,7 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
  using theater_hotkeys::Action;using theater_hotkeys::Key;
  if((m==WM_KEYDOWN||m==WM_KEYUP)&&!b.text_input.load()&&!theater_hotkeys::rebinding){
-  for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys})if(w==Key(action)){
+  for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys,Action::ToggleDollyControls})if(w==Key(action)){
    if(m==WM_KEYDOWN&&!(l&(1LL<<30))){
     {std::lock_guard lock(camera_mutex);if(camera_actions.size()<32)camera_actions.push_back(action);}
     if(action==Action::ClearDollyKeys)b.set_visibility(TheaterUI::UiVisibility::Shown);
@@ -358,6 +358,7 @@ extern "C" void tm_render_shutdown(){camera_runtime::stop();auto&b=backend();b.r
 }
 // CPU-only UI construction test. Does not install hooks or assert game rendering.
 extern "C" int tm_render_test_ui(){
+ SetEnvironmentVariableW(L"THEATER_OVERLAY_NO_SETTINGS_FILE",L"1");
  auto&b=backend();auto*c=ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.DeltaTime=1.f/60;
  // No renderer backend here: let the atlas build on the CPU as the legacy path does.
  b.overlay.Init(io);io.IniFilename=nullptr; // never touch the user's saved layout from a test
@@ -378,6 +379,12 @@ extern "C" int tm_render_test_ui(){
  // Cycling cameras is independent of showing the main overlay.
  b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;camera_runtime::mode(0);
  for(unsigned expected:{1u,2u,0u}){b.overlay.CameraHotkey(theater_hotkeys::Action::CycleCamera);valid=valid&&b.visibility==int(TheaterUI::UiVisibility::Hidden)&&camera_runtime::view(false).mode==expected;}
+ const bool markers=b.overlay.DollyControlsVisible();
+ const auto previousTool=b.overlay.State().activeTool;
+ b.overlay.CameraHotkey(theater_hotkeys::Action::ToggleDollyControls);
+ valid=valid&&b.overlay.DollyControlsVisible()!=markers&&b.visibility==int(TheaterUI::UiVisibility::Hidden)&&b.overlay.State().activeTool==previousTool;
+ b.overlay.CameraHotkey(theater_hotkeys::Action::ToggleDollyControls);
+ valid=valid&&b.overlay.DollyControlsVisible()==markers;
  // These are selection checks only: no game camera can arm in this test process.
  // Exercise short/narrow panels at different font/layout scales. Each child must
  // have its own scroll range and stay clipped above the separate event log.

@@ -54,6 +54,7 @@ namespace TheaterUI
 
         // Exposed for tests.
         UIState& State() { return ui_; }
+        bool DollyControlsVisible() const { return showDollyMarkers_; }
         // Render-thread only; window thread queues actions instead of editing UI state.
         void CameraHotkey(theater_hotkeys::Action action);
         Lang     language = Lang::English;
@@ -66,6 +67,7 @@ namespace TheaterUI
         void DrawDollyViewport(const OverlayFrame& f);
         void DrawSequencer(const OverlayFrame& f);
         void DrawToolbar(const OverlayFrame& f, float height);
+        void DrawDollyCurves(const OverlayFrame& f, ImVec2 min, ImVec2 max);
         void DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max);
         void DrawEventLog(float height);
         void DrawRecordingPill(const OverlayFrame& f);
@@ -85,7 +87,14 @@ namespace TheaterUI
         UIState ui_;
         unsigned cameraSelection_ = 0; // selection, not native ownership
         bool clearDollyDialog_ = false;
-        bool showDollyMarkers_=true,cameraMarkerClick_=false;
+        bool showDollyMarkers_=true,enableDollyVisibilityKey_=true,cameraMarkerClick_=false;
+        bool showDollyCurves_=true,curveDragging_=false,cameraSettingsDirty_=false;
+        double cameraSettingsChangedAt_=0;
+        int curveChannel_=0;
+        cinematic::Track curveTrack_;
+        std::uint64_t curveGeneration_=UINT64_MAX;
+        cinematic::Key curveStart_;
+        float curveMin_=0,curveMax_=1;
         std::uint64_t selectedDollyKey_=0;
         int gizmoOperation_=0,gizmoAxis_=-1;
         bool gizmoDragging_=false;

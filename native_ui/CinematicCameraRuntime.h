@@ -1,5 +1,5 @@
 #pragma once
-#include "CinematicCamera.h"
+#include "CameraEffects.h"
 #include "CameraTelemetry.h"
 #include "CameraCutTrack.h"
 #include <string>
@@ -14,7 +14,9 @@ struct View {
  bool dolly_preview=false,track_current=false;
  int bone_index=-1;bool bone_available=false;cinematic::Vec bone_offset{0,0,-1};
  std::uint64_t project_generation=0;
- double shake_position=0,shake_rotation=0,shake_frequency=1;
+ double dolly_smoothing_seconds=0;
+ double shake_position=0,shake_rotation=0,shake_frequency=1,shake_speed=1,shake_smoothing_seconds=0;
+ bool shake_dolly=true;
  bool cuts_enabled=false;std::vector<cinematic::CameraCut> cuts;
 };
 View view(bool include_keys=true);
@@ -31,7 +33,8 @@ void load_path();
 void movement(double speed,double sensitivity,double smoothing_seconds,double rotation_smoothing_seconds=0);
 void preview(bool enabled);
 void bone(int index,cinematic::Vec offset);
-void shake(double position_units,double rotation_degrees,double frequency_hz);
+void dolly_smoothing(double seconds);
+void shake(double position_units,double rotation_degrees,double frequency_hz,double speed=1,double smoothing=0,bool dolly=true);
 std::optional<cinematic::State> bone_world(const float* root_matrix,const float* model_qs);
 void timeline(std::uint64_t time,std::uint64_t duration,std::uint64_t anchor,bool playing,double speed,bool linked,const char* replay_path=nullptr);
 bool owns_input();
