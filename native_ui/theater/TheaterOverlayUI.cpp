@@ -42,7 +42,7 @@ namespace
     // The bone camera needs a bone; when none was picked yet use the head.
     bool AutoSelectBone(){
         const auto names=camera_runtime::bone_names();const int head=FindBone(names,"Head");
-        if(head<0)return false;camera_runtime::bone(head,{0,0,-1});return true;
+        if(head<0)return false;camera_runtime::bone_attach(head);return true;
     }
 }
 void Overlay::CameraHotkey(theater_hotkeys::Action action)
@@ -756,7 +756,7 @@ bool Overlay::DrawBoneViewport(const OverlayFrame& f,const cinematic::State& cam
         if(over||selected){const std::string n=d.i<(int)names.size()?names[d.i]:std::to_string(d.i);draw->AddText(ImVec2(d.p.x+Px(11,s),d.p.y-Px(6,s)),col,n.c_str());}
     }
     if(hit>=0&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)){
-        camera_runtime::bone(hit,cam.bone_offset);camera_runtime::mode(3);camera_runtime::enable(true);return true;}
+        camera_runtime::bone_attach(hit);camera_runtime::mode(3);camera_runtime::enable(true);return true;}
     return false;
 }
 
@@ -1414,7 +1414,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         const auto cam=camera_runtime::view(false);const auto names=camera_runtime::bone_names();
         ImGui::TextWrapped("%s",names.empty()?"Bone names are not available yet. Load into the world with your character; the list fills in by itself.":"Pick a bone and the camera attaches to it. It moves and turns like the free camera but follows the bone. F3 cycles Default, Free, Dolly and Bone camera.");
         ImGui::TextDisabled("Bone camera: %s | bone: %s | source: %s",cam.mode==3&&cam.enabled?"ACTIVE":"not active",cam.bone_index>=0&&cam.bone_index<(int)names.size()?names[cam.bone_index].c_str():"none",cam.bone_available?"available":"unavailable");
-        auto attach=[&](int index){camera_runtime::bone(index,cam.bone_offset);camera_runtime::mode(3);camera_runtime::enable(true);};
+        auto attach=[&](int index){camera_runtime::bone_attach(index);camera_runtime::mode(3);camera_runtime::enable(true);};
         const float half=(ImGui::GetContentRegionAvail().x-ImGui::GetStyle().ItemSpacing.x)*.5f;
         if(ImGui::Button("Attach to selected bone",ImVec2(half,0))){if(cam.bone_index>=0||AutoSelectBone()){camera_runtime::mode(3);camera_runtime::enable(true);}}
         ImGui::SameLine();

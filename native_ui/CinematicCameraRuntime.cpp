@@ -62,7 +62,8 @@ cinematic::Vec velocity{};
 std::atomic<int> selected_bone=-1;
 // Bone camera: the camera sits at a fixed place relative to the chosen bone (position in the bone's axes, orientation relative to
 // the bone) and is steered with the ordinary free-camera controls, so it follows the bone while still being movable and turnable.
-cinematic::Vec bone_local_pos{0,0,-1};cinematic::Quat bone_local_rot{0,0,0,1};bool bone_local_init=false;
+cinematic::Vec bone_local_pos{0,0,-1};cinematic::Quat bone_local_rot{0,0,0,1};bool bone_local_init=false,bone_use_offset=false;
+std::uint64_t unfocused_ns=0; // last time the game window was not focused (the camera holds its pose meanwhile)
 std::vector<std::string> bone_name_list;
 std::vector<std::array<float,3>> bone_dot_list;std::uint64_t bone_dot_time=0;std::atomic_bool bone_dots_wanted=false;
 std::optional<cinematic::State> bone_pose;
@@ -139,7 +140,10 @@ bool update(void* output,void* source){
  if(down(theater_hotkeys::Key(theater_hotkeys::Action::StopRecording))){release("Emergency Stop key; native camera control restored");state.mode=0;return false;}
  if(!game_allowed||now-game_heartbeat.load()>1000000000ULL||!linked||now-host_heartbeat>1000000000ULL){release("Player/offline/host context lost; native control restored");return false;}
  auto focused=GetForegroundWindow();auto game=game_window.load();DWORD pid=0;GetWindowThreadProcessId(focused,&pid);
- if(!game||!focused||pid!=GetCurrentProcessId()||GetAncestor(focused,GA_ROOT)!=GetAncestor(game,GA_ROOT)){release("Game focus lost; native control restored");return false;}
+ if(!game||!focused||pid!=GetCurrentProcessId()||GetAncestor(focused,GA_ROOT)!=GetAncestor(game,GA_ROOT)){// Alt-tab: hand the picture back to the game while the window is not focused, but keep the camera mode, its pose and its keys,
+  // so coming back finds the camera exactly where it was.
+  unfocused_ns=now;state.writing=false;input_owned=false;free_input=false;mouse_x=0;mouse_y=0;fov_wheel=0;velocity={};last_tick=now;
+  state.status="Game window not focused: camera held where it is";return false;}
  if(probe_until&&now>=probe_until){release("Two-second camera probe finished; native control restored");return false;}
  if(reset){owner=reinterpret_cast<std::uintptr_t>(source);destination=out;state.pose=*pose;rotation_pending={};fov_target=pose->fov_degrees;fov_wheel=0;if(probe_until)state.pose.position[0]+=.25;reset=false;last_tick=now;}
  if(owner!=reinterpret_cast<std::uintptr_t>(source)||destination!=out){release("Camera generation changed; native control restored");return false;}
@@ -151,9 +155,16 @@ bool update(void* output,void* source){
    move(dt);
   }
   else if(effective_mode==3){
-   if(!bone_pose||now<bone_time||now-bone_time>250000000ULL){release("Bone camera target unavailable or stale; native camera restored");return false;}
+   if(!bone_pose||now<bone_time||now-bone_time>250000000ULL){if(unfocused_ns&&now-unfocused_ns<3000000000ULL){last_tick=now;return false;} // just back from alt-tab: wait for fresh bone data
+    release("Bone camera target unavailable or stale; native camera restored");return false;}
    const auto bp=*bone_pose;float basis[16];encode(bp,basis);
-   if(!bone_local_init){bone_local_pos=state.bone_offset;bone_local_rot={0,0,0,1};bone_local_init=true;}
+   if(!bone_local_init){
+    // Keep the camera's current world orientation (no sudden tilt) and, unless an offset was asked for, its current position.
+    cinematic::Vec d=cinematic::sub(state.pose.position,bp.position);
+    for(int j=0;j<3;++j)bone_local_pos[j]=basis[j*4]*d[0]+basis[j*4+1]*d[1]+basis[j*4+2]*d[2];
+    if(bone_use_offset)bone_local_pos=state.bone_offset;
+    auto r=cinematic::normalized(product(cinematic::conjugate(bp.orientation),state.pose.orientation));bone_local_rot=r?*r:cinematic::Quat{0,0,0,1};
+    bone_local_init=true;}
    // 1. place the camera from the bone and the stored local pose; 2. let the free-camera controls move/turn it in the world;
    // 3. store the result back relative to the bone, so the next frame follows the bone's new transform.
    {cinematic::Vec p=bp.position;for(int i=0;i<3;++i)for(int j=0;j<3;++j)p[i]+=basis[j*4+i]*bone_local_pos[j];
@@ -324,7 +335,8 @@ void preview(bool enabled){std::lock_guard lock(mutex);
  state.dolly_preview=enabled;rotation_pending={};velocity={};mouse_x=0;mouse_y=0;
  state.status=enabled?"Dolly path preview at ReplayTime":"Dolly authoring: move camera and capture keys";
 }
-void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){bone_local_init=false;state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
+void bone_attach(int index){std::lock_guard lock(mutex);if(index>=-1){bone_local_init=false;bone_use_offset=false;state.bone_index=index;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
+void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){bone_local_init=false;bone_use_offset=true;state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
 void dolly_smoothing(double seconds){std::lock_guard lock(mutex);if(std::isfinite(seconds)&&seconds>=0&&seconds<=2)state.dolly_smoothing_seconds=seconds;}
 void high_quality_lods(bool enabled){std::lock_guard lock(mutex);state.high_quality_lods=enabled;}
 void close_up(bool prevent,double near_plane){std::lock_guard lock(mutex);if(std::isfinite(near_plane)&&near_plane>=.001&&near_plane<=1){state.prevent_asset_fade=prevent;state.near_plane=near_plane;}}

@@ -57,7 +57,8 @@ void save_path();
 void load_path();
 void movement(double speed,double sensitivity,double smoothing_seconds,double rotation_smoothing_seconds=0);
 void preview(bool enabled);
-void bone(int index,cinematic::Vec offset);
+void bone(int index,cinematic::Vec offset); // camera placed at `offset` (bone axes) from the bone
+void bone_attach(int index);                // camera stays exactly where it is and follows the bone from there
 void dolly_smoothing(double seconds);
 void shake(double position_units,double rotation_degrees,double frequency_hz,double speed=1,double smoothing=0,bool dolly=true);
 void high_quality_lods(bool enabled);
