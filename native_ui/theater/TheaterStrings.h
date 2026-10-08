@@ -38,6 +38,7 @@ namespace TheaterUI
         UnloadReplay,
         UiSounds, UiSoundsOn,
         ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote,
+        Weather, WeatherEditor,
         Count
     };
 
@@ -105,6 +106,7 @@ namespace TheaterUI
         { "Replay world", "Мир при воспроизведении" }, { "Restore doors, fog walls and bosses as recorded", "Восстанавливать двери, туманные стены и боссов как в записи" },
         { "Changes event flags (save state) while a replay plays; your own flags are put back when it ends. Time of day is always replayed.",
           "Меняет флаги событий (состояние сохранения) во время воспроизведения; ваши флаги возвращаются после. Время суток воспроизводится всегда." },
+        { "Weather", "Погода" }, { "Weather editor", "Редактор погоды" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

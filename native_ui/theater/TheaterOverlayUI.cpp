@@ -3,6 +3,7 @@
 #include "imgui_internal.h"
 #include "../CinematicCameraRuntime.h"
 #include "../EldenRingTimingAdapter.h"
+#include "../EldenRingWeatherAdapter.h"
 #include "../EldenRingHudAdapter.h"
 #include "CameraViewport.h"
 
@@ -171,7 +172,7 @@ void Overlay::LoadSettings()
         else if (key == "language") language = value >= 1 ? Lang::Russian : Lang::English;
         else if (key == "ui_scale") ui_.layout.uiScaleUser = std::clamp(value, 0.75f, 1.5f);
         else if (key == "panel_open") ui_.layout.panelOpen = value != 0;
-        else if (key == "tool" && value >= 0 && value <= (float)Tool::Settings) ui_.activeTool = (Tool)(int)value;
+        else if (key == "tool" && value >= 0 && value <= (float)Tool::Weather) ui_.activeTool = (Tool)(int)value;
         else if (key == "show_tools") showTools_ = value != 0;
         else if (key == "show_timeline") showTimeline_ = value != 0;
         else if (key == "show_event_log") showEventLog_ = value != 0;
@@ -639,7 +640,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, Color::PanelBgSolid.Vec4());
     const bool visible = BeginPanel("###tools", T(Str::PanelTools), ui_.rects.railMin, ui_.rects.railMax,
-        ImVec2(btn + Px(8, s), (btn + Px(4, s)) * 9 + Px(60, s)), &showTools_);
+        ImVec2(btn + Px(8, s), (btn + Px(4, s)) * 10 + Px(60, s)), &showTools_);
     if (!visible) { ImGui::End(); ImGui::PopStyleColor(); ImGui::PopStyleVar(); return; }
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 o(ImGui::GetWindowPos().x, ImGui::GetCursorScreenPos().y);
@@ -653,7 +654,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     struct Item { Tool tool; std::uint16_t glyph; Str label; bool available; };
     const Item top[] = {
         { Tool::Scene, Glyph::Scene, Str::Scene, true }, { Tool::Camera, Glyph::Camera, Str::Camera, true },
-        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
+        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
         { Tool::Export, Glyph::Export, Str::Export, true } };
     const Item bottom[] = { { Tool::Debug, Glyph::Debug, Str::Debug, true }, { Tool::Settings, Glyph::Settings, Str::Settings, true } };
 
@@ -664,6 +665,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
         ImGui::PushID((int)it.tool);
         const bool clicked = ImGui::InvisibleButton("##rail", ImVec2(btn, btn));
         const bool hovered = ImGui::IsItemHovered();
+        if(hovered&&it.tool==Tool::Weather)ImGui::SetTooltip("%s",T(Str::WeatherEditor));
         ImGui::PopID();
         const bool active = ui_.layout.panelOpen && ui_.activeTool == it.tool;
         if (active) dl->AddRectFilled(min, max, Color::SelectedBg.U32(), Px(Metric::CornerRadius, s));
@@ -728,8 +730,8 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     const auto& snap = f.snapshot;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(Space::LG, s), Px(Space::MD, s)));
     // The title bar shows the tool name and is the grab area; the window id stays the same per tool.
-    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings };
-    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 6)]), ui_.rects.panelMin, ui_.rects.panelMax,
+    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather };
+    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 7)]), ui_.rects.panelMin, ui_.rects.panelMax,
         ImVec2(Px(260, s), Px(320, s)), &ui_.layout.panelOpen);
     if (!visible) { ImGui::End(); ImGui::PopStyleVar(); return; }
     // Hiding the log returns its space to the independently scrolling tool.
@@ -1000,6 +1002,32 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         } // SDK probe
         } // Diagnostics
         ImGui::PopStyleVar();
+        break;
+    }
+    case Tool::Weather:
+    {
+        section(T(Str::WeatherEditor));
+        auto weather=game_weather::view();std::size_t count=0;const auto* presets=game_weather::presets(count);
+        const char* selected="Choose weather";
+        for(std::size_t i=0;i<count;++i)if(presets[i].id==weather.selected)selected=presets[i].name;
+        labelAbove("Weather preset");
+        if(ImGui::BeginCombo("##weather",selected)){
+            for(std::size_t i=0;i<count;++i){ImGui::PushID(presets[i].id);
+                if(ImGui::Selectable(presets[i].name,presets[i].id==weather.selected))game_weather::select(presets[i].id);
+                ImGui::PopID();}
+            ImGui::EndCombo();
+        }
+        ImGui::BeginDisabled(!weather.available);
+        if(ImGui::Button("Apply weather",ImVec2(-FLT_MIN,0)))game_weather::enable(true);
+        ImGui::EndDisabled();
+        if(ImGui::Button("Restore automatic weather",ImVec2(-FLT_MIN,0)))game_weather::enable(false);
+        ImGui::TextWrapped("%s",weather.enabled?(weather.applied?"Override active":"Waiting for native transition"):"Automatic weather");
+        ImGui::TextDisabled("Native ID: %d   Requested: %d",weather.current,weather.pending);
+        ImGui::TextWrapped("%s",weather.diagnostic.c_str());
+        ImGui::Separator();
+        ImGui::TextWrapped("Rain, snow, fog, wind and regional variants. Effects depend on the loaded area and may blend gradually.");
+        ImGui::TextDisabled("Runtime / visual validation required.");
+        ImGui::TextWrapped("Overrides turn off on loading, lost connection or game focus loss. Weather is not stored in replays yet.");
         break;
     }
     case Tool::Look: section(T(Str::NotYetAvailable)); note(Str::LookNotes); break;
