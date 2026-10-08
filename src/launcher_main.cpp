@@ -343,7 +343,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   wc.lpfnWndProc = launcher_proc;
   wc.hInstance = instance;
   wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+  wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1)); // the app icon (assets/app.rc)
+  if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
   wc.lpszClassName = L"EldenRingTheaterModeWindow";
   RegisterClassW(&wc);
   const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
@@ -356,6 +357,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     CloseHandle(single);
     return 1;
   }
+  // Title bar and taskbar icons at their exact sizes.
+  if (HICON big = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR))) SendMessageW(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big));
+  if (HICON small_icon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR))) SendMessageW(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(small_icon));
   const BOOL dark = TRUE; // DWMWA_USE_IMMERSIVE_DARK_MODE, matches the overlay's dark surfaces
   DwmSetWindowAttribute(window, 20, &dark, sizeof(dark));
 

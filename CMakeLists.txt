@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(EldenRingTheaterMode LANGUAGES C CXX ASM_MASM)
+project(EldenRingTheaterMode LANGUAGES C CXX ASM_MASM RC)
 add_subdirectory(shared)
 add_library(TheaterRenderBackend STATIC
  native_ui/TheaterRenderBackend.cpp
@@ -38,7 +38,7 @@ endif()
 add_library(imgui STATIC third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp third_party/imgui/backends/imgui_impl_win32.cpp third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(imgui PUBLIC third_party/imgui third_party/imgui/backends)
 target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler dwmapi)
-add_executable(EldenRingTheaterMode WIN32 src/launcher_main.cpp src/ingame_editor_server.cpp src/editor_backend.cpp src/replay_library.cpp src/character_client.cpp src/erplay.cpp src/replay_player.cpp src/game_control.cpp src/game_launcher.cpp)
+add_executable(EldenRingTheaterMode WIN32 assets/app.rc src/launcher_main.cpp src/ingame_editor_server.cpp src/editor_backend.cpp src/replay_library.cpp src/character_client.cpp src/erplay.cpp src/replay_player.cpp src/game_control.cpp src/game_launcher.cpp)
 target_include_directories(EldenRingTheaterMode PRIVATE native_ui/theater)
 target_compile_features(EldenRingTheaterMode PRIVATE cxx_std_20)
 target_compile_definitions(EldenRingTheaterMode PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
