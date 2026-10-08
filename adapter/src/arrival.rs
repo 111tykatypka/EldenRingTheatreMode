@@ -23,6 +23,10 @@ impl Place{
  /// the first block, and after the player crosses into the next block the origin becomes the block it
  /// came from, with the anchor and physics still continuous; the effective frame never changed.
  pub fn frame(&self)->i32{if self.origin!=-1{self.origin}else{self.block}}
+ /// The coordinate space anchors live in. MEASURED (recording 06-41): when the origin id changed from tile
+ /// m60_42_48_00 to m60_10_08_02 the anchor kept stepping by 16-32 m and physics - anchor stayed continuous,
+ /// so all overworld tiles of one area share ONE space whatever the origin id says. Legacy maps use the id.
+ pub fn space(&self)->i32{let f=self.frame();if overworld(f){-1000-i32::from(area(f))}else{f}}
 }
 pub fn place(chr:usize)->Place{
  let c=unsafe{&*(chr as *const ChrIns)};
@@ -83,3 +87,12 @@ pub fn warp_to_grace(grace:u32)->Result<(),String>{
 /// True while the game shows a loading screen or is still bringing the map in.
 pub fn loading()->bool{
  match unsafe{CSLuaEventManImp::instance()}{Ok(m)=>m.lua_event_proxy.is_load_wait,Err(_)=>true}}
+
+#[cfg(test)]mod tests{
+ use super::*;
+ #[test]fn overworld_tiles_share_one_space_legacy_maps_do_not(){
+  let a=Place{block:1009460480,origin:-1,global:[0.;4]};let b=Place{block:1007290626,origin:1009460480,global:[0.;4]};
+  assert_eq!(a.space(),b.space());
+  let far=Place{block:1009460480+0x0100_0000/4,origin:-1,global:[0.;4]};let _=far;
+  let dungeon=Place{block:0x1E000000,origin:-1,global:[0.;4]};assert_ne!(dungeon.space(),a.space());}
+}

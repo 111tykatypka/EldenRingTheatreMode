@@ -210,7 +210,7 @@ fn follow_loaded(s:&mut State,l:&Link){
    if let Some(a)=&actors{crate::log_game(&format!("BONE_REPLAY: {} recorded characters (enemies, NPCs, bosses)",a.len()));}
    // The player's anchor over the recording, for rebasing positions into the live physics frame.
    let mut anchors=crate::replay_interpolation::AnchorTrack::default();
-   for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.frame(),f.place.global);}}}
+   for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.space(),f.place.global);}}}
    crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
    Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors,anchors:Arc::new(anchors)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
@@ -238,11 +238,11 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
  let (a,b)=&*s.cur.insert((a,b));
  // The physics origin moves when the game re-bases the world; each recorded position is carried into the
  // live frame by the change of the anchor (see replay_interpolation::rebase, measured on real recordings).
- let translate=|p:&Place|->Option<[f32;3]>{if p.block==-1{Some([0.0;3])}else{crate::replay_interpolation::rebase(p.frame(),p.global,live_place.frame(),live_place.global)}};
+ let translate=|p:&Place|->Option<[f32;3]>{if p.block==-1{Some([0.0;3])}else{crate::replay_interpolation::rebase(p.space(),p.global,live_place.space(),live_place.global)}};
  let (Some(ta),Some(tb))=(translate(&a.place),translate(&b.place)) else {
   s.evaluated_root=None;
   crate::log_game(&format!("ROOT_SPACE_UNAVAILABLE: replay frame {} (origin {}, block {}) vs live frame {} (origin {}, block {}) differ; anchors {:?} / {:?}; no conversion is known between different frames",a.place.frame(),a.place.origin,a.place.block,live_place.frame(),live_place.origin,live_place.block,a.place.global,live_place.global));
-  status("REPLAY BLOCKED: you are too far from where this was recorded (different world frame). Walk back near the recording start and play again.");return false;};
+  status("REPLAY: the live position is in another map space; waiting for travel to the recorded place.");return false;};
  s.shift=ta;s.now_offset=ta;
  // Interpolate in the live frame, so an origin re-base between two samples is not a 32 m jump.
  let (mut ra,mut rb)=(a.transform,b.transform);for k in 0..3{ra[2][k]+=ta[k];rb[2][k]+=tb[k];}
@@ -287,6 +287,9 @@ fn apply_world(s:&mut State){
     if world_state::read_flag(*flag)!=state{world_state::write_flag(*flag,state);}}}}}
 
 // Phase 1.4: decide how to reach the recorded place when the replay takes the body.
+/// Further than this from the recorded start the player is taken there by grace travel (the map around the
+/// start is then loaded); closer, the body is placed directly.
+const FAR_DIRECT_M:f32=250.0;
 fn begin_arrival(s:&mut State,chr:usize){
  s.arrival=Arrival::Placing{tries:0,frames:0,good:0};
  let Some(loaded)=&mut s.loaded else {return;};
@@ -294,18 +297,25 @@ fn begin_arrival(s:&mut State,chr:usize){
  let here=arrival::place(chr);
  // Positions are rebased by the anchor change (measured), so a different tile anchor is fine; only a
  // different origin id has no known conversion.
- if target.block!=-1&&crate::replay_interpolation::rebase(target.frame(),target.global,here.frame(),here.global).is_none(){
-  crate::log_game(&format!("ARRIVAL_ERROR: world frame differs (replay frame {} origin {} block {} vs live frame {} origin {} block {}), anchors {:?} / {:?}; no known conversion",target.frame(),target.origin,target.block,here.frame(),here.origin,here.block,target.global,here.global));
-  status("REPLAY BLOCKED: you are too far from where this was recorded (different world frame). Walk back near the recording start and play again.");
-  if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}return;
- }
+ // Another map (or another coordinate space) has no conversion until the game has taken the player there,
+ // so it is reached by grace travel first; after that the spaces match.
+ let convertible=target.block==-1||crate::replay_interpolation::rebase(target.space(),target.global,here.space(),here.global).is_some();
+ // Distance from the player to the recorded start, measured in one frame (anchor-corrected physics).
+ let far_m=if convertible&&target.block!=-1{
+  let tf=loaded.store.get(i).map(|f|f.transform[2]);let live=read_transform(chr).map(|t|t[2]);
+  match(tf,live,crate::replay_interpolation::rebase(target.space(),target.global,here.space(),here.global)){
+   (Some(p),Some(l),Some(sh))=>(0..3).map(|k|(p[k]+sh[k]-l[k]).powi(2)).sum::<f32>().sqrt(),_=>0.0}}else{0.0};
  if target.block==-1{s.arrival=Arrival::Ready;crate::log_game("ARRIVAL: recording has no map data (older file); positions used as recorded");return;}
  crate::log_game(&format!("ARRIVAL: here {} {:?}, replay {} {:?}, distance {:.1} m",arrival::block_name(here.block),&here.global[..3],arrival::block_name(target.block),&target.global[..3],arrival::distance(here.global,target.global)));
- if !arrival::needs_warp(&here,&target){return;}
+ let far=far_m>FAR_DIRECT_M;
+ if convertible&&!far&&!arrival::needs_warp(&here,&target){return;}
+ crate::log_game(&format!("ARRIVAL: travel needed (convertible={convertible}, distance {far_m:.0} m, limit {FAR_DIRECT_M:.0} m)"));
  match arrival::nearest_grace(&target){
+  None if convertible=>{crate::log_game(&format!("ARRIVAL: no grace found for {}; placing the body directly ({far_m:.0} m)",arrival::block_name(target.block)));}
   None=>{crate::log_game(&format!("ARRIVAL_ERROR: no grace found for {}; cannot travel there",arrival::block_name(target.block)));status("BONE REPLAY ERROR: the replay was recorded where no grace can take you. Travel there first, then play it");if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}}
   Some((grace,name))=>match arrival::warp_to_grace(grace){
    Ok(())=>{s.warped=true;s.arrival=Arrival::Warping{target,since:crate::monotonic_ns(),stable:0};crate::log_game(&format!("ARRIVAL: warping to {name} for {}",arrival::block_name(target.block)));status("BONE REPLAY: travelling to the replay's location...");}
+   Err(e) if convertible=>{crate::log_game(&format!("ARRIVAL: grace warp unavailable ({e}); placing the body directly ({far_m:.0} m)"));}
    Err(e)=>{crate::log_game(&format!("ARRIVAL_ERROR: grace warp failed: {e}"));status("BONE REPLAY ERROR: could not travel to the replay's location (see log)");if let Some(l)=s.loaded.take(){s.loading=Loading::Failed(l.path);}}}}}
 // Each frame while owning: finish a warp once the map has loaded, then confirm the body is on the spot.
 fn advance_arrival(s:&mut State,chr:usize,now:u64){
@@ -313,7 +323,8 @@ fn advance_arrival(s:&mut State,chr:usize,now:u64){
   Arrival::Ready=>{}
   Arrival::Warping{target,since,stable}=>{
    let here=arrival::place(chr);
-   let settled=!arrival::loading()&&here.block!=-1&&BlockArea::same(here.block,target.block);
+   // The 4 s floor: a warp inside the same area is still "settled" for a moment before the loading screen starts.
+   let settled=!arrival::loading()&&here.block!=-1&&BlockArea::same(here.block,target.block)&&now.saturating_sub(since)>4_000_000_000;
    let stable=if settled{stable+1}else{0};
    if stable>=90{crate::log_game(&format!("ARRIVAL: map loaded ({} after {:.1} s); placing the body",arrival::block_name(here.block),(now-since) as f64/1e9));s.arrival=Arrival::Placing{tries:0,frames:0,good:0};s.settle=s.settle.max(3);}
    else if now.saturating_sub(since)>60_000_000_000{crate::log_game("ARRIVAL_ERROR: the map did not finish loading within 60 s");status("BONE REPLAY ERROR: the replay's location did not finish loading (see log)");reject(s,chr,"warp timed out");}
@@ -466,7 +477,7 @@ pub fn tick(group:usize,now:u64){
    unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,s.local_out.len());std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,s.model_out.len());}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);
    // Recorded enemies/NPCs/bosses at the same replay time (Phase 2.2).
-   let (t,live)=(s.last_t,(here.frame(),here.global));
+   let (t,live)=(s.last_t,(here.space(),here.global));
    let anchors=s.loaded.as_ref().map(|l|l.anchors.clone());
    if let (Some(anchors),Some(a))=(anchors,s.loaded.as_mut().and_then(|l|l.actors.as_mut())){a.set_options(s.options);a.write(t,now,live,&anchors,interpolated_pose_enabled());}}
   DRAW_GROUP=>{
