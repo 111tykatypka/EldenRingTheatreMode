@@ -39,6 +39,15 @@ void __fastcall detour(void*manager,std::uint32_t id,std::uint64_t tag,const flo
  if(capture.load(std::memory_order_relaxed)&&!replaying&&pos){float p[3];if(read_position(pos,p))queue_event(id,p);}
  original(manager,id,tag,pos,out);
 }
+bool scene_guard(std::uintptr_t b);
+using SceneCreate=void*(__fastcall*)(void*,void*,std::uint32_t,void*,const float*,int,int);
+SceneCreate scene_original=nullptr;
+// Every effect the game creates (hits, blood, spells, attached or free) passes through this one scene-controller function; capture
+// the id and the translation of the 4x4 matrix (row 3). Replay-made calls are flagged and never captured.
+void*__fastcall scene_detour(void*scene,void*handle,std::uint32_t id,void*params,const float*matrix,int a,int b){
+ if(capture.load(std::memory_order_relaxed)&&!replaying&&matrix){float m[16];__try{for(int i=0;i<16;++i)m[i]=matrix[i];queue_event(id,m+12);}__except(EXCEPTION_EXECUTE_HANDLER){}}
+ return scene_original(scene,handle,id,params,matrix,a,b);
+}
 bool call_original(void*manager,std::uint32_t id,const float*pos){
  __try{void*out=nullptr;original(manager,id,0,pos,&out);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -51,6 +60,13 @@ bool read_manager(void**out){
 }
 extern "C" int tm_effect_initialize(){
  using namespace game_effects;base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+ if(scene_guard(base)){
+  auto initialized=MH_Initialize();if(initialized!=MH_OK&&initialized!=MH_ERROR_ALREADY_INITIALIZED)return 0;
+  auto site=reinterpret_cast<void*>(base+TM_VAL_VFX_SCENE_CREATE_RVA);
+  if(MH_CreateHook(site,reinterpret_cast<void*>(scene_detour),reinterpret_cast<void**>(&scene_original))!=MH_OK)return 0;
+  if(MH_EnableHook(site)!=MH_OK){MH_RemoveHook(site);scene_original=nullptr;return 0;}
+  return 1;}
+ return 0;
  const unsigned char expected[]=TM_EFFECT_SPAWN_BYTES;unsigned char bytes[sizeof(expected)];SIZE_T got=0;
  auto site=reinterpret_cast<void*>(base+TM_VAL_EFFECT_SPAWN_RVA);
  if(!ReadProcessMemory(GetCurrentProcess(),site,bytes,sizeof(bytes),&got)||got!=sizeof(bytes)||memcmp(bytes,expected,sizeof(bytes)))return 0;
@@ -73,7 +89,7 @@ extern "C" void tm_effect_stats(std::uint64_t*seen_out,std::uint64_t*dropped_out
 extern "C" int tm_effect_spawn(std::uint32_t id,const float*pos){
  using namespace game_effects;if(!original||!pos)return 0;
  void*manager=nullptr;if(!read_manager(&manager)||!manager)return 0;
- replaying=true;const bool ok=call_original(manager,id,pos);replaying=false;
+ replaying=true;const bool ok=false&&call_original(manager,id,pos);replaying=false;
  if(ok)++replayed;return ok?1:0;
 }
 
@@ -121,7 +137,8 @@ extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,con
  Slot*slot=nullptr;for(auto&s:slots)if(!s.used){slot=&s;break;}if(!slot){++no_slot;return -2;}
  alignas(16) float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, pos[0],pos[1],pos[2],1};
  memset(slot->handle,0,sizeof(slot->handle));
- if(!seh_create(base,scene,*slot,id,m)){scene_faulted=true;++failed;return -3;}
+ replaying=true;const bool made=seh_create(base,scene,*slot,id,m);replaying=false;
+ if(!made){scene_faulted=true;++failed;return -3;}
  std::uintptr_t object=0;memcpy(&object,slot->handle+TM_OFF_VFX_HANDLE_OBJECT,sizeof(object));
  slot->used=true;slot->expires=GetTickCount64()+life_ms;
  if(!object){release_slot(*slot);++failed;return 0;}
