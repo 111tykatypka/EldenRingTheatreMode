@@ -210,9 +210,9 @@ pub enum Representation{Live,Puppet,Missing}
 struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,transform:Transform,puppet:bool,saved_1c5:u8,hidden:bool}
 /// A puppet request in flight: the game's debug creator consumes it asynchronously.
 #[derive(Clone)]
-struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32,pos:[f32;3],before:HashSet<(usize,u64)>}
+struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32,chr_id:i32,pos:[f32;3],before:HashSet<(usize,u64)>}
 pub struct Player{tracks:Vec<(ActorInfo,ActorTrack,Vec<i16>)>,controlled:HashMap<u32,Controlled>,next_match:u64,local:Vec<u8>,model:Vec<u8>,logged:bool,categories:HashMap<u32,u32>,warned:HashSet<u32>,skeletons:HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,
- meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>}
+ meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>,failed:bool}
 const MAX_PUPPETS:usize=8;
 impl Player{
  pub fn new(actors:Vec<(ActorInfo,ActorTrack)>,context:&[EntityContext],skeletons:&HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,meta:HashMap<u32,ActorMeta>)->Self{
@@ -220,7 +220,7 @@ impl Player{
   let tracks=actors.into_iter().map(|(info,mut t)|{
    let n=t.len();let picks:Vec<PlayerFrame>=(0..3).filter_map(|k|t.get(k*(n.saturating_sub(1))/2).map(|f|f.body.clone())).collect();
    let parents=skeletons.get(&info.id).map(|d|d.parents.clone()).unwrap_or_else(||crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..]))));(info,t,parents)}).collect();
-  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new()}}
+  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new(),failed:false}}
  pub fn len(&self)->usize{self.tracks.len()}
  pub fn set_options(&mut self,options:u32){self.options=options;}
  fn find(info:&ActorInfo,taken:&[usize],category:u32,unique_recorded:bool)->Option<usize>{
@@ -235,8 +235,9 @@ impl Player{
   if self.last_existence.insert(id,ex)!=Some(ex){crate::log_game(&format!("ACTOR_LIFETIME: id={id} -> {ex:?} at replay time {:.2} s",t as f64/1e9));}}
  /// Asks the game's own debug character creator for a stand-in (opt-in). One request at a time.
  fn request_puppet(&mut self,info:&ActorInfo,now:u64,position:[f32;3],why:&'static str){
-  if self.request.is_some()||self.controlled.values().filter(|c|c.puppet).count()>=MAX_PUPPETS{return;}
-  if let Some((tries,not_before))=self.tries.get(&info.id){if *tries>=2||now<*not_before{return;}}
+  // One failed request ends puppets for this replay: an unidentified stand-in is a free enemy that attacks the player.
+  if self.failed||self.request.is_some()||self.controlled.values().filter(|c|c.puppet).count()>=MAX_PUPPETS{return;}
+  if let Some((tries,not_before))=self.tries.get(&info.id){if *tries>=1||now<*not_before{return;}}
   let Some(m)=self.meta.get(&info.id).copied() else {if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} recorded before construction metadata existed",info.id));}return;};
   if m.character_id==0||m.npc_param==0{return;}
   let Ok(world)=(unsafe{WorldChrMan::instance_mut()}) else {return};
@@ -248,7 +249,7 @@ impl Player{
   let entry=self.tries.entry(info.id).or_insert((0,0));entry.0+=1;entry.1=now+5_000_000_000;
   // Bodies that exist now; the creator's product is whatever new body shows up afterwards.
   let before:HashSet<(usize,u64)>=live().into_iter().map(|a|(a,handle_of(unsafe{&*(a as *const ChrIns)}))).collect();
-  self.request=Some(Request{id:info.id,at:now,prev_last,npc_param:m.npc_param,pos:position,before});
+  self.request=Some(Request{id:info.id,at:now,prev_last,npc_param:m.npc_param,chr_id:m.character_id as i32,pos:position,before});
   crate::log_game(&format!("PUPPET_REQUESTED: id={} chr=c{:04} npc_param={} think={} ({why}); entity id 0, so no map scripts, rewards or progression are tied to it",info.id,m.character_id,m.npc_param,m.think_param));}
  /// Looks for the body the creator made for the outstanding request and takes it over safely.
  fn poll_request(&mut self,now:u64){
@@ -262,12 +263,13 @@ impl Player{
    let c=unsafe{&*(*a as *const ChrIns)};if c.field_ins_handle.is_empty()||self.controlled.values().any(|x|x.chr==*a){return false;}
    if r.before.contains(&(*a,handle_of(c))){return false;}
    let p=c.modules.physics.position;let d=((p.0-r.pos[0]).powi(2)+(p.1-r.pos[1]).powi(2)+(p.2-r.pos[2]).powi(2)).sqrt();
-   c.npc_param_id==r.npc_param&&c.event_entity_id==0&&d<8.0}).collect();
+   (c.npc_param_id==r.npc_param||c.character_id as i32==r.chr_id)&&c.event_entity_id==0&&d<10.0}).collect();
   if candidates.is_empty(){if let Some(h)=hint{if live_now.contains(&h)&&!self.controlled.values().any(|x|x.chr==h)&&!r.before.contains(&(h,handle_of(unsafe{&*(h as *const ChrIns)}))){candidates.push(h);}}}
   if candidates.is_empty(){
    if now.saturating_sub(r.at)>6_000_000_000{
-    let new_bodies:Vec<String>=live_now.iter().filter(|a|!r.before.contains(&(**a,handle_of(unsafe{&*(**a as *const ChrIns)})))).map(|a|{let c=unsafe{&*(*a as *const ChrIns)};format!("npc_param={} entity={}",c.npc_param_id,c.event_entity_id)}).collect();
-    crate::log_game(&format!("PUPPET_TIMEOUT: id={} no matching new body within 6 s (new bodies seen: {new_bodies:?}); no retry for 5 s",r.id));self.request=None;}
+    let new_bodies:Vec<String>=live_now.iter().filter(|a|!r.before.contains(&(**a,handle_of(unsafe{&*(**a as *const ChrIns)})))).filter_map(|a|{let c=unsafe{&*(*a as *const ChrIns)};let p=c.modules.physics.position;let d=((p.0-r.pos[0]).powi(2)+(p.1-r.pos[1]).powi(2)+(p.2-r.pos[2]).powi(2)).sqrt();(d<60.0).then(||format!("npc_param={} chr={} entity={} {:.0} m",c.npc_param_id,c.character_id,c.event_entity_id,d))}).collect();
+    self.failed=true;
+    crate::log_game(&format!("PUPPET_TIMEOUT: id={} requested chr={} npc_param={} but no new body within 10 m matched in 6 s (new bodies within 60 m: {new_bodies:?}). PUPPETS_DISABLED for the rest of this replay: an unidentified stand-in would stay in the world and attack, so no further requests are made.",r.id,r.chr_id,r.npc_param));self.request=None;}
    return;}
   if candidates.len()>1{crate::log_game(&format!("PUPPET_AMBIGUOUS: id={} {} new bodies match; taking the first",r.id,candidates.len()));}
   let last=candidates[0];
