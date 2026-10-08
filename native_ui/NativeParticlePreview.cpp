@@ -24,13 +24,15 @@ bool initialized=false;
 using Create=void*(__fastcall*)(void*,void*,std::uint32_t,void*,const float*,int,int);
 using HandleFn=void(__fastcall*)(void*);
 bool read(std::uintptr_t p,void* out,std::size_t n){SIZE_T got=0;return p>=0x10000&&p<=0x00007FFFFFFFFFFFULL-n&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(p),out,n,&got)&&got==n;}
+extern "C" int tm_effect_scene_guard_passed();
 bool guard(std::uintptr_t base){
     struct Site {std::uintptr_t rva;std::array<unsigned char,10> bytes;};
     const Site sites[]={
         {TM_VAL_VFX_SCENE_CREATE_RVA,{0x40,0x53,0x48,0x81,0xec,0x80,0,0,0,0x48}},
         {TM_VAL_VFX_HANDLE_STOP_RVA,{0x48,0x89,0x4c,0x24,0x08,0x57,0x48,0x83,0xec,0x20}},
         {TM_VAL_VFX_HANDLE_RELEASE_RVA,{0x48,0x89,0x4c,0x24,0x08,0x57,0x48,0x83,0xec,0x30}}};
-    for(const auto& s:sites){unsigned char actual[10]{};if(!read(base+s.rva,actual,10)||memcmp(actual,s.bytes.data(),10))return false;}return true;
+    // The creation function is hooked by the effect recorder once its bytes were verified there; its first bytes are then a jump.
+    for(const auto& s:sites){if(s.rva==TM_VAL_VFX_SCENE_CREATE_RVA&&tm_effect_scene_guard_passed())continue;unsigned char actual[10]{};if(!read(base+s.rva,actual,10)||memcmp(actual,s.bytes.data(),10))return false;}return true;
 }
 bool resident(std::uintptr_t scene,std::uint32_t wanted){
     std::uintptr_t graphics=0,container=0,head=0,node=0;

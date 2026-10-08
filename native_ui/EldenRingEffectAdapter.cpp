@@ -40,6 +40,7 @@ void __fastcall detour(void*manager,std::uint32_t id,std::uint64_t tag,const flo
  original(manager,id,tag,pos,out);
 }
 bool scene_guard(std::uintptr_t b);
+std::atomic_bool scene_guard_passed=false; // checked once before the creation function was hooked (afterwards its first bytes are a jump)
 using SceneCreate=void*(__fastcall*)(void*,void*,std::uint32_t,void*,const float*,int,int);
 SceneCreate scene_original=nullptr;
 // Every effect the game creates (hits, blood, spells, attached or free) passes through this one scene-controller function; capture
@@ -60,7 +61,8 @@ bool read_manager(void**out){
 }
 extern "C" int tm_effect_initialize(){
  using namespace game_effects;base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
- if(scene_guard(base)){
+  if(scene_guard(base)){
+  scene_guard_passed=true;
   auto initialized=MH_Initialize();if(initialized!=MH_OK&&initialized!=MH_ERROR_ALREADY_INITIALIZED)return 0;
   auto site=reinterpret_cast<void*>(base+TM_VAL_VFX_SCENE_CREATE_RVA);
   if(MH_CreateHook(site,reinterpret_cast<void*>(scene_detour),reinterpret_cast<void**>(&scene_original))!=MH_OK)return 0;
@@ -131,7 +133,7 @@ void release_slot(Slot&s){if(!s.used)return;if(!seh_release(base,s))scene_faulte
 extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,const float*pos,std::uint32_t life_ms){
  using namespace game_effects;if(!manager||!pos||!id)return 0;if(scene_faulted)return -3;
  if(!base)base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
- static bool guarded=false,guard_ok=false;if(!guarded){guard_ok=scene_guard(base);guarded=true;}if(!guard_ok)return -4;
+ if(!scene_guard_passed)return -4;
  std::uintptr_t scene=0;if(!read_mem(manager+TM_OFF_SFX_SCENE_CTRL,&scene,8)||!scene)return -5;
  if(!resident(scene,id)){++not_resident;return -1;}
  Slot*slot=nullptr;for(auto&s:slots)if(!s.used){slot=&s;break;}if(!slot){++no_slot;return -2;}
@@ -144,6 +146,7 @@ extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,con
  // An empty handle right after creation is reported but the slot is kept until it expires (the handle may be filled later).
  if(!object){++failed;return 2;}
  ++created;return 1;}
+extern "C" int tm_effect_scene_guard_passed(){return game_effects::scene_guard_passed.load()?1:0;}
 extern "C" void tm_effect_scene_tick(){
  using namespace game_effects;const auto now=GetTickCount64();for(auto&s:slots)if(s.used&&now>=s.expires)release_slot(s);}
 extern "C" void tm_effect_scene_release_all(){using namespace game_effects;for(auto&s:slots)release_slot(s);}
