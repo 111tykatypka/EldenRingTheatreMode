@@ -67,6 +67,12 @@ pub fn ragdoll_info(chr:usize)->Option<(u8,usize,Vec<(u32,u64)>)>{
  let mut ptrs=Vec::new();
  if ragdoll>0x10000{for off in (0..0x200usize).step_by(8){if let Some(p)=crate::companions::word(ragdoll+off).filter(|p|*p>0x10000&&*p<0x7FFF_FFFF_FFFF){let mut t=[0u8;8];if crate::companions::copy(p as usize,&mut t){ptrs.push((off as u32,p as u64));if ptrs.len()>=12{break;}}}}}
  Some((b[0],ragdoll,ptrs))}
+/// Number of visual effects currently alive in all world blocks (WorldSfxMan), if it reads sensibly.
+pub fn sfx_total()->Option<u32>{
+ let m=unsafe{eldenring::cs::WorldSfxMan::instance()}.ok()?;let base=m as *const _ as usize;
+ let (count,list)=(crate::companions::dword(base+0x28)?,crate::companions::word(base+0x30)?);
+ if count>256||list<=0x10000{return None;}
+ Some((0..count as usize).filter_map(|i|crate::companions::dword(list+i*0x78+0x5C)).filter(|n|*n<100_000).sum())}
 fn snapshot(chr:usize)->Vec<(String,usize,Vec<u8>)>{
  region_list(chr).into_iter().filter_map(|(n,a,l)|{let mut b=vec![0u8;l];crate::companions::copy(a,&mut b).then_some((n,a,b))}).collect()}
 impl Probe{
