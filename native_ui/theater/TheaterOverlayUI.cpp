@@ -629,6 +629,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
+            // No fade-out near the camera (adapter camera_fade.rs): ON by default, bit 64 = off.
+            bool noNearFade = (gReplayOptions.load() & 64) == 0;
+            if (ImGui::Checkbox(T(Str::NoNearFade), &noNearFade)) { gReplayOptions = noNearFade ? (gReplayOptions & ~64u) : (gReplayOptions | 64u); SaveSettings(); }
+            PushFont(Font::Meta);
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(T(Str::NoNearFadeNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);

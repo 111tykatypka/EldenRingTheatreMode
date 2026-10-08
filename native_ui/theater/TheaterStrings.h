@@ -37,7 +37,7 @@ namespace TheaterUI
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
         UiSounds, UiSoundsOn,
-        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote, ReplayEquipment, ReplayEquipmentNote, ReplaySummonHorse, ReplaySummonHorseNote,
+        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote, ReplayEquipment, ReplayEquipmentNote, ReplaySummonHorse, ReplaySummonHorseNote, NoNearFade, NoNearFadeNote,
         Count
     };
 
@@ -120,6 +120,9 @@ namespace TheaterUI
         { "Summon Torrent when the recording has him", "Призывать Торрента, если он есть в записи" },
         { "Uses the game's own Spectral Steed Whistle effect once per replay when the recording contains Torrent but he is not out. He stays out until you dismiss him.",
           "Один раз за повтор применяет эффект Свистка призрачного коня игры, если в записи есть Торрент, а его нет рядом. Он остаётся, пока вы его не отпустите." },
+        { "No fade-out near the camera", "Не скрывать объекты вблизи камеры" },
+        { "While a replay plays or a recording runs, grass, trees, rocks and models do not fade away when the camera comes close. Only the in-memory parameter tables change, and they are restored exactly.",
+          "Пока идёт повтор или запись, трава, деревья, скалы и модели не исчезают при приближении камеры. Таблицы параметров изменяются только в памяти и возвращаются." },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 
