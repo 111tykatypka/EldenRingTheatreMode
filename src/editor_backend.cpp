@@ -91,6 +91,8 @@ void playback_tick() {
 }
 bool handle_global_hotkey(UINT id) {
   if(id<1||id>2)return false;
+  DWORD foregroundPid=0;GetWindowThreadProcessId(GetForegroundWindow(),&foregroundPid);
+  if(!app.game_pid.load()||foregroundPid!=app.game_pid.load())return false;
   log_line("GLOBAL_HOTKEY received id="+std::to_string(id));
   if(id==2)emergency_stop();
   else if(ingame_editor::overlay_connected()){
@@ -807,7 +809,7 @@ void bookmark_delete(std::uint64_t t) {
 }
 void initialize(HWND window) {
   theater_hotkeys::Reload();
-  SetTimer(window,0x544D,1000,nullptr);
+  SetTimer(window,0x544D,100,nullptr);
   app.window = window;
   app.root = app_root();
   app.replays = app.root / L"replays";
@@ -819,8 +821,7 @@ void initialize(HWND window) {
   load_loader_path();
   {const auto order=library::load_sort(app.root);app.sort_key=static_cast<std::uint32_t>(order.key);app.sort_descending=order.descending;}
   using theater_hotkeys::Action;
-  register_hotkey(window, 1, theater_hotkeys::Key(Action::StartRecording), "START RECORDING");
-  app.stop_hotkey = register_hotkey(window, 2, theater_hotkeys::Key(Action::StopRecording), "STOP");
+
   refresh_bindings();
   ingame_editor::start();
   app.control.start(app.game_pid);
@@ -853,15 +854,15 @@ void shutdown() {
 namespace theater {
 void refresh_bindings(){
  using A=theater_hotkeys::Action;theater_hotkeys::Reload();
- static unsigned registeredStart=0,registeredStop=0,seenStart=0,seenStop=0;
+ static unsigned lastStart=0,lastStop=0;static bool registered=false;
+ DWORD foregroundPid=0;GetWindowThreadProcessId(GetForegroundWindow(),&foregroundPid);
+ const bool active=app.game_pid.load()!=0&&foregroundPid==app.game_pid.load();
  auto a=theater_hotkeys::Key(A::StartRecording),b=theater_hotkeys::Key(A::StopRecording);
- if(!seenStart){registeredStart=seenStart=a;registeredStop=seenStop=b;return;}
- if(seenStart==a&&seenStop==b)return;
+ if(!active){if(registered){UnregisterHotKey(app.window,1);UnregisterHotKey(app.window,2);registered=false;app.stop_hotkey=false;}return;}
+ if(registered&&a==lastStart&&b==lastStop)return;
  UnregisterHotKey(app.window,1);UnregisterHotKey(app.window,2);
- bool startOk=register_hotkey(app.window,1,a,"START RECORDING");
- app.stop_hotkey=register_hotkey(app.window,2,b,"STOP");
- if(startOk)registeredStart=a;else register_hotkey(app.window,1,registeredStart,"START RECORDING previous binding fallback");
- if(app.stop_hotkey)registeredStop=b;else app.stop_hotkey=register_hotkey(app.window,2,registeredStop,"STOP previous binding fallback");
- seenStart=a;seenStop=b;
+ register_hotkey(app.window,1,a,"START RECORDING (game focus)");
+ app.stop_hotkey=register_hotkey(app.window,2,b,"STOP (game focus)");
+ lastStart=a;lastStop=b;registered=true;
 }
 }

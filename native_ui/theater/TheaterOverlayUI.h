@@ -28,11 +28,13 @@ namespace TheaterUI
     inline constexpr std::uint32_t kCommandToggleUi = 0xFFFFFFFFu;
     // Not a pipe command: set visibility (value: 0 shown, 1 hidden), used by the name box.
     inline constexpr std::uint32_t kCommandSetVisibility = 0xFFFFFFFEu;
+    inline constexpr std::uint32_t kCommandCleanView = 0xFFFFFFFDu;
 
     struct OverlayFrame
     {
         ImTextureID game_texture=0; // current GPU-only back-buffer copy; zero in CPU tests
         theater_ui::Snapshot snapshot;   // copy taken under the IPC lock
+        bool        focused = true;
         bool        hostLinked = false;  // pipe round trip succeeded at least once since the last drop
         std::vector<std::string> events; // new game-side event log lines since the last frame
         double      now = 0.0;           // seconds, monotonic
@@ -90,6 +92,8 @@ namespace TheaterUI
         bool compactTracks_=true,expandActorTracks_=false,gameViewInitialized_=false;
         ImVec2 gameViewMin_{},gameViewMax_{};
         bool gameViewFit_=true;
+        float cameraBarBottom_=0,curveFraction_=.5f;double curveZoom_=1,curvePan_=0;
+        bool inputFocused_=true;
         float sequencerTop_=0,sequencerRight_=0;
         unsigned cameraSelection_ = 0; // selection, not native ownership
         bool clearDollyDialog_ = false;

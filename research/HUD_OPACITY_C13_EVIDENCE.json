@@ -1,0 +1,10 @@
+{
+  "sha256": "D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134",
+  "target_rva": "0x11624E0",
+  "guard_bytes": "41 0f 28 00 48 8b c2 41 0f 28 48 10 0f 29 02 0f 29 4a 10 c3",
+  "exact_sequence_occurrences_in_file": 1,
+  "reference_block": "AOB_HUD_OPACITY_READ_ADDRESS",
+  "reference_patch": "0F 57 C0 90 (zero first XMM vector)",
+  "independent_implementation": "MinHook output-vector filter; original called, first 16 output bytes zero only on requested/focused/fresh gameplay",
+  "runtime": "UNVERIFIED"
+}

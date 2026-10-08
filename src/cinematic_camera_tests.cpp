@@ -40,6 +40,7 @@ int main(){using namespace cinematic;
  {using namespace theater_hotkeys;std::array<std::uint32_t,static_cast<std::size_t>(Action::Count)> keys{};
   std::istringstream ok("THEATER_KEYBINDS_V1\ncycle_camera=119\n");check(DecodeBindings(ok,keys));check(keys[static_cast<std::size_t>(Action::CycleCamera)]==119);
   std::istringstream legacy("THEATER_KEYBINDS_V1\ncycle_camera=80\n");check(DecodeBindings(legacy,keys));check(keys[static_cast<std::size_t>(Action::CycleCamera)]==80);check(keys[static_cast<std::size_t>(Action::ToggleDollyControls)]!=80);
+  std::istringstream legacyO("THEATER_KEYBINDS_V1\ncycle_camera=79\n");check(DecodeBindings(legacyO,keys));check(keys[static_cast<std::size_t>(Action::CycleCamera)]==79);check(keys[static_cast<std::size_t>(Action::ToggleAllHud)]!=79);
   for(auto text:{"BAD\n","THEATER_KEYBINDS_V1\ncycle_camera=87\n","THEATER_KEYBINDS_V1\ncycle_camera=0\n","THEATER_KEYBINDS_V1\ncycle_camera=256\n","THEATER_KEYBINDS_V1\ncycle_camera=119xx\n","THEATER_KEYBINDS_V1\ncycle_camera=119\ncycle_camera=118\n","THEATER_KEYBINDS_V1\nunknown=119\n"}){auto saved=keys;std::istringstream bad(text);check(!DecodeBindings(bad,keys));check(keys==saved);}}
 
  CameraCutTrack cuts;check(cuts.replace({{1,0,5,CutMode::Player},{2,5,14,CutMode::Dolly}},20));check(cuts.evaluate(4)==CutMode::Player);check(cuts.evaluate(5)==CutMode::Dolly);check(cuts.evaluate(13)==CutMode::Dolly);check(cuts.evaluate(14)==CutMode::Player);check(cuts.evaluate(0)==CutMode::Player);

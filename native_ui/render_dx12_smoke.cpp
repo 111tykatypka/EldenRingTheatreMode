@@ -7,6 +7,7 @@
 using Microsoft::WRL::ComPtr;
 extern "C" int tm_render_start(void(*)());
 extern "C" void tm_render_shutdown();
+extern "C" void tm_render_smoke_visibility(int shown);
 void emergency(){}
 // --preview: show the v3 UI in a 1600x900 window for a few seconds (for screenshots), no automated input.
 int main(int argc,char**argv){const bool preview=argc>1&&!strcmp(argv[1],"--preview");
@@ -26,6 +27,6 @@ int main(int argc,char**argv){const bool preview=argc>1&&!strcmp(argv[1],"--prev
  if(preview){ShowWindow(window,SW_SHOW);SetWindowPos(window,HWND_TOPMOST,40,40,1600+16,900+39,0);chain->ResizeBuffers(2,1600,900,DXGI_FORMAT_R8G8B8A8_UNORM,0);SendMessageW(window,WM_KEYDOWN,VK_F4,0);
   for(int i=0;i<600;++i){MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}if(FAILED(chain->Present(1,0)))return 3;}
   tm_render_shutdown();DestroyWindow(window);return 0;}
- for(int i=0;i<120;++i){MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}if(i==30||i==60||i==90)SendMessageW(window,WM_KEYDOWN,VK_F4,0);if(i==35||i==65)SendMessageW(window,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(30,30));if(i==36||i==66)SendMessageW(window,WM_RBUTTONUP,0,MAKELPARAM(30,30));if(i==75&&FAILED(chain->ResizeBuffers(2,800,600,DXGI_FORMAT_R8G8B8A8_UNORM,0)))return 4;if(FAILED(chain->Present(0,0)))return 3;Sleep(5);}
+ for(int i=0;i<120;++i){MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}if(i==30||i==60||i==90)tm_render_smoke_visibility(i!=60);if(i==35||i==65)SendMessageW(window,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(30,30));if(i==36||i==66)SendMessageW(window,WM_RBUTTONUP,0,MAKELPARAM(30,30));if(i==75&&FAILED(chain->ResizeBuffers(2,800,600,DXGI_FORMAT_R8G8B8A8_UNORM,0)))return 4;if(FAILED(chain->Present(0,0)))return 3;Sleep(5);}
  tm_render_shutdown();DestroyWindow(window);std::cout<<"DX12 real-device hook/first-frame/F4 Shown/Hidden UI, RMB down/up, resize PASS\n";
 }

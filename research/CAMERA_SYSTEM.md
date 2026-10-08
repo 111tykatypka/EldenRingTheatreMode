@@ -41,3 +41,13 @@ The 0x681970 post-copy hook and its discovery signature are removed from active 
 ## C7 performance follow-up
 
 User-observed camera-enable stall is documented in notes/CINEMATIC_C7_CAMERA_PERFORMANCE.md. Per-copy process-memory syscalls were replaced by guarded local accesses; direct failures preserve the original native copy. New interval/read/write diagnostics make the suspected cause testable. Offline suites pass; FPS improvement still unverified. Current comparison package: outputs/Cinematic-C7-camera-performance.
+
+
+## C13 native HUD and focused editor controls
+
+See notes/CINEMATIC_C13_FOCUS_AND_CLEAN_VIEW.md and HUD_OPACITY_C13_EVIDENCE.json.
+A separate exact-profile guarded HUD output-vector hook now implements session-only
+HUD hiding, default OFF; in-game coverage remains UNVERIFIED. O combines this with
+Theater Clean Preview. Space controls a loaded replay outside F4, game focus only.
+Middle-click in the shown game picture switches Move/Rotate gizmos. No new camera
+engine addresses or actor replay changes were introduced.

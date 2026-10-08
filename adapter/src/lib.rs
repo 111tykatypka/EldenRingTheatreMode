@@ -165,6 +165,8 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 set_state(TASK_RUNTIME_READY,"TASK_RUNTIME_READY");
                 set_state(WORLDCHR_SEARCH,"WORLDCHR_SEARCH");
                 let world_ready=std::sync::atomic::AtomicBool::new(false);let player_found=std::sync::atomic::AtomicBool::new(false);
+                unsafe extern "C"{fn tm_hud_initialize()->i32;}
+                log_game(if unsafe{tm_hud_initialize()}!=0{"HUD_OPACITY hook READY; default visible; runtime validation required"}else{"HUD_OPACITY signature/hook UNAVAILABLE; no HUD override"});
                 fidelity_capture::initialize();
                 let mut characters=character_capture::Capture::new();
 
@@ -175,6 +177,8 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                 let callback=RecurringTask::new(move |_:&FD4TaskData| {
                     let now=monotonic_ns();
                     unsafe{tm_camera_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
+                    unsafe extern "C"{fn tm_hud_game_context(active:i32);}
+                    unsafe{tm_hud_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
                     camera_probe::tick(now);
                     characters.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}

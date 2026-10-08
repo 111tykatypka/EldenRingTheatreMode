@@ -3,6 +3,7 @@
 #include "imgui_internal.h"
 #include "../CinematicCameraRuntime.h"
 #include "../EldenRingTimingAdapter.h"
+#include "../EldenRingHudAdapter.h"
 #include "CameraViewport.h"
 
 #include <windows.h>
@@ -152,6 +153,7 @@ void Overlay::LoadSettings()
         if (!std::isfinite(value)) continue;
         if (key == "dolly_markers") showDollyMarkers_=value!=0;
         else if(key=="dolly_visibility_key") enableDollyVisibilityKey_=value!=0;
+        else if(key=="curve_fraction") curveFraction_=std::clamp(value,.15f,.85f);
         else if(key=="game_view_fit") gameViewFit_=value!=0;
         else if(key=="compact_tracks") compactTracks_=value!=0;
         else if(key=="actor_tracks") expandActorTracks_=value!=0;
@@ -184,6 +186,7 @@ void Overlay::SaveSettings() const
     std::error_code ec; std::filesystem::create_directories(path.parent_path(), ec);
     std::ofstream out(path, std::ios::trunc);
     const auto effects=camera_runtime::view(false);
+    out << "curve_fraction " << curveFraction_ << "\n";
     out << "game_view_fit " << gameViewFit_ << "\n";
     out << "compact_tracks " << compactTracks_ << "\n" << "actor_tracks " << expandActorTracks_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
@@ -209,6 +212,7 @@ void Overlay::SaveSettings() const
 
 void Overlay::Emit(std::uint32_t command, std::uint64_t value, const char* text)
 {
+    if(!inputFocused_)return;
     if (emit_) emit_(emitUser_, command, value, text);
     // UI sound for the action (overlay show/hide plays from the backend; recording start/stop from the
     // snapshot, so F5/F6 sound the same as the buttons). Seek and timescale are continuous drags: silent.
@@ -313,6 +317,8 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         timescaleInput_[0] = 0;
     }
     ImGuiIO& io = ImGui::GetIO();
+    inputFocused_=f.focused;
+    if(!inputFocused_){gizmoDragging_=false;curveDragging_=false;scrubbing_=false;draggingNavigator_=false;}
     ui_.visibility = f.visibility;
     ui_.hiddenAt = f.hiddenAt;
 
@@ -344,13 +350,13 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     {
         PushFont(Font::Body);
         DrawMenuBar();
+        DrawCameraModes(f);
         if (showTools_) DrawRail(f);
         if (ui_.layout.panelOpen) DrawPanel(f);
         sequencerTop_=io.DisplaySize.y;sequencerRight_=io.DisplaySize.x;
         if (showTimeline_) DrawSequencer(f);
         DrawGameViewport(f);
         DrawDollyViewport(f);
-        DrawCameraModes(f);
         DrawDialogs(f);
         UiSoundsAfterFrame();
         if (resetLayout_) { resetLayout_ = false; SaveSettings(); }
@@ -405,13 +411,14 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
             }
         }
     }
+    cameraBarBottom_=ImGui::GetWindowPos().y+ImGui::GetWindowHeight();
     ImGui::End();ImGui::PopStyleColor();
 }
 
 void Overlay::DrawGameViewport(const OverlayFrame& f)
 {
     auto&io=ImGui::GetIO();if(!f.game_texture){gameViewInitialized_=false;return;}
-    const float s=ui_.rects.uiScale,gap=Px(6,s),top=menuH_+gap;
+    const float s=ui_.rects.uiScale,gap=Px(6,s),top=std::max(menuH_,cameraBarBottom_)+gap;
     const float bottom=std::max(top+Px(80,s),sequencerTop_-gap);
     const float right=std::min(io.DisplaySize.x,sequencerRight_);
     ImVec2 pos(std::min(ui_.rects.areaMin.x,std::max(0.f,right-Px(240,s))),top),size(std::max(Px(240,s),right-pos.x),std::max(Px(80,s),bottom-top));
@@ -427,8 +434,7 @@ void Overlay::DrawGameViewport(const OverlayFrame& f)
     if(gameViewFit_)sz=ImVec2(right-p.x,bottom-p.y);
     sz.x=std::min(sz.x,right-p.x);
     sz.y=std::min(sz.y,bottom-p.y);ImGui::SetWindowPos(p);ImGui::SetWindowSize(sz);
-    ImGui::RadioButton("Move XYZ",&gizmoOperation_,0);ImGui::SameLine();ImGui::RadioButton("Rotate XYZ",&gizmoOperation_,1);
-    if(ImGui::IsItemHovered())ImGui::SetTooltip("Select a Dolly camera marker, then drag its red/green/blue rotation rings.");
+    ImGui::TextDisabled("Gizmo: %s | Middle click in picture to switch",gizmoOperation_==0?"Move":"Rotate");
     ImGui::SameLine();if(ImGui::Checkbox("Fit sequencer",&gameViewFit_))SaveSettings();
     ImVec2 content=ImGui::GetCursorScreenPos(),end(p.x+sz.x-ImGui::GetStyle().WindowPadding.x,bottom);
     end.y=std::min(end.y,p.y+sz.y-ImGui::GetStyle().WindowPadding.y);
@@ -443,6 +449,7 @@ void Overlay::DrawGameViewport(const OverlayFrame& f)
         FitAspect(a.x,a.y,std::max(1.f,b.x-a.x),std::max(1.f,b.y-a.y),io.DisplaySize.x/io.DisplaySize.y,ui_.rects.gameMin,ui_.rects.gameMax);
     }
     gameViewMin_=ui_.rects.gameMin;gameViewMax_=ui_.rects.gameMax;
+    if(f.focused&&!ImGui::GetIO().WantTextInput&&ImGui::IsWindowHovered()&&io.MousePos.x>=gameViewMin_.x&&io.MousePos.x<=gameViewMax_.x&&io.MousePos.y>=gameViewMin_.y&&io.MousePos.y<=gameViewMax_.y&&ImGui::IsMouseClicked(ImGuiMouseButton_Middle)){gizmoOperation_=1-gizmoOperation_;gizmoDragging_=false;}
     auto*draw=ImGui::GetBackgroundDrawList();draw->AddRectFilled(ImVec2(0,0),io.DisplaySize,Color::TimelineBg.U32());
     draw->AddImage(ImTextureRef(f.game_texture),ui_.rects.gameMin,ui_.rects.gameMax);
     ImGui::End();
@@ -771,7 +778,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         if(checkbox("Enable Dolly visibility shortcut (default P)",&enableDollyVisibilityKey_))SaveSettings();
         if(checkbox("Show Dolly curve editor in sequencer",&showDollyCurves_))SaveSettings();
         ImGui::TextDisabled("Markers stay visible outside F4. Open F4 to edit handles.");
-        ImGui::RadioButton("Move handles",&gizmoOperation_,0);ImGui::SameLine();ImGui::RadioButton("Rotate handles",&gizmoOperation_,1);
+        ImGui::TextWrapped("Middle click inside Game viewport switches Move / Rotate handles.");
         ImGui::Text("Native interception: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
         ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
         ImGui::TextWrapped("Runtime validation required. Test the two-second probe first; F6 immediately disables camera overrides.");
@@ -923,11 +930,17 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopStyleColor();
             ImGui::PopFont();
         }
+        section("Clean view / HUD");
+        bool hudHidden=game_hud::requested();ImGui::BeginDisabled(!game_hud::ready());
+        if(checkbox("Hide native game HUD",&hudHidden))game_hud::request(hudHidden);
+        const auto cleanLabel="Hide game HUD + all Theater UI ["+KeyName(theater_hotkeys::Action::ToggleAllHud)+"]";
+        if(ImGui::Button(cleanLabel.c_str()))Emit(kCommandCleanView);
+        ImGui::EndDisabled();ImGui::TextDisabled("HUD opacity hook: %s. Clean View key is rebindable.",game_hud::ready()?"READY":"UNAVAILABLE");
         section(T(Str::HotkeysTitle));
         {
             auto& waiting=bindingWaiting_;auto& released=bindingReleased_;auto& bindError=bindingError_;
             ImGui::TextWrapped("Click a key to rebind. Escape cancels. Reset restores that action's default; conflicts are reported without replacing another binding.");
-            if(waiting>=0){
+            if(waiting>=0&&f.focused){
                 ImGui::TextColored(Color::AccentAmber.Vec4(),"Binding: %s",theater_hotkeys::Label(static_cast<theater_hotkeys::Action>(waiting)));
                 if(ImGui::Button("Cancel binding",ImVec2(-FLT_MIN,0))){waiting=-1;theater_hotkeys::rebinding=false;}
                 if(waiting>=0){bool any=false;for(int vk=8;vk<256;++vk)if(GetAsyncKeyState(vk)&0x8000)any=true;
@@ -1362,7 +1375,7 @@ void Overlay::DrawSequencer(const OverlayFrame& f)
         if(pos.y+size.y>ImGui::GetIO().DisplaySize.y)ImGui::SetWindowPos(ImVec2(pos.x,std::max(menuH_,ImGui::GetIO().DisplaySize.y-size.y)));
     }
     if(f.game_texture&&!ImGui::IsWindowDocked()){
-        const auto p=ImGui::GetWindowPos();const float minimum=menuH_+Px(150,s);
+        const auto p=ImGui::GetWindowPos();const float minimum=std::max(menuH_,cameraBarBottom_)+Px(150,s);
         if(p.y<minimum)ImGui::SetWindowPos(ImVec2(p.x,minimum));
         if(ImGui::GetWindowPos().y+ImGui::GetWindowHeight()>ImGui::GetIO().DisplaySize.y)ImGui::SetWindowSize(ImVec2(ImGui::GetWindowWidth(),ImGui::GetIO().DisplaySize.y-ImGui::GetWindowPos().y));
     }
@@ -1376,9 +1389,17 @@ void Overlay::DrawSequencer(const OverlayFrame& f)
     const ImVec2 min = ImGui::GetCursorScreenPos();
     const ImVec2 max(ImGui::GetWindowPos().x + ImGui::GetWindowWidth(), ImGui::GetWindowPos().y + ImGui::GetWindowHeight());
     DrawToolbar(f, toolbar);
-    const float curveHeight=showDollyCurves_?std::min(Px(125,s),std::max(0.f,(max.y-min.y-toolbar-Px(100,s))*.5f)):0.f;
-    DrawTimeline(f, ImVec2(min.x, min.y + toolbar), ImVec2(max.x,max.y-curveHeight));
-    if(curveHeight>Px(50,s))DrawDollyCurves(f,ImVec2(min.x,max.y-curveHeight),max);
+    const float space=std::max(0.f,max.y-min.y-toolbar),curveHeight=showDollyCurves_?std::min(std::max(0.f,space-Px(80,s)),space*curveFraction_):0.f;
+    const float split=max.y-curveHeight;
+    DrawTimeline(f, ImVec2(min.x, min.y + toolbar), ImVec2(max.x,split));
+    if(curveHeight>Px(50,s)){
+        ImGui::SetCursorScreenPos(ImVec2(min.x,split));ImGui::InvisibleButton("##curve-splitter",ImVec2(max.x-min.x,Px(5,s)));
+        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(min.x,split),ImVec2(max.x,split+Px(3,s)),Color::BorderStrong.U32());
+        if(ImGui::IsItemHovered()||ImGui::IsItemActive())ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        if(ImGui::IsItemActive()){ImGui::MarkItemEdited(ImGui::GetItemID());curveFraction_=std::clamp((max.y-ImGui::GetIO().MousePos.y)/std::max(1.f,space),.15f,.85f);}
+        if(ImGui::IsItemDeactivatedAfterEdit())SaveSettings();
+        DrawDollyCurves(f,ImVec2(min.x,split+Px(6,s)),max);
+    }
     ImGui::End();
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();
@@ -1398,7 +1419,8 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
         const char* modes[]={"Linear","Smooth","Bezier","Curve","Spline","Step"};
         if(ImGui::Combo("##curve-interpolation",&interpolation,modes,6)){auto key=*selected;key.outgoing=cinematic::Interpolation(interpolation);camera_runtime::edit_key(key);}
     }
-    ImGui::SameLine();ImGui::TextDisabled("Drag: value | Ctrl: time | Esc: cancel");
+    ImGui::SameLine();if(ImGui::SmallButton("Fit curve")){curveZoom_=1;curvePan_=0;}
+    ImGui::SameLine();ImGui::TextDisabled("Wheel: Y zoom | Ctrl+wheel: time zoom | Shift: Y pan");
     if(!camera.track_current||camera.keys.empty()){curveDragging_=false;ImGui::TextDisabled("Load a replay and capture Dolly keys to edit its spline.");return;}
     if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys);curveGeneration_=camera.project_generation;}
     const ImVec2 a(min.x+Px(8,s),ImGui::GetCursorScreenPos().y+Px(3,s)),b(max.x-Px(8,s),max.y-Px(4,s));
@@ -1408,12 +1430,18 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     auto timeAt=[&](float x){return std::clamp(ui_.timeline.viewStart+(x-lane)/ui_.timeline.pixelsPerSecond,0.,f.snapshot.duration_ns/1e9);};
     auto xAt=[&](std::uint64_t t){return lane+float((t/1e9-ui_.timeline.viewStart)*ui_.timeline.pixelsPerSecond);};
     auto value=[&](const cinematic::State& pose){return curveChannel_<3?pose.position[curveChannel_]:pose.fov_degrees;};
+    auto&curveIo=ImGui::GetIO();
+    if(!curveDragging_&&ImGui::IsWindowHovered()&&curveIo.MousePos.x>=a.x&&curveIo.MousePos.x<=b.x&&curveIo.MousePos.y>=a.y&&curveIo.MousePos.y<=b.y&&curveIo.MouseWheel){
+        if(curveIo.KeyCtrl){const auto anchor=timeAt(curveIo.MousePos.x);ui_.timeline.pixelsPerSecond=std::clamp(ui_.timeline.pixelsPerSecond*std::pow(1.2,curveIo.MouseWheel),.1,2000.*s);ui_.timeline.viewStart=anchor-(curveIo.MousePos.x-lane)/ui_.timeline.pixelsPerSecond;}
+        else if(curveIo.KeyShift)curvePan_+=curveIo.MouseWheel*(curveMax_-curveMin_)*.1;
+        else curveZoom_=std::clamp(curveZoom_*std::pow(1.2,curveIo.MouseWheel),.01,1000.);
+    }
     const double t0=timeAt(a.x),t1=timeAt(b.x);
     if(!curveDragging_){
         double lo=1e300,hi=-1e300;
         for(int n=0;n<=192;++n)if(auto pose=cinematic::dolly_evaluate(curveTrack_,std::uint64_t((t0+(t1-t0)*n/192)*1e9),camera.dolly_smoothing_seconds)){lo=std::min(lo,value(*pose));hi=std::max(hi,value(*pose));}
         for(auto&key:camera.keys)if(xAt(key.time_ns)>=a.x&&xAt(key.time_ns)<=b.x){lo=std::min(lo,value(key.state));hi=std::max(hi,value(key.state));}
-        const double padding=std::max(.1,(hi-lo)*.15);curveMin_=float(lo-padding);curveMax_=float(hi+padding);
+        const double padding=std::max(.1,(hi-lo)*.15),center=(lo+hi)*.5+curvePan_,half=((hi-lo)*.5+padding)/curveZoom_;curveMin_=float(center-half);curveMax_=float(center+half);
     }
     auto yAt=[&](double v){return b.y-float((v-curveMin_)/(curveMax_-curveMin_))*(b.y-a.y);};
     ImGui::SetCursorScreenPos(a);ImGui::InvisibleButton("##dolly-curve-plot",ImVec2(b.x-a.x,b.y-a.y));

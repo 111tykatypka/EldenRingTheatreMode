@@ -2,6 +2,7 @@
 // No game offsets or character writes are implemented in this translation unit.
 #include <windows.h>
 #include "EldenRingTimingAdapter.h"
+#include "EldenRingHudAdapter.h"
 #include <realtimeapiset.h>
 #pragma comment(lib,"mincore.lib")
 #define DIRECTINPUT_VERSION 0x0800
@@ -54,9 +55,10 @@ public:
  // mode 2 = v3 UI shown (cursor + input capture), 0 = hidden. visibility holds TheaterUI::UiVisibility.
  std::atomic_int mode{0},visibility{int(TheaterUI::UiVisibility::Hidden)};std::atomic<ULONGLONG> hidden_tick{0};
  std::atomic_bool running{true},ui_ready{},capture_mouse{},capture_keyboard{},host_linked{};std::thread client;
- TheaterUI::Overlay overlay;
+ TheaterUI::Overlay overlay;TheaterUI::UiVisibility before_clean=TheaterUI::UiVisibility::Hidden;bool all_hidden=false;
  // Game input is blocked only while the UI is shown AND actually rendering, so a failed overlay never traps the player.
- bool blocking() const {return mode.load()==2&&ui_ready.load()&&!failed;}
+ bool focused() const {auto fg=GetForegroundWindow();return hwnd&&fg&&GetAncestor(fg,GA_ROOT)==GetAncestor(hwnd,GA_ROOT);}
+ bool blocking() const {return focused()&&mode.load()==2&&ui_ready.load()&&!failed;}
  // Set by bone replay playback: the player character is the replay body, so the game gets no
  // keyboard and no mouse buttons (mouse movement still turns the camera). Gamepads are not blocked yet.
  std::atomic_bool game_input_locked{};
@@ -66,7 +68,7 @@ public:
  std::atomic_bool replay_loaded{},replay_playing{};
  // TogglePlayback (Space) belongs to Theater Mode only while the overlay is open (game input is
  // blocked then anyway). With the overlay hidden it is always the game's key, replay loaded or not.
- bool owns_playback_key() const {return blocking();}
+ bool owns_playback_key() const {return focused()&&(blocking()||replay_loaded.load());}
  void toggle_playback(){if(replay_loaded.load())command(theater_ui::toggle_playback);}
  // Virtual cursor. Elden Ring can hold the mouse through DirectInput so Windows never moves
  // the cursor or sends WM_MOUSEMOVE. While the UI is shown, the blocked game mouse deltas and
@@ -81,7 +83,7 @@ public:
  // The OS cursor is hidden while shown (WM_SETCURSOR) and the overlay draws the only arrow.
  ULONGLONG cursor_log_tick{};bool dinput_mode{};
  void feed_virtual_mouse(){auto&io=ImGui::GetIO();const long dx=mouse_dx.exchange(0),dy=mouse_dy.exchange(0);const unsigned buttons=mouse_buttons.load();
-  if(mode.load()!=2){virtual_mouse={-1,-1};applied_buttons=0;dinput_mode=false;return;}
+  if(!focused()||mode.load()!=2){virtual_mouse={-1,-1};applied_buttons=0;dinput_mode=false;return;}
   const ULONGLONG now=GetTickCount64();const bool dinput=now-os_mouse_tick.load()>1000;
   if(dinput!=dinput_mode){dinput_mode=dinput;virtual_mouse=ImGui::IsMousePosValid(&io.MousePos)?io.MousePos:ImVec2(io.DisplaySize.x*.5f,io.DisplaySize.y*.5f);
    log(dinput?"CURSOR source=DirectInput (no window mouse messages for 1 s)":"CURSOR source=Windows messages");}
@@ -93,20 +95,22 @@ public:
  std::atomic<WNDPROC> forward_proc{};void* exception_observer{};unsigned diagnostic_frames{};
  void (*emergency)(){};
  void log(const char*message){wchar_t path[MAX_PATH]{};GetTempPathW(MAX_PATH,path);std::ofstream file(std::filesystem::path(path)/L"TheaterModeRender.log",std::ios::app);file<<GetTickCount64()<<" "<<message<<'\n';}
- void command(std::uint32_t kind,std::uint64_t value=0,const char*text=nullptr){if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
+ void command(std::uint32_t kind,std::uint64_t value=0,const char*text=nullptr){if(kind==TheaterUI::kCommandCleanView){clean_view();return;}if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
   if(kind==TheaterUI::kCommandSetVisibility){set_visibility(value==0?TheaterUI::UiVisibility::Shown:TheaterUI::UiVisibility::Hidden);return;}
   if(kind==theater_ui::play||kind==theater_ui::restart||kind==theater_ui::toggle_playback)game_timing::enable(true);
   if(kind==theater_ui::stop){game_timing::enable(false);camera_runtime::stop();if(emergency)emergency();}std::lock_guard lock(ipc);
   // A scrub produces many seeks and the pipe sends one request per round trip, so only the newest pending seek matters.
   if(kind==theater_ui::seek&&!commands.empty()&&commands.back().command==theater_ui::seek){commands.back().value=value;return;}
   if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;if(text)strncpy_s(r.text,text,_TRUNCATE);commands.push_back(r);}}
- void set_visibility(TheaterUI::UiVisibility next){if(next!=TheaterUI::UiVisibility::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==TheaterUI::UiVisibility::Shown?2:0;
+ void clean_view(){if(!all_hidden){if(!game_hud::ready()){log("HUD_OPACITY unavailable; clean toggle rejected");return;}before_clean=TheaterUI::UiVisibility(visibility.load());all_hidden=true;game_hud::request(true);set_visibility(TheaterUI::UiVisibility::HiddenClean);}else{all_hidden=false;game_hud::request(false);set_visibility(before_clean);}}
+ void set_visibility(TheaterUI::UiVisibility next){if(next==TheaterUI::UiVisibility::Shown){all_hidden=false;game_hud::request(false);}if(next!=TheaterUI::UiVisibility::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==TheaterUI::UiVisibility::Shown?2:0;
   if(next==TheaterUI::UiVisibility::Shown)ClipCursor(nullptr);}
  // True while an ImGui text field has keyboard focus: F4 and Space then type instead of acting.
  std::atomic_bool text_input{};
  // F4 toggles Shown/Hidden. Shift+F4 toggles the clean mode that also hides the REC pill.
  void toggle_ui(bool clean){using V=TheaterUI::UiVisibility;const auto current=V(visibility.load());V next;
   if(clean)next=current==V::HiddenClean?V::Hidden:V::HiddenClean;else next=current==V::Shown?V::Hidden:V::Shown;
+  if(next==V::Shown){all_hidden=false;game_hud::request(false);}
   if(next!=V::Shown)hidden_tick=GetTickCount64();visibility=int(next);mode=next==V::Shown?2:0;
   if(next==V::Shown)ClipCursor(nullptr);
   if((current==V::Shown)!=(next==V::Shown))TheaterUI::Sound::Play(next==V::Shown?TheaterUI::Sound::Cue::Open:TheaterUI::Sound::Cue::Close);} // through the hook: confines to the whole window while shown
@@ -174,15 +178,15 @@ public:
   TheaterUI::OverlayFrame frame;{std::lock_guard lock(ipc);frame.snapshot=snapshot;}
   {std::lock_guard lock(camera_mutex);frame.camera=camera_snapshot;}
   {std::lock_guard lock(camera_mutex);while(!camera_actions.empty()){overlay.CameraHotkey(camera_actions.front());camera_actions.pop_front();}}
-  frame.game_texture=scene;
+  frame.focused=focused();frame.game_texture=scene;
   frame.hostLinked=host_linked.load();frame.visibility=TheaterUI::UiVisibility(visibility.load());
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
   {std::lock_guard lock(events_mutex);frame.events.assign(events.begin(),events.end());events.clear();}
   auto&io=ImGui::GetIO();const bool shown=frame.visibility==TheaterUI::UiVisibility::Shown;io.MouseDrawCursor=false; // the overlay draws its own cursor (TheaterOverlayUI)
   camera_runtime::overlay_visible(shown);
   const auto rects=overlay.Draw(frame,[](void*user,std::uint32_t kind,std::uint64_t value,const char*text){static_cast<TheaterRenderBackend*>(user)->command(kind,value,text);},this);
-  text_input=shown&&ImGui::GetIO().WantTextInput;
-  capture_mouse=shown&&io.WantCaptureMouse;capture_keyboard=shown&&io.WantCaptureKeyboard;return rects;
+  text_input=shown&&frame.focused&&ImGui::GetIO().WantTextInput;
+  capture_mouse=shown&&frame.focused&&io.WantCaptureMouse;capture_keyboard=shown&&frame.focused&&io.WantCaptureKeyboard;return rects;
  }
  void render(IDXGISwapChain*sc,UINT flags){if(flags&DXGI_PRESENT_TEST)return;std::lock_guard lock(graphics);if(failed||!chain||sc!=static_cast<IDXGISwapChain*>(chain.Get()))return;
   // Draw only when something is visible: the UI, the REC pill (not in Shift+F4 clean mode), or the F4 hint.
@@ -212,7 +216,10 @@ public:
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
   const bool composite=vis==TheaterUI::UiVisibility::Shown&&prepare_scene(f);
-  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();feed_virtual_mouse();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");draw(composite?ImTextureID(f.scene_srv.ptr):0);
+  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();const bool active=focused();game_hud::focused(active);TheaterUI::Sound::SetFocused(active);
+  if(!active){std::lock_guard lock(input_mutex);inputs.clear();mouse_dx=0;mouse_dy=0;mouse_buttons=0;applied_buttons=0;virtual_mouse={-1,-1};ImGui::GetIO().ClearEventsQueue();ImGui::GetIO().ClearInputKeys();ImGui::GetIO().ClearInputMouse();ImGui::GetIO().AddFocusEvent(false);}
+  else {ImGui::GetIO().AddFocusEvent(true);feed_virtual_mouse();}
+  stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");draw(composite?ImTextureID(f.scene_srv.ptr):0);
   ImGui::Render();if(!needed)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
   if(composite){
@@ -246,6 +253,8 @@ LONG CALLBACK observe_exception(EXCEPTION_POINTERS*e){
  }busy=false;return EXCEPTION_CONTINUE_SEARCH;
 }
 LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){auto&b=backend();
+ if(!b.focused()){auto previous=b.forward_proc.load(std::memory_order_acquire);return previous?CallWindowProcW(previous,h,m,w,l):DefWindowProcW(h,m,w,l);}
+ if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==theater_hotkeys::Key(theater_hotkeys::Action::ToggleAllHud)&&!b.text_input&&!theater_hotkeys::rebinding){b.clean_view();return 0;}
  // F4 replaces Insert. Alt+F4 arrives as WM_SYSKEYDOWN and still closes the game.
  using theater_hotkeys::Action;using theater_hotkeys::Key;
  if((m==WM_KEYDOWN||m==WM_KEYUP)&&!b.text_input.load()&&!theater_hotkeys::rebinding){
@@ -297,14 +306,14 @@ void capture_mouse_data(IDirectInputDevice8W*d,DWORD object_size,const DIDEVICEO
   if(e.dwOfs==DIMOFS_X)b.mouse_dx+=LONG(e.dwData);else if(e.dwOfs==DIMOFS_Y)b.mouse_dy+=LONG(e.dwData);
   else if(e.dwOfs>=DIMOFS_BUTTON0&&e.dwOfs<=DIMOFS_BUTTON2){const unsigned bit=1u<<(e.dwOfs-DIMOFS_BUTTON0);if(e.dwData&0x80)b.mouse_buttons|=bit;else b.mouse_buttons&=~bit;}}}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_state(IDirectInputDevice8W*d,DWORD size,LPVOID data){
- const HRESULT hr=original_state[N](d,size,data);if(FAILED(hr)||!data)return hr;auto&b=backend();
+ const HRESULT hr=original_state[N](d,size,data);if(FAILED(hr)||!data)return hr;auto&b=backend();if(!b.focused())return hr;
  if(camera_runtime::owns_input()&&!b.blocking()&&(size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))){auto*m=static_cast<DIMOUSESTATE*>(data);camera_runtime::mouse_delta(m->lX,m->lY);}
  if(b.blocking()){capture_mouse_state(data,size);memset(data,0,size);}
  else if(b.game_input_locked.load()||camera_runtime::owns_input()){if(size==256)memset(data,0,size);else if(size==sizeof(DIMOUSESTATE)||size==sizeof(DIMOUSESTATE2))memset(static_cast<DIMOUSESTATE*>(data)->rgbButtons,0,size-12);}
  else if(size==256&&b.owns_playback_key()){const DWORD code=playback_scan_code();if(code&&code<256)static_cast<BYTE*>(data)[code]=0;}
  return hr;}
 template<int N> HRESULT STDMETHODCALLTYPE on_device_data(IDirectInputDevice8W*d,DWORD object_size,LPDIDEVICEOBJECTDATA data,LPDWORD count,DWORD flags){
- const HRESULT hr=original_data[N](d,object_size,data,count,flags);if(FAILED(hr)||!count)return hr;auto&b=backend();
+ const HRESULT hr=original_data[N](d,object_size,data,count,flags);if(FAILED(hr)||!count)return hr;auto&b=backend();if(!b.focused())return hr;
  if(camera_runtime::owns_input()&&!b.blocking()&&data&&!(flags&DIGDD_PEEK)&&object_size>=sizeof(DIDEVICEOBJECTDATA)&&is_mouse(d)){
   auto*bytes=reinterpret_cast<const unsigned char*>(data);for(DWORD i=0;i<*count;++i){auto&e=*reinterpret_cast<const DIDEVICEOBJECTDATA*>(bytes+size_t(i)*object_size);if(e.dwOfs==DIMOFS_X)camera_runtime::mouse_delta(LONG(e.dwData),0);else if(e.dwOfs==DIMOFS_Y)camera_runtime::mouse_delta(0,LONG(e.dwData));}
  }
@@ -439,9 +448,13 @@ extern "C" int tm_render_test_ui(){
   for(int pass=0;pass<4;++pass){ImGui::NewFrame();
    if(auto*seq=ImGui::FindWindowByName("###timeline")){ImGui::SetWindowPos(seq,ImVec2(50,size.y*.6f));ImGui::SetWindowSize(seq,ImVec2(size.x-70,size.y*.4f));}
    const auto rect=b.draw(ImTextureID(1));ImGui::Render();auto*seq=ImGui::FindWindowByName("###timeline");
-   valid=valid&&ImGui::GetDrawData()->Valid&&seq&&rect.gameMax.y<=seq->Pos.y&&rect.gameMin.x>=0&&rect.gameMax.x<=size.x&&rect.gameMax.y>rect.gameMin.y;
+   auto*bar=ImGui::FindWindowByName("##camera-modes");
+   valid=valid&&bar&&rect.gameMin.y>=bar->Pos.y+bar->Size.y&&ImGui::GetDrawData()->Valid&&seq&&rect.gameMax.y<=seq->Pos.y&&rect.gameMin.x>=0&&rect.gameMax.x<=size.x&&rect.gameMax.y>rect.gameMin.y;
   }
  }
+ const auto visibilityBefore=b.visibility.load();const auto actionsBefore=camera_actions.size(),commandsBefore=b.commands.size();
+ for(auto key:{theater_hotkeys::Action::ToggleOverlay,theater_hotkeys::Action::TogglePlayback,theater_hotkeys::Action::ToggleAllHud,theater_hotkeys::Action::CycleCamera})TheaterRenderBackend::wndproc(nullptr,WM_KEYDOWN,theater_hotkeys::Key(key),0);
+ valid=valid&&b.visibility==visibilityBefore&&camera_actions.size()==actionsBefore&&b.commands.size()==commandsBefore;
  b.host_linked=false;b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;ImGui::DestroyContext(c);return valid?1:0;
 }
 // The hotkey table for the Rust side (shared/TheaterHotkeys.h). Unknown action: 0 (unbound).
@@ -461,3 +474,6 @@ extern "C" void tm_camera_publish(const theater_camera::Telemetry* snapshot){
  for(auto&slot:camera_snapshot.slots)slot.valid=slot.valid&&theater_camera::valid(slot);
 }
 extern "C" bool tm_camera_probe_enabled(){return theater_camera::probe_enabled.load();}
+
+// Standalone GPU smoke fixture only, linked into the test EXE, not a Rust export.
+extern "C" void tm_render_smoke_visibility(int shown){backend().set_visibility(shown?TheaterUI::UiVisibility::Shown:TheaterUI::UiVisibility::Hidden);}
