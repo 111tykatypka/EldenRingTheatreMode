@@ -124,11 +124,11 @@ struct State{
  // Reserved root-rebase value; remains zero until cross-origin conversion is verified.
  now_offset:[f32;3],
  replay_blocked:bool,
- mount_note:u8,returning:Option<(u64,u32)>,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,virt:Option<Virt>,fx_cursor:usize,fx_t:u64,fx_live:Vec<(u64,u32)>,
+ mount_note:u8,returning:Option<(u64,u32)>,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,virt:Option<Virt>,fx_cursor:usize,fx_t:u64,fx_live:Vec<(u64,u32)>,fx_attach:Vec<(u64,u32,usize,[f32;3])>,
  module_saved:Option<[u8;weapon_loc::BYTES]>,module_written:Option<[u8;weapon_loc::BYTES]>,module_lost:u64,module_frames:u64,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,returning:None,saved_place:None,inv_saved:None,eval_place:None,virt:None,fx_cursor:0,fx_t:0,fx_live:Vec::new(),module_saved:None,module_written:None,module_lost:0,module_frames:0});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,returning:None,saved_place:None,inv_saved:None,eval_place:None,virt:None,fx_cursor:0,fx_t:0,fx_live:Vec::new(),fx_attach:Vec::new(),module_saved:None,module_written:None,module_lost:0,module_frames:0});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -158,6 +158,24 @@ fn pose_arrays(chr:usize)->Option<(usize,usize)>{
 fn pose(p:usize,bytes:usize)->&'static [u8]{unsafe{std::slice::from_raw_parts(p as *const u8,bytes)}}
 // Read-only publication on Draw_Pre; no retained game pointers cross the FFI.
 /// Tells the overlay the names of the player skeleton's bones (once per skeleton) so the bone camera can offer a named list.
+static WEAPON_BONES:Mutex<Vec<usize>>=Mutex::new(Vec::new());
+/// World position of one bone of `chr` (root matrix rows are the model axes, row 3 the position; bone translation in model space).
+fn bone_world(chr:usize,root:&[f32;16],bone:usize)->Option<[f32;3]>{
+ let (_,model)=pose_arrays(chr)?;let mut raw=[0u8;12];
+ if !crate::companions::copy(model.checked_add(bone.checked_mul(48)?)?,&mut raw){return None;}
+ let t:[f32;3]=std::array::from_fn(|i|f32::from_le_bytes(raw[i*4..i*4+4].try_into().unwrap()));
+ if !t.iter().all(|v|v.is_finite()){return None;}
+ Some(std::array::from_fn(|i|root[12+i]+(0..3).map(|j|root[j*4+i]*t[j]).sum::<f32>()))}
+fn read_root(chr:usize)->Option<[f32;16]>{
+ let mut raw=[0u8;64];if !crate::companions::copy(matrix_address(chr),&mut raw){return None;}
+ let m:[f32;16]=std::array::from_fn(|i|f32::from_le_bytes(raw[i*4..i*4+4].try_into().unwrap()));m.iter().all(|v|v.is_finite()).then_some(m)}
+/// The weapon bone nearest to `p` (within 0.6 m) and `p` expressed along the character's axes from that bone.
+fn nearest_weapon_bone(chr:usize,p:[f32;3])->Option<(usize,[f32;3],f32)>{
+ let bones=WEAPON_BONES.lock().unwrap().clone();if bones.is_empty(){return None;}let root=read_root(chr)?;
+ let mut best:Option<(usize,[f32;3],f32)>=None;
+ for b in bones{let Some(w)=bone_world(chr,&root,b) else {continue};let d=[p[0]-w[0],p[1]-w[1],p[2]-w[2]];let dist=(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]).sqrt();
+  if dist<=0.6&&best.is_none_or(|x|dist<x.2){best=Some((b,std::array::from_fn(|j|(0..3).map(|i|root[j*4+i]*d[i]).sum::<f32>()),dist));}}
+ best}
 fn publish_bone_names(chr:usize){
  static LAST:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(0);
  unsafe extern "C"{fn tm_camera_bone_names(names:*const *const std::ffi::c_char,count:i32);}
@@ -170,6 +188,7 @@ fn publish_bone_names(chr:usize){
   let p=read_ptr(bones+i*16)&!1usize;let mut raw=[0u8;64];
   let name=if p>0x10000&&crate::companions::copy(p,&mut raw){let end=raw.iter().position(|b|*b==0).unwrap_or(raw.len());let s=&raw[..end];if !s.is_empty()&&s.iter().all(|b|(0x20..0x7F).contains(b)){String::from_utf8_lossy(s).into_owned()}else{String::new()}}else{String::new()};
   names.push(std::ffi::CString::new(if name.is_empty(){format!("bone {i}")}else{name}).unwrap_or_default());}
+ {let weapons:Vec<usize>=names.iter().enumerate().filter(|(_,n)|n.to_string_lossy().to_ascii_lowercase().contains("weapon")).map(|(i,_)|i).collect();crate::log_game(&format!("BONE_CAMERA: weapon bones (trail attachment): {:?}",weapons.iter().map(|i|names[*i].to_string_lossy().into_owned()).collect::<Vec<_>>()));*WEAPON_BONES.lock().unwrap()=weapons;}
  let pointers:Vec<*const std::ffi::c_char>=names.iter().map(|n|n.as_ptr()).collect();
  unsafe{tm_camera_bone_names(pointers.as_ptr(),count as i32)};
  LAST.store(skel,std::sync::atomic::Ordering::Relaxed);
@@ -219,7 +238,7 @@ fn finish_recording(s:&mut State){
  let Some(r)=s.recording.take() else {return;};
  // Effects: stop capturing and hand the last ones to the writer before the channel closes.
  effects::capture(false);{let rest=fx_relative(effects::drain(),r.first);{let up=effects::drain_updates();if !up.is_empty(){let _=r.tx.try_send(Message::EffectUpdates(up));}}let (seen,dropped,_)=effects::stats();if !rest.is_empty(){let _=r.tx.try_send(Message::Effects(rest));}
-  crate::log_game(&format!("EFFECTS: {seen} effect creations seen so far this session ({dropped} dropped by the queue)"));}
+  crate::log_game(&format!("EFFECTS: {seen} effect creations seen so far this session ({dropped} dropped by the queue)"));let (us,ud)=effects::update_stats();crate::log_game(&format!("EFFECT_UPDATES: {us} per-frame effect movements captured so far this session ({ud} dropped)"));}
  let seconds=r.last.saturating_sub(r.first) as f64/1e9;
  crate::log_game(&format!("BONE_REPLAY: recording stopped; {} frames over {seconds:.2} s ({} dropped while the disk was busy), {} characters; finishing {}",r.frames,r.dropped,r.actors.count(),world_path(&r.path).display()));
  crate::log_game(&format!("COMPANIONS_SUMMARY: {} companion identities, {} dropped actor samples (no lost catalog announcements)",r.actors.companions(),r.actors.drops()));
@@ -267,6 +286,7 @@ fn follow_loaded(s:&mut State,l:&Link){
    let mut anchors=crate::replay_interpolation::AnchorTrack::default();
    for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.frame(),f.place.global);}}}
    crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
+   crate::log_game(&format!("BONE_REPLAY: {} effects follow something (recorded movement paths, {} samples)",world_data.effect_tracks.len(),world_data.effect_tracks.values().map(|v|v.len()).sum::<usize>()));
    crate::log_game(&format!("BONE_REPLAY: {} recorded effects in the file; replay of them is {}",world_data.effects.len(),if effects::ready(){"available"}else{"unavailable (hook not installed)"}));
    {let sample:Vec<String>=world_data.effects.iter().take(12).map(|e|format!("id {} t={:.2}s at ({:.1},{:.1},{:.1})",e.id,e.time as f64/1e9,e.pos[0],e.pos[1],e.pos[2])).collect();crate::log_game(&format!("EFFECTS_IN_FILE first events: {sample:?}"));}
    Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors,anchors:Arc::new(anchors)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
@@ -651,12 +671,15 @@ pub fn tick(group:usize,now:u64){
     if jumped{effects::release_all();}
     let mut i=if jumped{ev.partition_point(|e|e.time<=t)}else{s.fx_cursor.min(ev.len())};
     if !jumped{let mut made=0;while i<ev.len()&&ev[i].time<=t&&made<16{
-     if let Some(sh)=if loaded.anchors.is_empty(){Some([0.0f32;3])}else{loaded.anchors.translation(ev[i].time,live.0,live.1)}{let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];let code=effects::spawn_scene(ev[i].id,p,ev[i].time.saturating_add(20_000_000_000),ev[i].time);let ok=code==1||code==2;if ok{made+=1;if loaded.world.effect_tracks.contains_key(&(ev[i].time,ev[i].id)){s.fx_live.push((ev[i].time,ev[i].id));}}let (before,after)=(code,code);
+     if let Some(sh)=if loaded.anchors.is_empty(){Some([0.0f32;3])}else{loaded.anchors.translation(ev[i].time,live.0,live.1)}{let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];let code=effects::spawn_scene(ev[i].id,p,ev[i].time.saturating_add(20_000_000_000),ev[i].time);let ok=code==1||code==2;if ok{made+=1;if loaded.world.effect_tracks.contains_key(&(ev[i].time,ev[i].id)){s.fx_live.push((ev[i].time,ev[i].id));}
+       else if s.fx_attach.len()<256{if let Some((bone,offset,dist))=nearest_weapon_bone(chr,p){s.fx_attach.push((ev[i].time,ev[i].id,bone,offset));
+        static ATT:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);if ATT.fetch_add(1,std::sync::atomic::Ordering::Relaxed)<30{crate::log_game(&format!("EFFECT_ATTACH: effect {} follows weapon bone {bone} ({dist:.2} m from it)",ev[i].id));}}}}let (before,after)=(code,code);
       static LOGGED:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);if LOGGED.fetch_add(1,std::sync::atomic::Ordering::Relaxed)<40{crate::log_game(&format!("EFFECT_REPLAY: id {} at t={:.2}s -> ({:.1},{:.1},{:.1}) called={} scene-create result {:?} (1 created, 2 created but empty handle, -1 FXR not resident, -4 check failed, -5 no scene, -7 no CSSfxImp) {:?} shift=({:.1},{:.1},{:.1}) replayed player at {:?}, recorded effect at {:?}",ev[i].id,ev[i].time as f64/1e9,p[0],p[1],p[2],ok,before,after,sh[0],sh[1],sh[2],read_transform(chr).map(|t|t[2]),ev[i].pos));}}
      i+=1;}}
     s.fx_cursor=i;s.fx_t=t;
     // Effects that followed something while recording (auras, trails, weapon effects) get their recorded matrix every frame.
-    if jumped{s.fx_live.clear();}
+    if jumped{s.fx_live.clear();s.fx_attach.clear();}
+    if !s.fx_attach.is_empty(){if let Some(root)=read_root(chr){s.fx_attach.retain(|(tag,id,bone,off)|{let Some(w)=bone_world(chr,&root,*bone) else {return true};let mut m=root;for i in 0..3{m[12+i]=w[i]+(0..3).map(|j|root[j*4+i]*off[j]).sum::<f32>();}effects::set_transform(*tag,*id,&m)});}}
     let tracks=&loaded.world.effect_tracks;let empty=loaded.anchors.is_empty();
     s.fx_live.retain(|k|{
      let Some(tr)=tracks.get(k) else {return false};let Some(last)=tr.last() else {return false};
