@@ -391,6 +391,12 @@ fn begin_arrival(s:&mut State,chr:usize){
    (Some(p),Some(l),Some(sh))=>(0..3).map(|k|(p[k]+sh[k]-l[k]).powi(2)).sum::<f32>().sqrt(),_=>0.0}}else{0.0};
  if target.block==-1{s.arrival=Arrival::Ready;crate::log_game("ARRIVAL: recording has no map data (older file); positions used as recorded");return;}
  crate::log_game(&format!("ARRIVAL: here {} {:?}, replay {} {:?}, distance {:.1} m",arrival::block_name(here.block),&here.global[..3],arrival::block_name(target.block),&target.global[..3],arrival::distance(here.global,target.global)));
+ // A grace warp ends the game session of the body (loading screen), which releases ownership; the replay then starts again from
+ // scratch. When the nearest grace is itself more than the direct-placement limit away from the recorded start, that would warp
+ // again and again. So after a warp in the last two minutes the body is placed directly instead of travelling a second time.
+ static LAST_WARP_NS:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+ let last=LAST_WARP_NS.load(std::sync::atomic::Ordering::Relaxed);
+ if last!=0&&crate::monotonic_ns().saturating_sub(last)<120_000_000_000&&convertible{crate::log_game(&format!("ARRIVAL: already travelled by grace {:.0} s ago; placing the body directly ({far_m:.0} m) instead of warping again",crate::monotonic_ns().saturating_sub(last) as f64/1e9));return;}
  let far=far_m>FAR_DIRECT_M;
  if convertible&&!far&&!arrival::needs_warp(&here,&target){return;}
  crate::log_game(&format!("ARRIVAL: travel needed (convertible={convertible}, distance {far_m:.0} m, limit {FAR_DIRECT_M:.0} m)"));
@@ -398,7 +404,7 @@ fn begin_arrival(s:&mut State,chr:usize){
   None if convertible=>{crate::log_game(&format!("ARRIVAL: no grace found for {}; placing the body directly ({far_m:.0} m)",arrival::block_name(target.block)));}
   None=>{crate::log_game(&format!("ARRIVAL_ERROR: no grace found for {}; cannot travel there",arrival::block_name(target.block)));status("BONE REPLAY ERROR: the replay was recorded where no grace can take you. Travel there first, then play it");reject(s,chr,"no grace to travel to");}
   Some((grace,name))=>match arrival::warp_to_grace(grace){
-   Ok(())=>{s.warped=true;s.arrival=Arrival::Warping{target,since:crate::monotonic_ns(),stable:0};crate::log_game(&format!("ARRIVAL: warping to {name} for {}",arrival::block_name(target.block)));status("BONE REPLAY: travelling to the replay's location...");}
+   Ok(())=>{LAST_WARP_NS.store(crate::monotonic_ns().max(1),std::sync::atomic::Ordering::Relaxed);s.warped=true;s.arrival=Arrival::Warping{target,since:crate::monotonic_ns(),stable:0};crate::log_game(&format!("ARRIVAL: warping to {name} for {}",arrival::block_name(target.block)));status("BONE REPLAY: travelling to the replay's location...");}
    Err(e) if convertible=>{crate::log_game(&format!("ARRIVAL: grace warp unavailable ({e}); placing the body directly ({far_m:.0} m)"));}
    Err(e)=>{crate::log_game(&format!("ARRIVAL_ERROR: grace warp failed: {e}"));status("BONE REPLAY ERROR: could not travel to the replay's location (see log)");reject(s,chr,"grace warp failed");}}}}
 // Each frame while owning: finish a warp once the map has loaded, then confirm the body is on the spot.
