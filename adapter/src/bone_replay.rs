@@ -486,7 +486,7 @@ pub fn tick(group:usize,now:u64){
   // No fade-out near the camera (foliage, trees, rocks, characters): applied as soon as Theater is connected, because objects
   // that are already in the world keep the values they were created with (the owner still saw fading after a late
   // override); areas loaded afterwards use the changed tables. Option bit 64 = off.
-  camera_fade::tick(l.options&64==0&&l.linked!=0);
+  camera_fade::tick(l.options&64==0&&l.linked!=0,now);
   // Update-LOD override (STEP A): on while recording, or while a replay with recorded actors owns the body.
   let want_omission=l.options&4==0&&(s.recording.is_some()||(s.owning&&s.loaded.as_ref().is_some_and(|l|l.actors.is_some())));
   if want_omission&&!omission::engaged(){if let Err(e)=omission::engage(){static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||{crate::log_game(&format!("OMISSION_UNAVAILABLE: {e}"));status("OMISSION: update-level override unavailable (see log); distant actors may be recorded at a reduced rate");});}}
