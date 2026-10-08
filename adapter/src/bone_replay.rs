@@ -645,7 +645,9 @@ pub fn tick(group:usize,now:u64){
    // the effects again, which is how they reappear after a rewind.
    effects::tick(t);
    if s.options&256==0&&effects::ready(){if let Some(loaded)=&s.loaded{let ev=&loaded.world.effects;
-    let jumped=s.fx_t==0||t<s.fx_t||t-s.fx_t>500_000_000;
+    // Pause re-evaluates the same moment and can step back a frame or two: only a real seek (back more than a quarter of a second,
+    // or forward more than half a second) clears the effects.
+    let jumped=s.fx_t==0||(t<s.fx_t&&s.fx_t-t>250_000_000)||(t>s.fx_t&&t-s.fx_t>500_000_000);
     if jumped{effects::release_all();}
     let mut i=if jumped{ev.partition_point(|e|e.time<=t)}else{s.fx_cursor.min(ev.len())};
     if !jumped{let mut made=0;while i<ev.len()&&ev[i].time<=t&&made<16{
