@@ -115,6 +115,7 @@ extern "C" __declspec(dllexport) int __cdecl tm_anti_cheat_state();
 #define TM_OFF_POSE_IMPORTER_SKELETON 0x48     /* importer -> hkaSkeleton */
 #define TM_OFF_HKA_SKELETON_PARENTS 0x20       /* -> int16 parent index per bone */
 #define TM_OFF_HKA_SKELETON_PARENT_COUNT 0x28
+#define TM_OFF_HKA_SKELETON_BONES 0x30         /* -> hkaBone[bone count], 16 bytes each, first field = name (string pointer, low bit is a flag) */
 #define TM_OFF_HKA_SKELETON_BONE_COUNT 0x38
 #define TM_OFF_HKA_SKELETON_REFPOSE_COUNT 0x48
 // Structural guard for the debug flags: +0x530 must hold this callback (RVA) before +0x538 is written.

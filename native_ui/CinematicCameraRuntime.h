@@ -26,6 +26,7 @@ struct View {
  cinematic::EvaluationDebug evaluation;
 };
 View view(bool include_keys=true);
+std::vector<std::string> bone_names();
 void mode(unsigned value);
 void enable(bool value);
 void stop();

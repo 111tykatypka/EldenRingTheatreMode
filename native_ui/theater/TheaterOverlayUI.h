@@ -104,6 +104,9 @@ namespace TheaterUI
         bool inputFocused_=true;
         float sequencerTop_=0,sequencerRight_=0;
         unsigned cameraSelection_ = 0; // selection, not native ownership
+        float cameraModesX_=-1,cameraModesY_=-1,cameraModesScale_=1; // movable / scalable camera mode widget (x < 0: default place)
+        bool cameraModesDirty_=false;
+        int boneQuickPick_=-1;bool cameraModesDragging_=false;
         bool clearDollyDialog_ = false;
         bool showDollyMarkers_=true,enableDollyVisibilityKey_=true,cameraMarkerClick_=false;
         bool showDollyCurves_=true,curveDragging_=false,cameraSettingsDirty_=false;

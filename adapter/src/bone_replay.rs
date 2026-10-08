@@ -153,8 +153,28 @@ fn pose_arrays(chr:usize)->Option<(usize,usize)>{
  (array(local)&&array(model)).then_some((local,model))}
 fn pose(p:usize,bytes:usize)->&'static [u8]{unsafe{std::slice::from_raw_parts(p as *const u8,bytes)}}
 // Read-only publication on Draw_Pre; no retained game pointers cross the FFI.
+/// Tells the overlay the names of the player skeleton's bones (once per skeleton) so the bone camera can offer a named list.
+fn publish_bone_names(chr:usize){
+ static LAST:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(0);
+ unsafe extern "C"{fn tm_camera_bone_names(names:*const *const std::ffi::c_char,count:i32);}
+ let importer=read_ptr(chr+profile::OFF_CHRINS_POSE_IMPORTER);if importer<0x10000{return;}
+ let skel=read_ptr(importer+profile::OFF_POSE_IMPORTER_SKELETON);if skel<0x10000||LAST.load(std::sync::atomic::Ordering::Relaxed)==skel{return;}
+ let count=read_ptr(skel+profile::OFF_HKA_SKELETON_BONE_COUNT) as u32 as usize;let bones=read_ptr(skel+profile::OFF_HKA_SKELETON_BONES);
+ if bones<0x10000||count==0||count>1024{return;}
+ let mut names:Vec<std::ffi::CString>=Vec::with_capacity(count);
+ for i in 0..count{
+  let p=read_ptr(bones+i*16)&!1usize;let mut raw=[0u8;64];
+  let name=if p>0x10000&&crate::companions::copy(p,&mut raw){let end=raw.iter().position(|b|*b==0).unwrap_or(raw.len());let s=&raw[..end];if !s.is_empty()&&s.iter().all(|b|(0x20..0x7F).contains(b)){String::from_utf8_lossy(s).into_owned()}else{String::new()}}else{String::new()};
+  names.push(std::ffi::CString::new(if name.is_empty(){format!("bone {i}")}else{name}).unwrap_or_default());}
+ let pointers:Vec<*const std::ffi::c_char>=names.iter().map(|n|n.as_ptr()).collect();
+ unsafe{tm_camera_bone_names(pointers.as_ptr(),count as i32)};
+ LAST.store(skel,std::sync::atomic::Ordering::Relaxed);
+ let preview:Vec<String>=names.iter().take(12).map(|n|n.to_string_lossy().into_owned()).collect();
+ crate::log_game(&format!("BONE_CAMERA: {count} bone names published, first: {preview:?}"));
+}
 pub fn camera_bone_sample(){
  unsafe extern "C"{fn tm_camera_bone_index()->i32;fn tm_camera_bone_publish(root:*const f32,qs:*const f32);}
+ if let Some(chr)=player_chr(){publish_bone_names(chr);}
  let index=unsafe{tm_camera_bone_index()};if index<0{return;}
  let sample=(||{let chr=player_chr()?;let count=crate::actors::bone_count(chr)?;if index as usize>=count{return None;}
   let (_,model)=pose_arrays(chr)?;let mut root=[0u8;64];let mut qs=[0u8;48];

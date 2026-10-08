@@ -29,13 +29,31 @@
 
 namespace TheaterUI
 {
+namespace
+{
+    // Index of the bone whose name equals `key` (ignoring case), else the first one containing it; -1 if none.
+    int FindBone(const std::vector<std::string>& names, const char* key){
+        auto lower=[](std::string s){for(auto& c:s)c=(char)std::tolower((unsigned char)c);return s;};
+        const std::string k=lower(key);
+        for(int i=0;i<(int)names.size();++i)if(lower(names[i])==k)return i;
+        for(int i=0;i<(int)names.size();++i)if(lower(names[i]).find(k)!=std::string::npos)return i;
+        return -1;
+    }
+    // The bone camera needs a bone; when none was picked yet use the head.
+    bool AutoSelectBone(){
+        const auto names=camera_runtime::bone_names();const int head=FindBone(names,"Head");
+        if(head<0)return false;camera_runtime::bone(head,{0,0,-1});return true;
+    }
+}
 void Overlay::CameraHotkey(theater_hotkeys::Action action)
 {
     if(action==theater_hotkeys::Action::PlayDollyPath){playDollyRequested_=true;return;}
     if(action==theater_hotkeys::Action::ToggleDollyControls){if(enableDollyVisibilityKey_){showDollyMarkers_=!showDollyMarkers_;gizmoDragging_=false;SaveSettings();}return;}
     ui_.activeTool=Tool::Camera;ui_.layout.panelOpen=true;
     if(action==theater_hotkeys::Action::CycleCamera){
-        const auto mode=camera_runtime::view(false).mode;cameraSelection_=mode>=2?0:mode+1;camera_runtime::mode(cameraSelection_);
+        const auto cam=camera_runtime::view(false);cameraSelection_=cam.mode>=3?0:cam.mode+1;
+        if(cameraSelection_==3&&cam.bone_index<0&&!AutoSelectBone())cameraSelection_=0; // no bone list yet: skip the bone camera
+        camera_runtime::mode(cameraSelection_);
         camera_runtime::enable(cameraSelection_!=0);
     } else if(action==theater_hotkeys::Action::AddDollyKey){
         camera_runtime::add_key();
@@ -163,7 +181,10 @@ void Overlay::LoadSettings()
     while (in >> key >> value)
     {
         if (!std::isfinite(value)) continue;
-        if (key == "dolly_markers") showDollyMarkers_=value!=0;
+        if (key == "camera_modes_x") cameraModesX_=value;
+        else if (key == "camera_modes_y") cameraModesY_=value;
+        else if (key == "camera_modes_scale") cameraModesScale_=std::clamp(value,.5f,3.f);
+        else if (key == "dolly_markers") showDollyMarkers_=value!=0;
         else if(key=="light_markers") showLightMarkers_=value!=0;
         else if(key=="dolly_visibility_key") enableDollyVisibilityKey_=value!=0;
         else if(key=="curve_fraction") curveFraction_=std::clamp(value,.15f,.85f);
@@ -200,7 +221,7 @@ void Overlay::LoadSettings()
         else if (key == "ui_scale") ui_.layout.uiScaleUser = std::clamp(value, 0.75f, 1.5f);
         else if (key == "panel_open") ui_.layout.panelOpen = value != 0;
         else if (key == "particle_markers") showParticleMarkers_=value!=0;
-        else if (key == "tool" && value >= 0 && value <= (float)Tool::Particles) ui_.activeTool = (Tool)(int)value;
+        else if (key == "tool" && value >= 0 && value <= (float)Tool::Bones) ui_.activeTool = (Tool)(int)value;
         else if (key == "show_tools") showTools_ = value != 0;
         else if (key == "show_timeline") showTimeline_ = value != 0;
         else if (key == "show_event_log") showEventLog_ = value != 0;
@@ -236,6 +257,7 @@ void Overlay::SaveSettings() const
     out << "high_quality_lods " << effects.high_quality_lods << "\n";
     out << "light_markers " << showLightMarkers_ << "\n";
     out << "particle_markers " << showParticleMarkers_ << "\n";
+    out << "camera_modes_x " << cameraModesX_ << "\ncamera_modes_y " << cameraModesY_ << "\ncamera_modes_scale " << cameraModesScale_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
         << "dolly_visibility_key " << enableDollyVisibilityKey_ << "\n"
         << "dolly_curves " << showDollyCurves_ << "\n"
@@ -475,27 +497,51 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
     const bool shown=ui_.visibility==UiVisibility::Shown;
     const auto pictureMin=shown?ui_.rects.gameMin:ImVec2(0,0),pictureMax=shown?ui_.rects.gameMax:ImGui::GetIO().DisplaySize;
     if(pictureMax.x<=pictureMin.x||pictureMax.y<=pictureMin.y)return;
-    const float s=std::min(ui_.rects.uiScale,(pictureMax.x-pictureMin.x)/280.f);auto camera=camera_runtime::view(false);
-    ImGui::SetNextWindowPos(ImVec2((pictureMin.x+pictureMax.x)*.5f,pictureMin.y+Px(8,s)),ImGuiCond_Always,ImVec2(.5f,0));
+    const float s=std::min(ui_.rects.uiScale,(pictureMax.x-pictureMin.x)/340.f)*cameraModesScale_;auto camera=camera_runtime::view(false);
+    // Movable and scalable: drag it by its grip strip or any empty part, Ctrl + mouse wheel (or right-click) changes its size.
+    if(cameraModesX_>=0&&!cameraModesDragging_)ImGui::SetNextWindowPos(ImVec2(cameraModesX_,cameraModesY_),ImGuiCond_Always);
+    else if(cameraModesX_<0)ImGui::SetNextWindowPos(ImVec2((pictureMin.x+pictureMax.x)*.5f,pictureMin.y+Px(8,s)),ImGuiCond_Always,ImVec2(.5f,0));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0,0),ImVec2(pictureMax.x-pictureMin.x,std::max(1.f,pictureMax.y-pictureMin.y-Px(8,s))));
-    ImGuiWindowFlags flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoMove;
+    ImGuiWindowFlags flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus;
     if(!shown)flags|=ImGuiWindowFlags_NoInputs;
     ImGui::PushStyleColor(ImGuiCol_WindowBg,Color::OverlayBg.Alpha(235).Vec4());
     const bool visible=ImGui::Begin("##camera-modes",nullptr,flags);
     if(visible){
-        const char*names[]={"Default","Free","Dolly"};
-        for(int mode=0;mode<3;++mode){if(mode)ImGui::SameLine();ImGui::PushID(mode);
+        if(shown){
+            // Grip strip: empty space the window can be dragged by.
+            const ImVec2 g=ImGui::GetCursorScreenPos();const float gw=Px(72,s)*4+ImGui::GetStyle().ItemSpacing.x*3;
+            ImGui::Dummy(ImVec2(gw,Px(9,s)));
+            auto*gd=ImGui::GetWindowDrawList();for(int d=-3;d<=3;++d)gd->AddCircleFilled(ImVec2(g.x+gw*.5f+d*Px(7,s),g.y+Px(4,s)),Px(1.6f,s),Color::TextSecondary.U32());
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("Drag to move. Ctrl + mouse wheel or right-click to resize.");
+            const auto&io=ImGui::GetIO();
+            if(ImGui::IsWindowHovered()&&io.KeyCtrl&&io.MouseWheel!=0){cameraModesScale_=std::clamp(cameraModesScale_+io.MouseWheel*.1f,.5f,3.f);cameraModesDirty_=true;}
+            if(ImGui::BeginPopupContextWindow("##camera-modes-menu")){
+                if(ImGui::SliderFloat("Size",&cameraModesScale_,.5f,3.f,"%.2f"))cameraModesDirty_=true;
+                if(ImGui::MenuItem("Reset position")){cameraModesX_=-1;cameraModesY_=-1;cameraModesDirty_=true;}
+                ImGui::EndPopup();}
+            const bool dragNow=ImGui::IsWindowHovered()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left,3.f)&&!ImGui::IsAnyItemActive();
+            if(dragNow)cameraModesDragging_=true;
+            if(cameraModesDragging_){const ImVec2 p=ImGui::GetWindowPos();cameraModesX_=p.x;cameraModesY_=p.y;
+                if(!ImGui::IsMouseDown(ImGuiMouseButton_Left)){cameraModesDragging_=false;cameraModesDirty_=true;}}
+            if(cameraModesDirty_&&!cameraModesDragging_){cameraModesDirty_=false;SaveSettings();}
+        }
+        const char*names[]={"Default","Free","Dolly","Bone"};
+        for(int mode=0;mode<4;++mode){if(mode)ImGui::SameLine();ImGui::PushID(mode);
             ImVec2 start=ImGui::GetCursorScreenPos();const float w=Px(72,s),h=Px(48,s);
-            if(ImGui::InvisibleButton("mode",ImVec2(w,h))&&shown){camera_runtime::mode(mode);camera_runtime::enable(mode!=0);}
+            if(ImGui::InvisibleButton("mode",ImVec2(w,h))&&shown){if(mode==3&&camera.bone_index<0)AutoSelectBone();camera_runtime::mode(mode);camera_runtime::enable(mode!=0);}
             auto*draw=ImGui::GetWindowDrawList();const bool active=camera.mode==unsigned(mode);
             draw->AddRectFilled(start,ImVec2(start.x+w,start.y+h),(active?Color::SelectedBg:Color::ChildBg).U32(),Px(5,s));
             const ImU32 color=(active?Color::AccentBlue:Color::TextPrimary).U32();float x=start.x+w*.5f,y=start.y+Px(15,s);
             if(mode==0){draw->AddCircle(ImVec2(x,y-Px(5,s)),Px(4,s),color);draw->AddLine(ImVec2(x,y),ImVec2(x,y+Px(8,s)),color,2);draw->AddLine(ImVec2(x-Px(7,s),y+Px(4,s)),ImVec2(x+Px(7,s),y+Px(4,s)),color,2);}
+            else if(mode==3){ // bone with a camera dot
+                draw->AddLine(ImVec2(x-Px(9,s),y+Px(6,s)),ImVec2(x+Px(7,s),y-Px(6,s)),color,2);
+                draw->AddCircle(ImVec2(x-Px(10,s),y+Px(7,s)),Px(3,s),color,0,2);draw->AddCircle(ImVec2(x+Px(9,s),y-Px(8,s)),Px(3,s),color,0,2);
+                draw->AddCircleFilled(ImVec2(x+Px(9,s),y+Px(7,s)),Px(2.5f,s),color);}
             else {draw->AddRect(ImVec2(x-Px(10,s),y-Px(5,s)),ImVec2(x+Px(3,s),y+Px(5,s)),color,2);
                 draw->AddTriangle(ImVec2(x+Px(3,s),y),ImVec2(x+Px(11,s),y-Px(6,s)),ImVec2(x+Px(11,s),y+Px(6,s)),color,2);
                 if(mode==2){draw->AddLine(ImVec2(x-Px(12,s),y+Px(9,s)),ImVec2(x+Px(12,s),y+Px(9,s)),color);for(int j=-1;j<=1;++j)draw->AddCircleFilled(ImVec2(x+j*Px(10,s),y+Px(9,s)),Px(2,s),color);}}
             const auto label=ImGui::CalcTextSize(names[mode]);draw->AddText(ImVec2(x-label.x*.5f,start.y+h-label.y-Px(3,s)),Color::TextPrimary.U32(),names[mode]);
-            if(shown&&ImGui::IsItemHovered())ImGui::SetTooltip("%s camera. %s",names[mode],mode==2?"Author keys: move and capture with K. Play path: follow recorded keys at ReplayTime.":mode==1?"Move independently from the player; mouse wheel adjusts FOV.":"Native player camera; Theater releases camera ownership.");
+            if(shown&&ImGui::IsItemHovered())ImGui::SetTooltip("%s camera. %s",names[mode],mode==3?"Attached to the bone chosen in the Bones tab. Move and turn like the free camera; it follows the bone.":mode==2?"Author keys: move and capture with K. Play path: follow recorded keys at ReplayTime.":mode==1?"Move independently from the player; mouse wheel adjusts FOV.":"Native player camera; Theater releases camera ownership.");
             ImGui::PopID();
         }
         const auto cycleKey=KeyName(theater_hotkeys::Action::CycleCamera);
@@ -796,7 +842,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     struct Item { Tool tool; std::uint16_t glyph; Str label; bool available; };
     const Item top[] = {
         { Tool::Scene, Glyph::Scene, Str::Scene, true }, { Tool::Camera, Glyph::Camera, Str::Camera, true },
-        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Lights, Glyph::Look, Str::Lights, true }, { Tool::Particles, Glyph::Globe, Str::Particles, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
+        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Lights, Glyph::Look, Str::Lights, true }, { Tool::Particles, Glyph::Globe, Str::Particles, true }, { Tool::Bones, Glyph::Scene, Str::Bones, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
         { Tool::Export, Glyph::Export, Str::Export, true } };
     const Item bottom[] = { { Tool::Debug, Glyph::Debug, Str::Debug, true }, { Tool::Settings, Glyph::Settings, Str::Settings, true } };
 
@@ -872,8 +918,8 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     const auto& snap = f.snapshot;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(Space::LG, s), Px(Space::MD, s)));
     // The title bar shows the tool name and is the grab area; the window id stays the same per tool.
-    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather, Str::Lights, Str::Particles };
-    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 9)]), ui_.rects.panelMin, ui_.rects.panelMax,
+    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather, Str::Lights, Str::Particles, Str::Bones };
+    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 10)]), ui_.rects.panelMin, ui_.rects.panelMax,
         ImVec2(Px(260, s), Px(320, s)), &ui_.layout.panelOpen);
     if (!visible) { ImGui::End(); ImGui::PopStyleVar(); return; }
     // Hiding the log returns its space to the independently scrolling tool.
@@ -1250,6 +1296,50 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         if(ImGui::Button("Save light setup"))light_editor::save();ImGui::SameLine();if(ImGui::Button("Load setup")){light_editor::load();viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}
         if(!editor.status.empty())ImGui::TextWrapped("%s",editor.status.c_str());
         ImGui::TextDisabled("Shadow requests are experimental. Cone softness unavailable.");
+        break;
+    }
+    case Tool::Bones:
+    {
+        section(T(Str::BoneCamera));
+        const auto cam=camera_runtime::view(false);const auto names=camera_runtime::bone_names();
+        ImGui::TextWrapped("%s",names.empty()?"Bone names are not available yet. Load into the world with your character; the list fills in by itself.":"Pick a bone and the camera attaches to it. It moves and turns like the free camera but follows the bone. F3 cycles Default, Free, Dolly and Bone camera.");
+        ImGui::TextDisabled("Bone camera: %s | bone: %s | source: %s",cam.mode==3&&cam.enabled?"ACTIVE":"not active",cam.bone_index>=0&&cam.bone_index<(int)names.size()?names[cam.bone_index].c_str():"none",cam.bone_available?"available":"unavailable");
+        auto attach=[&](int index){camera_runtime::bone(index,cam.bone_offset);camera_runtime::mode(3);camera_runtime::enable(true);};
+        const float half=(ImGui::GetContentRegionAvail().x-ImGui::GetStyle().ItemSpacing.x)*.5f;
+        if(ImGui::Button("Attach to selected bone",ImVec2(half,0))){if(cam.bone_index>=0||AutoSelectBone()){camera_runtime::mode(3);camera_runtime::enable(true);}}
+        ImGui::SameLine();
+        if(ImGui::Button("Detach (Default)",ImVec2(-FLT_MIN,0))){camera_runtime::mode(0);camera_runtime::enable(false);}
+        ImGui::Separator();
+        ImGui::TextUnformatted("Quick picks");
+        const struct{const char*label;const char*keys[3];} quick[]={{"Head",{"Head"}},{"Neck",{"Neck"}},{"Spine",{"Spine2","Spine1","Spine"}},{"Pelvis",{"Pelvis"}},{"Left hand",{"L_Hand"}},{"Right hand",{"R_Hand"}},{"Left weapon",{"L_Weapon","L_Hand"}},{"Right weapon",{"R_Weapon","R_Hand"}},{"Left foot",{"L_Foot"}},{"Right foot",{"R_Foot"}}};
+        int column=0;
+        for(const auto&q:quick){
+            int found=-1;for(const char*key:q.keys){if(!key)break;found=FindBone(names,key);if(found>=0)break;}
+            if(column)ImGui::SameLine();
+            ImGui::BeginDisabled(found<0);
+            if(ImGui::Button(q.label,ImVec2(half,0)))attach(found);
+            ImGui::EndDisabled();
+            column=1-column;
+        }
+        ImGui::Separator();
+        ImGui::TextUnformatted("Camera position on the bone");
+        double offset[3]={cam.bone_offset[0],cam.bone_offset[1],cam.bone_offset[2]};bool offsetChanged=false;
+        const char*offsetLabels[]={"Right of bone","Above bone","In front of bone"};
+        for(int i=0;i<3;++i)offsetChanged|=number(offsetLabels[i],&offset[i],.01,.1,"%.3f");
+        if(offsetChanged&&cam.bone_index>=0)camera_runtime::bone(cam.bone_index,{offset[0],offset[1],offset[2]});
+        if(ImGui::Button("Reset camera on bone",ImVec2(-FLT_MIN,0))&&cam.bone_index>=0)camera_runtime::bone(cam.bone_index,{0,0,-1});
+        ImGui::Separator();
+        static char boneFilter[48]="";
+        ImGui::SetNextItemWidth(-FLT_MIN);ImGui::InputTextWithHint("##bone-filter","Filter bones...",boneFilter,sizeof(boneFilter));
+        std::string needle=boneFilter;for(auto&c:needle)c=(char)std::tolower((unsigned char)c);
+        if(ImGui::BeginChild("##bone-list",ImVec2(0,std::max(160.f,ImGui::GetContentRegionAvail().y)),true)){
+            for(int i=0;i<(int)names.size();++i){
+                if(!needle.empty()){std::string lower=names[i];for(auto&c:lower)c=(char)std::tolower((unsigned char)c);if(lower.find(needle)==std::string::npos)continue;}
+                char row[96];snprintf(row,sizeof(row),"%3d  %s",i,names[i].c_str());
+                if(ImGui::Selectable(row,cam.bone_index==i))attach(i);
+            }
+        }
+        ImGui::EndChild();
         break;
     }
     case Tool::Particles:

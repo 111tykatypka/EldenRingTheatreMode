@@ -60,6 +60,10 @@ double fov_target=60;
 cinematic::Vec rotation_pending{};
 cinematic::Vec velocity{};
 std::atomic<int> selected_bone=-1;
+// Bone camera: the camera sits at a fixed place relative to the chosen bone (position in the bone's axes, orientation relative to
+// the bone) and is steered with the ordinary free-camera controls, so it follows the bone while still being movable and turnable.
+cinematic::Vec bone_local_pos{0,0,-1};cinematic::Quat bone_local_rot{0,0,0,1};bool bone_local_init=false;
+std::vector<std::string> bone_name_list;
 std::optional<cinematic::State> bone_pose;
 std::uint64_t bone_time=0;
 bool read(std::uintptr_t address,void*out,std::size_t bytes){SIZE_T n=0;return address>=0x10000&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes;}
@@ -147,8 +151,16 @@ bool update(void* output,void* source){
   }
   else if(effective_mode==3){
    if(!bone_pose||now<bone_time||now-bone_time>250000000ULL){release("Bone camera target unavailable or stale; native camera restored");return false;}
-   float basis[16];encode(*bone_pose,basis);state.pose.orientation=bone_pose->orientation;state.pose.position=bone_pose->position;
-   for(int i=0;i<3;++i)for(int j=0;j<3;++j)state.pose.position[i]+=basis[j*4+i]*state.bone_offset[j];
+   const auto bp=*bone_pose;float basis[16];encode(bp,basis);
+   if(!bone_local_init){bone_local_pos=state.bone_offset;bone_local_rot={0,0,0,1};bone_local_init=true;}
+   // 1. place the camera from the bone and the stored local pose; 2. let the free-camera controls move/turn it in the world;
+   // 3. store the result back relative to the bone, so the next frame follows the bone's new transform.
+   {cinematic::Vec p=bp.position;for(int i=0;i<3;++i)for(int j=0;j<3;++j)p[i]+=basis[j*4+i]*bone_local_pos[j];
+    state.pose.position=p;if(auto o=cinematic::normalized(product(bp.orientation,bone_local_rot)))state.pose.orientation=*o;}
+   move(dt);
+   {cinematic::Vec d=cinematic::sub(state.pose.position,bp.position);for(int j=0;j<3;++j)bone_local_pos[j]=basis[j*4]*d[0]+basis[j*4+1]*d[1]+basis[j*4+2]*d[2];
+    if(auto r=cinematic::normalized(product(cinematic::conjugate(bp.orientation),state.pose.orientation)))bone_local_rot=*r;
+    state.bone_offset=bone_local_pos;}
   }
   else if(!track.keys().empty()&&keys_replay_path!=replay_path){release("Dolly keys belong to another replay; clear them before creating a new path");return false;}
   else if(auto value=cinematic::dolly_evaluate(track,time_at(now),state.dolly_smoothing_seconds,[](cinematic::TargetType type,std::uint64_t,std::uint64_t time)->std::optional<cinematic::Vec>{
@@ -186,6 +198,7 @@ bool update(void* output,void* source){
 
 }
 View view(bool include_keys){std::lock_guard lock(mutex);auto copy=state;copy.track_current=keys_replay_path==replay_path&&!track.keys().empty();copy.key_count=track.keys().size();if(include_keys){copy.keys=track.keys();copy.cuts=cut_track.cuts();}if(faulted){copy.enabled=false;copy.writing=false;copy.status="Camera backend faulted; overrides disabled until process restart";}return copy;}
+std::vector<std::string> bone_names(){std::lock_guard lock(mutex);return bone_name_list;}
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot&slot){return decode(slot);}
 void encode_pose(const cinematic::State&pose,float*matrix){encode(pose,matrix);}
 void mode(unsigned value){std::lock_guard lock(mutex);state.mode=value%4;state.cuts_enabled=false;if(state.mode==2)state.dolly_preview=false;rotation_pending={};mouse_x=0;mouse_y=0;velocity={};fov_target=state.pose.fov_degrees;fov_wheel=0;state.writing=false;input_owned=false;free_input=false;probe_until=0;if(state.mode==0)reset=true;state.status=state.enabled?"Camera mode changed":"Camera selected; enable experimental writes to apply";}
@@ -307,7 +320,7 @@ void preview(bool enabled){std::lock_guard lock(mutex);
  state.dolly_preview=enabled;rotation_pending={};velocity={};mouse_x=0;mouse_y=0;
  state.status=enabled?"Dolly path preview at ReplayTime":"Dolly authoring: move camera and capture keys";
 }
-void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
+void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){bone_local_init=false;state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
 void dolly_smoothing(double seconds){std::lock_guard lock(mutex);if(std::isfinite(seconds)&&seconds>=0&&seconds<=2)state.dolly_smoothing_seconds=seconds;}
 void high_quality_lods(bool enabled){std::lock_guard lock(mutex);state.high_quality_lods=enabled;}
 void close_up(bool prevent,double near_plane){std::lock_guard lock(mutex);if(std::isfinite(near_plane)&&near_plane>=.001&&near_plane<=1){state.prevent_asset_fade=prevent;state.near_plane=near_plane;}}
@@ -378,3 +391,9 @@ extern "C" int tm_camera_runtime_diagnostic(char*out,std::size_t size){
  const auto writes=camera_runtime::write_calls.load(),window_calls=camera_runtime::interval_calls.exchange(0),window_cost=camera_runtime::interval_cost_ns.exchange(0);
  snprintf(out,size,"CAMERA_RUNTIME backend=C7_local_store hook=%u observed=%u enabled=%u writing=%u mode=%u keys=%zu position=(%.3f,%.3f,%.3f) fov_deg=%.3f callbacks=%llu lock_skips=%llu mean_hook_us=%.2f window_callbacks=%llu window_mean_hook_us=%.2f max_hook_us=%.2f mean_local_read_us=%.2f mean_local_write_us=%.2f status=%s",s.hook_ready,s.observed,s.enabled,s.writing,s.mode,camera_runtime::track.keys().size(),s.pose.position[0],s.pose.position[1],s.pose.position[2],s.pose.fov_degrees,static_cast<unsigned long long>(calls),static_cast<unsigned long long>(camera_runtime::lock_skips.load()),calls?double(camera_runtime::hook_cost_ns.load())/calls/1000:0,static_cast<unsigned long long>(window_calls),window_calls?double(window_cost)/window_calls/1000:0,double(camera_runtime::hook_max_ns.load())/1000,calls?double(camera_runtime::read_cost_ns.load())/calls/1000:0,writes?double(camera_runtime::write_cost_ns.load())/writes/1000:0,s.status.c_str());return 1;
 }
+
+// Names of the player skeleton's bones, published by the adapter (one string per bone, index = bone index).
+extern "C" void tm_camera_bone_names(const char*const*names,int count){
+ std::lock_guard lock(camera_runtime::mutex);camera_runtime::bone_name_list.clear();
+ if(!names||count<=0||count>1024)return;
+ for(int i=0;i<count;++i)camera_runtime::bone_name_list.emplace_back(names[i]?names[i]:"");}
