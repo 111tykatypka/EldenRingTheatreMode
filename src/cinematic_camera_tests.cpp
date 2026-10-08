@@ -9,6 +9,10 @@
 #include <limits>
 void check(bool ok){if(!ok)throw std::runtime_error("cinematic check failed");}
 int main(){using namespace cinematic;
+ {check(wheel_fov(60,1)==57);check(wheel_fov(60,-1)==63);check(wheel_fov(60,1,.1)==59.7);
+  check(wheel_fov(2,100)==1);check(wheel_fov(177,-100)==178);
+  double a=60,b=60;for(int i=0;i<60;++i)a=smooth_fov(a,30,1./60);for(int i=0;i<120;++i)b=smooth_fov(b,30,1./120);
+  check(std::abs(a-b)<1e-10);check(a>30&&a<31);check(smooth_fov(60,30,0)==60);check(smooth_fov(60,NAN,.01)==60);}
  // Upright mouse look must not accumulate roll while yawing at a nonzero pitch.
  {Quat q{0,0,0,1};q=*mouse_look(q,0,.6,0);
   for(int i=0;i<5000;++i){q=*mouse_look(q,.003,(i%2?.001:-.001),0);

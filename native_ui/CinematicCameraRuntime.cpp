@@ -41,6 +41,9 @@ bool playing=false,linked=false,reset=true;
 double speed=1;
 std::string replay_path,keys_replay_path;
 std::uintptr_t owner=0,destination=0;
+std::atomic<double> fov_wheel{0};
+std::atomic_bool free_input{false};
+double fov_target=60;
 cinematic::Vec velocity{};
 std::atomic<int> selected_bone=-1;
 std::optional<cinematic::State> bone_pose;
@@ -51,7 +54,7 @@ std::uint64_t time_at(std::uint64_t now){
  if(playing&&now>=anchor_ns){auto delta=static_cast<long double>(now-anchor_ns)*speed;auto remaining=duration_ns>time?duration_ns-time:0;time+=static_cast<std::uint64_t>(std::min<long double>(delta,remaining));}
  return std::min(time,duration_ns);
 }
-void release(const char*reason){state.enabled=false;state.writing=false;input_owned=false;reset=true;probe_until=0;mouse_x=0;mouse_y=0;velocity={};state.status=reason;}
+void release(const char*reason){state.enabled=false;state.writing=false;input_owned=false;free_input=false;reset=true;probe_until=0;mouse_x=0;mouse_y=0;fov_wheel=0;velocity={};state.status=reason;}
 // Matrix memory contains right/up/forward basis vectors, then position.
 std::optional<cinematic::State> decode(const theater_camera::Slot&c){
  if(!theater_camera::valid(c)||c.fov>=3.14159265f||std::abs(c.matrix[15]-1)>0.01f)return {};
@@ -75,7 +78,7 @@ cinematic::Quat product(cinematic::Quat a,cinematic::Quat b){return {a[3]*b[0]+a
 bool down(int key){return (GetAsyncKeyState(key)&0x8000)!=0;}
 bool held(theater_hotkeys::Action action){return down(theater_hotkeys::Key(action));}
 void move(double dt){
- if(ui_visible){mouse_x=0;mouse_y=0;velocity={};return;}
+ if(ui_visible){mouse_x=0;mouse_y=0;fov_wheel=0;velocity={};return;}
  using A=theater_hotkeys::Action;
  const double yaw=(int(held(A::YawRight))-int(held(A::YawLeft)))*dt+std::clamp(mouse_x.exchange(0)*state.mouse_sensitivity,-.25,.25);
  const double pitch=(int(held(A::PitchDown))-int(held(A::PitchUp)))*dt+std::clamp(mouse_y.exchange(0)*state.mouse_sensitivity,-.25,.25);
@@ -91,8 +94,10 @@ void move(double dt){
  for(int i=0;i<3;++i)delta[i]=m[i]*right+m[8+i]*forward;delta[1]+=up;
  double n=cinematic::length(delta);if(n>1)delta=cinematic::mul(delta,1/n);
  auto desired=cinematic::mul(delta,state.movement_speed*(held(A::Fast)?5:held(A::Slow)?.1:1));
- state.pose.fov_degrees=std::clamp(state.pose.fov_degrees+(int(held(A::FovUp))-int(held(A::FovDown)))*20*dt,1.,178.);
- if(held(A::ResetFov))state.pose.fov_degrees=60;
+ fov_target=cinematic::wheel_fov(fov_target,fov_wheel.exchange(0),held(A::Slow)?.1:held(A::Fast)?.25:1.);
+ fov_target=std::clamp(fov_target+(int(held(A::FovUp))-int(held(A::FovDown)))*20*dt,1.,178.);
+ if(held(A::ResetFov))fov_target=state.pose.fov_degrees=60;
+ state.pose.fov_degrees=cinematic::smooth_fov(state.pose.fov_degrees,fov_target,dt);
  static bool faster=false,slower=false;bool fastNow=held(A::SpeedUp),slowNow=held(A::SpeedDown);
  if(fastNow&&!faster)state.movement_speed=std::min(state.movement_speed*1.25,1e6);if(slowNow&&!slower)state.movement_speed=std::max(state.movement_speed/1.25,1e-6);faster=fastNow;slower=slowNow;
  velocity=cinematic::mix(velocity,desired,state.smoothing_seconds>0?1-std::exp(-dt/state.smoothing_seconds):1);
@@ -107,7 +112,7 @@ bool update(void* output,void* source){
  auto pose=decode(native);if(!pose){state.observed=false;release("Invalid matrix/FOV; native control restored");return false;}
  state.observed=true;state.timestamp_ns=now;
  auto effective_mode=state.cuts_enabled?static_cast<unsigned>(cut_track.evaluate(time_at(now))):state.mode;
- if(!state.enabled||effective_mode==0){state.pose=*pose;state.writing=false;input_owned=false;reset=true;last_tick=now;return false;}
+ if(!state.enabled||effective_mode==0){state.pose=*pose;state.writing=false;input_owned=false;free_input=false;reset=true;last_tick=now;return false;}
  // RegisterHotKey can route F6 to the host instead of the game window. Poll the
  // shared emergency key here too, before any camera write.
  if(down(theater_hotkeys::Key(theater_hotkeys::Action::StopRecording))){release("Emergency Stop key; native camera control restored");state.mode=0;return false;}
@@ -115,7 +120,7 @@ bool update(void* output,void* source){
  auto focused=GetForegroundWindow();auto game=game_window.load();DWORD pid=0;GetWindowThreadProcessId(focused,&pid);
  if(!game||!focused||pid!=GetCurrentProcessId()||GetAncestor(focused,GA_ROOT)!=GetAncestor(game,GA_ROOT)){release("Game focus lost; native control restored");return false;}
  if(probe_until&&now>=probe_until){release("Two-second camera probe finished; native control restored");return false;}
- if(reset){owner=reinterpret_cast<std::uintptr_t>(source);destination=out;state.pose=*pose;if(probe_until)state.pose.position[0]+=.25;reset=false;last_tick=now;}
+ if(reset){owner=reinterpret_cast<std::uintptr_t>(source);destination=out;state.pose=*pose;fov_target=pose->fov_degrees;fov_wheel=0;if(probe_until)state.pose.position[0]+=.25;reset=false;last_tick=now;}
  if(owner!=reinterpret_cast<std::uintptr_t>(source)||destination!=out){release("Camera generation changed; native control restored");return false;}
  double dt=std::min(double(now-last_tick)/1e9,.05);last_tick=now;
  if(!probe_until){
@@ -144,7 +149,7 @@ bool update(void* output,void* source){
  auto write_start=clock_now();bool written=camera_local_write(output,matrix,fov);write_cost_ns.fetch_add(clock_now()-write_start,std::memory_order_relaxed);++write_calls;
  if(!written){release("Camera write failed; native control restored on next native copy");return false;}
  if(!state.writing)state.status=probe_until?"Two-second offset probe active":"Experimental camera override active (runtime unverified)";
- state.writing=true;input_owned=true;
+ state.writing=true;input_owned=true;free_input=effective_mode==1&&!probe_until;
  return true;
 }
 
@@ -152,7 +157,7 @@ bool update(void* output,void* source){
 View view(){std::lock_guard lock(mutex);auto copy=state;copy.keys=track.keys();copy.cuts=cut_track.cuts();if(faulted){copy.enabled=false;copy.writing=false;copy.status="Camera backend faulted; overrides disabled until process restart";}return copy;}
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot&slot){return decode(slot);}
 void encode_pose(const cinematic::State&pose,float*matrix){encode(pose,matrix);}
-void mode(unsigned value){std::lock_guard lock(mutex);state.mode=value%4;state.writing=false;input_owned=false;probe_until=0;if(state.mode==0)reset=true;state.status=state.enabled?"Camera mode changed":"Camera selected; enable experimental writes to apply";}
+void mode(unsigned value){std::lock_guard lock(mutex);state.mode=value%4;fov_target=state.pose.fov_degrees;fov_wheel=0;state.writing=false;input_owned=false;free_input=false;probe_until=0;if(state.mode==0)reset=true;state.status=state.enabled?"Camera mode changed":"Camera selected; enable experimental writes to apply";}
 void enable(bool value){std::lock_guard lock(mutex);if(!value){release("Camera overrides disabled; native control restored");return;}if(faulted||!state.hook_ready||!state.observed||clock_now()-state.timestamp_ns>500000000ULL||!game_allowed||!linked){release("Cannot arm: fresh camera, offline player and host required; backend must not be faulted");return;}
  if(state.mode==2&&(track.keys().empty()||keys_replay_path!=replay_path)){release("Capture or load Dolly keys for this replay before selecting Dolly");return;}
  if(state.mode==3&&(selected_bone<0||!bone_pose||clock_now()-bone_time>250000000ULL)){release("Select an available player bone before selecting Bone camera");return;}
@@ -210,7 +215,8 @@ bool owns_input(){return input_owned.load();}
 void overlay_visible(bool visible){ui_visible=visible;}
 void window(void* hwnd){game_window=static_cast<HWND>(hwnd);}
 void mouse_delta(long x,long y){if(input_owned&&!ui_visible){mouse_x.fetch_add(x);mouse_y.fetch_add(y);}}
-void fov(double value){std::lock_guard lock(mutex);if(state.enabled&&std::isfinite(value)&&value>0&&value<179)state.pose.fov_degrees=value;}
+bool mouse_wheel(double notches){if(!free_input||ui_visible||!std::isfinite(notches))return false;fov_wheel.fetch_add(notches);return true;}
+void fov(double value){std::lock_guard lock(mutex);if(state.enabled&&std::isfinite(value)&&value>0&&value<179)fov_target=state.pose.fov_degrees=value;}
 void cuts(bool enabled,std::vector<cinematic::CameraCut> values){std::lock_guard lock(mutex);if(enabled&&(track.keys().empty()||keys_replay_path!=replay_path)){state.status="Create this replay's Dolly path before enabling cuts";return;}if(!cut_track.replace(std::move(values),duration_ns)){state.status="Invalid cut: overlaps, duplicate IDs or outside replay";return;}state.cuts_enabled=enabled;state.writing=false;reset=true;state.status="Camera cuts updated; explicitly arm camera writes";}
 }
 extern "C" int tm_camera_bone_index(){return camera_runtime::selected_bone.load();}

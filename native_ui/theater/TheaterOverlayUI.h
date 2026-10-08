@@ -86,6 +86,7 @@ namespace TheaterUI
         int bindingWaiting_ = -1;
         bool bindingReleased_ = false;
         std::string bindingError_;
+        ImGuiTextFilter bindingFilter_;
         ImFont* iconFont_ = nullptr;
         float   appliedScale_ = 0.0f;
         EmitFn  emit_ = nullptr;

@@ -35,6 +35,7 @@ bool owns_input();
 void overlay_visible(bool visible);
 void window(void* hwnd);
 void mouse_delta(long x,long y);
+bool mouse_wheel(double notches);
 void fov(double degrees);
 void cuts(bool enabled,std::vector<cinematic::CameraCut> values);
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot& slot);

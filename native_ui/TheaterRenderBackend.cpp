@@ -11,6 +11,7 @@
 #include <wrl/client.h>
 #include <MinHook.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 #include "TheaterUiProtocol.h"
@@ -239,6 +240,11 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
  if(m==WM_KEYDOWN&&w==Key(Action::StopRecording)){b.command(theater_ui::stop);return 0;}
  if((m==WM_KEYDOWN||m==WM_KEYUP||m==WM_CHAR)&&w==Key(Action::TogglePlayback)&&b.owns_playback_key()&&!b.text_input.load()&&!theater_hotkeys::rebinding){
   if(m==WM_KEYDOWN&&!(l&(1LL<<30)))b.toggle_playback();return 0;}
+ // Use one wheel source (Win32) to avoid counting DirectInput buffered/state copies twice.
+ // Shown UI retains its wheel for child scrolling; only hidden Free Camera consumes it.
+ if(m==WM_MOUSEWHEEL&&!b.blocking()&&camera_runtime::owns_input()){
+  if(camera_runtime::mouse_wheel(double(GET_WHEEL_DELTA_WPARAM(w))/WHEEL_DELTA))return 0;
+ }
  const bool input=(m>=WM_MOUSEFIRST&&m<=WM_MOUSELAST)||(m>=WM_KEYFIRST&&m<=WM_KEYLAST)||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_MOUSELEAVE||m==WM_NCMOUSEMOVE||m==WM_NCMOUSELEAVE;
  if(m==WM_MOUSEMOVE)b.os_mouse_tick=GetTickCount64();
  // The overlay draws the only cursor while shown; keep the Windows cursor hidden and the game out of it.
@@ -369,6 +375,33 @@ extern "C" int tm_render_test_ui(){
      b.visibility=int(vis);b.mode=vis==TheaterUI::UiVisibility::Shown?2:0;b.overlay.State().activeTool=tool;io.DisplaySize=size;
      ImGui::NewFrame();b.draw();ImGui::Render();valid=valid&&ImGui::GetDrawData()->Valid;
     }}
+ // Exercise short/narrow panels at different font/layout scales. Each child must
+ // have its own scroll range and stay clipped above the separate event log.
+ b.visibility=int(TheaterUI::UiVisibility::Shown);b.mode=2;
+ for(auto size:{ImVec2(1280,720),ImVec2(1920,1080),ImVec2(3840,2160)})
+ for(float scale:{.75f,1.f,1.5f})for(auto tool:{TheaterUI::Tool::Camera,TheaterUI::Tool::Settings}){
+  io.DisplaySize=size;b.overlay.State().layout.uiScaleUser=scale;b.overlay.State().activeTool=tool;
+  for(int pass=0;pass<3;++pass){
+   ImGui::NewFrame();
+   if(auto*panel=ImGui::FindWindowByName("###panel")){
+    ImGui::SetWindowPos(panel,ImVec2(30,50),ImGuiCond_Always);
+    ImGui::SetWindowSize(panel,ImVec2(300*scale,360*scale),ImGuiCond_Always);
+   }
+   b.draw();ImGui::Render();valid=valid&&ImGui::GetDrawData()->Valid;
+  }
+  ImGuiWindow*content=nullptr;ImGuiWindow*log=nullptr;
+  for(auto*window:ImGui::GetCurrentContext()->Windows)if(window->Active){
+   if(strstr(window->Name,"##tool-content"))content=window;
+   if(strstr(window->Name,"##log"))log=window;
+  }
+  valid=valid&&content&&log;
+  if(content&&log){
+   valid=valid&&content->ScrollMax.y>0&&!(content->Flags&ImGuiWindowFlags_NoScrollWithMouse)
+    &&content->Pos.y+content->Size.y<=log->Pos.y+1
+    &&log->Pos.y+log->Size.y<=log->ParentWindow->InnerRect.Max.y+1;
+   if(!valid)fprintf(stderr,"Scrollable panel geometry failed: tool=%u scale=%.2f size=%.0fx%.0f scroll=%.2f content_bottom=%.2f log=%.2f..%.2f parent_bottom=%.2f\n",unsigned(tool),scale,size.x,size.y,content->ScrollMax.y,content->Pos.y+content->Size.y,log->Pos.y,log->Pos.y+log->Size.y,log->ParentWindow->InnerRect.Max.y);
+  }
+ }
  b.host_linked=false;b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;ImGui::DestroyContext(c);return valid?1:0;
 }
 // The hotkey table for the Rust side (shared/TheaterHotkeys.h). Unknown action: 0 (unbound).
