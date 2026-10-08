@@ -11,10 +11,12 @@
 #include "GameProfile.h"
 #include <MinHook.h>
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 #include <realtimeapiset.h>
 namespace game_effects {
@@ -28,16 +30,37 @@ thread_local bool replaying=false;
 bool read_position(const float*pos,float*out){
  __try{out[0]=pos[0];out[1]=pos[1];out[2]=pos[2];return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-void queue_event(std::uint32_t id,const float*p){
+// Per-frame matrix of an effect that follows something (auras, trails, weapon effects): the game updates the effect handle's transform
+// every frame through one function. Samples are keyed by the effect's creation (time, id) and kept only when the matrix changed.
+struct Update{std::uint64_t created_ns;std::uint32_t id;std::uint32_t pad;std::uint64_t time_ns;float m[16];};
+struct LiveFx{std::uint64_t created_ns;std::uint32_t id;float last[16];bool has_last;};
+std::vector<Update> pending_updates;std::unordered_map<std::uintptr_t,LiveFx> live_fx;
+std::atomic<std::uint64_t> updates_seen=0,updates_dropped=0;
+std::uint64_t queue_event(std::uint32_t id,const float*p,std::uintptr_t handle=0){
  ULONGLONG ticks=0;QueryInterruptTimePrecise(&ticks);
  Event e{ticks*100,id,{p[0],p[1],p[2]}};
  std::lock_guard guard(lock);
- if(pending.size()>=8192){++dropped;return;}
- pending.push_back(e);++seen;
+ if(handle){if(live_fx.size()>20000)live_fx.clear();live_fx[handle]=LiveFx{e.time_ns,id,{},false};}
+ if(pending.size()>=8192){++dropped;return e.time_ns;}
+ pending.push_back(e);++seen;return e.time_ns;
 }
 void __fastcall detour(void*manager,std::uint32_t id,std::uint64_t tag,const float*pos,void*out){
  if(capture.load(std::memory_order_relaxed)&&!replaying&&pos){float p[3];if(read_position(pos,p))queue_event(id,p);}
  original(manager,id,tag,pos,out);
+}
+using UpdateFn=std::uint64_t(__fastcall*)(void*,const float*);
+UpdateFn update_original=nullptr;
+bool copy16(const float*src,float*dst){__try{for(int i=0;i<16;++i)dst[i]=src[i];return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
+std::uint64_t __fastcall update_detour(void*handle,const float*matrix){
+ if(capture.load(std::memory_order_relaxed)&&!replaying&&matrix){
+  float m[16];const bool ok=copy16(matrix,m);
+  if(ok){ULONGLONG ticks=0;QueryInterruptTimePrecise(&ticks);std::lock_guard guard(lock);
+   auto it=live_fx.find(reinterpret_cast<std::uintptr_t>(handle));
+   if(it!=live_fx.end()){auto&fx=it->second;bool same=fx.has_last;
+    if(same)for(int i=0;i<16;++i)if(std::fabs(fx.last[i]-m[i])>1e-4f){same=false;break;}
+    if(!same){if(pending_updates.size()>=262144)++updates_dropped;else{Update u{};u.created_ns=fx.created_ns;u.id=fx.id;u.time_ns=ticks*100;memcpy(u.m,m,sizeof(m));pending_updates.push_back(u);++updates_seen;}
+     memcpy(fx.last,m,sizeof(m));fx.has_last=true;}}}}
+ return update_original(handle,matrix);
 }
 bool scene_guard(std::uintptr_t b);
 std::atomic_bool scene_guard_passed=false; // checked once before the creation function was hooked (afterwards its first bytes are a jump)
@@ -46,7 +69,7 @@ SceneCreate scene_original=nullptr;
 // Every effect the game creates (hits, blood, spells, attached or free) passes through this one scene-controller function; capture
 // the id and the translation of the 4x4 matrix (row 3). Replay-made calls are flagged and never captured.
 void*__fastcall scene_detour(void*scene,void*handle,std::uint32_t id,void*params,const float*matrix,int a,int b){
- if(capture.load(std::memory_order_relaxed)&&!replaying&&matrix){float m[16];__try{for(int i=0;i<16;++i)m[i]=matrix[i];queue_event(id,m+12);}__except(EXCEPTION_EXECUTE_HANDLER){}}
+ if(capture.load(std::memory_order_relaxed)&&!replaying&&matrix){float m[16];__try{for(int i=0;i<16;++i)m[i]=matrix[i];queue_event(id,m+12,reinterpret_cast<std::uintptr_t>(handle));}__except(EXCEPTION_EXECUTE_HANDLER){}}
  return scene_original(scene,handle,id,params,matrix,a,b);
 }
 bool call_original(void*manager,std::uint32_t id,const float*pos){
@@ -67,7 +90,12 @@ extern "C" int tm_effect_initialize(){
   auto site=reinterpret_cast<void*>(base+TM_VAL_VFX_SCENE_CREATE_RVA);
   if(MH_CreateHook(site,reinterpret_cast<void*>(scene_detour),reinterpret_cast<void**>(&scene_original))!=MH_OK)return 0;
   if(MH_EnableHook(site)!=MH_OK){MH_RemoveHook(site);scene_original=nullptr;return 0;}
-  return 1;}
+  // Transform update of an effect handle (optional: without it effects are replayed where they started).
+  const unsigned char update_bytes[]={0x48,0x89,0x54,0x24,0x10,0x48,0x89,0x4c,0x24,0x08,0x56,0x57,0x48,0x81,0xec,0x88};unsigned char got[sizeof(update_bytes)]{};
+  auto usite=reinterpret_cast<void*>(base+TM_VAL_VFX_HANDLE_TRANSFORM_RVA);SIZE_T n=0;
+  if(ReadProcessMemory(GetCurrentProcess(),usite,got,sizeof(got),&n)&&n==sizeof(got)&&!memcmp(got,update_bytes,sizeof(got))){
+   if(MH_CreateHook(usite,reinterpret_cast<void*>(update_detour),reinterpret_cast<void**>(&update_original))==MH_OK){if(MH_EnableHook(usite)!=MH_OK){MH_RemoveHook(usite);update_original=nullptr;}}}
+  return update_original?2:1;}
  return 0;
  const unsigned char expected[]=TM_EFFECT_SPAWN_BYTES;unsigned char bytes[sizeof(expected)];SIZE_T got=0;
  auto site=reinterpret_cast<void*>(base+TM_VAL_EFFECT_SPAWN_RVA);
@@ -101,7 +129,7 @@ extern "C" int tm_effect_spawn(std::uint32_t id,const float*pos){
 // created (the debug-position function above silently ignores anything else). Every created effect owns one fixed handle slot and is
 // stopped and released after a fixed real-time lifetime or when the replay ends.
 namespace game_effects { namespace {
-struct Slot{alignas(16) unsigned char handle[TM_VAL_VFX_HANDLE_SIZE];bool used=false;std::uint64_t expires=0,created_at=0;}; // expires: replay time (ns), so pause and slow motion stretch the lifetime
+struct Slot{alignas(16) unsigned char handle[TM_VAL_VFX_HANDLE_SIZE];bool used=false;std::uint64_t expires=0,created_at=0,tag_time=0;std::uint32_t tag_id=0;}; // expires: replay time (ns), so pause and slow motion stretch the lifetime
 constexpr std::uint64_t MAX_LIFE_NS=20000000000ULL; // looping-effect safety net
 Slot slots[128];
 std::atomic<std::uint64_t> created{0},not_resident{0},failed{0},no_slot{0},ended_naturally{0},capped{0};
@@ -131,7 +159,7 @@ void release_slot(Slot&s){if(!s.used)return;if(!seh_release(base,s))scene_faulte
 }}
 // manager = CSSfxImp address (from the Rust side, game callback thread only). Returns 1 created, 0 refused, -1 not resident, -2 no free
 // slot, -3 faulted. `life_ms` is the real-time lifetime before the effect is stopped and released.
-extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,const float*pos,std::uint64_t expires_at){
+extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,const float*pos,std::uint64_t expires_at,std::uint64_t tag_time){
  using namespace game_effects;if(!manager||!pos||!id)return 0;if(scene_faulted)return -3;
  if(!base)base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
  if(!scene_guard_passed)return -4;
@@ -144,7 +172,7 @@ extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,con
  replaying=true;const bool made=seh_create(base,scene,*slot,id,m);replaying=false;
  if(!made){scene_faulted=true;++failed;return -3;}
  std::uintptr_t object=0;memcpy(&object,slot->handle+TM_OFF_VFX_HANDLE_OBJECT,sizeof(object));
- slot->used=true;slot->expires=expires_at;slot->created_at=expires_at>MAX_LIFE_NS?expires_at-MAX_LIFE_NS:0;
+ slot->used=true;slot->tag_time=tag_time;slot->tag_id=id;slot->expires=expires_at;slot->created_at=expires_at>MAX_LIFE_NS?expires_at-MAX_LIFE_NS:0;
  // An empty handle right after creation is reported but the slot is kept until it expires (the handle may be filled later).
  if(!object){++failed;return 2;}
  ++created;return 1;}
@@ -160,3 +188,19 @@ extern "C" void tm_effect_scene_tick(std::uint64_t replay_time){
 extern "C" void tm_effect_scene_release_all(){using namespace game_effects;for(auto&s:slots)release_slot(s);}
 extern "C" void tm_effect_scene_stats(std::uint64_t*c,std::uint64_t*nr,std::uint64_t*f,std::uint64_t*ns){using namespace game_effects;*c=created;*nr=not_resident;*f=failed;*ns=no_slot;}
 extern "C" void tm_effect_scene_end_stats(std::uint64_t*natural,std::uint64_t*cap){using namespace game_effects;*natural=ended_naturally;*cap=capped;}
+
+// Drains the captured per-frame effect transforms (Update records above).
+extern "C" std::uint32_t tm_effect_drain_updates(void*out,std::uint32_t max){
+ using namespace game_effects;std::lock_guard guard(lock);
+ const auto n=static_cast<std::uint32_t>(std::min<std::size_t>(pending_updates.size(),max));
+ if(n){memcpy(out,pending_updates.data(),n*sizeof(Update));pending_updates.erase(pending_updates.begin(),pending_updates.begin()+n);}
+ return n;}
+extern "C" void tm_effect_update_stats(std::uint64_t*seen_out,std::uint64_t*dropped_out){*seen_out=game_effects::updates_seen.load();*dropped_out=game_effects::updates_dropped.load();}
+// Replay: moves a replay-made effect (found by its recorded creation time and id) to a recorded matrix. 1 = updated, 0 = no such effect.
+extern "C" int tm_effect_scene_set_transform(std::uint64_t tag_time,std::uint32_t id,const float*m){
+ using namespace game_effects;if(!update_original||!m)return 0;
+ for(auto&s:slots)if(s.used&&s.tag_time==tag_time&&s.tag_id==id){
+  alignas(16) float copy[16];memcpy(copy,m,sizeof(copy));replaying=true;bool ok=true;
+  __try{reinterpret_cast<UpdateFn>(base+TM_VAL_VFX_HANDLE_TRANSFORM_RVA)(s.handle,copy);}__except(EXCEPTION_EXECUTE_HANDLER){ok=false;scene_faulted=true;}
+  replaying=false;return ok?1:0;}
+ return 0;}
