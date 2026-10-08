@@ -101,7 +101,7 @@ extern "C" int tm_effect_spawn(std::uint32_t id,const float*pos){
 // created (the debug-position function above silently ignores anything else). Every created effect owns one fixed handle slot and is
 // stopped and released after a fixed real-time lifetime or when the replay ends.
 namespace game_effects { namespace {
-struct Slot{alignas(16) unsigned char handle[TM_VAL_VFX_HANDLE_SIZE];bool used=false;ULONGLONG expires=0;};
+struct Slot{alignas(16) unsigned char handle[TM_VAL_VFX_HANDLE_SIZE];bool used=false;std::uint64_t expires=0;}; // expires: replay time (ns), so pause and slow motion stretch the lifetime
 Slot slots[128];
 std::atomic<std::uint64_t> created{0},not_resident{0},failed{0},no_slot{0};
 bool read_mem(std::uintptr_t p,void*out,std::size_t n){SIZE_T got=0;return p>=0x10000&&p<=0x00007FFFFFFFFFFFULL-n&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(p),out,n,&got)&&got==n;}
@@ -130,7 +130,7 @@ void release_slot(Slot&s){if(!s.used)return;if(!seh_release(base,s))scene_faulte
 }}
 // manager = CSSfxImp address (from the Rust side, game callback thread only). Returns 1 created, 0 refused, -1 not resident, -2 no free
 // slot, -3 faulted. `life_ms` is the real-time lifetime before the effect is stopped and released.
-extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,const float*pos,std::uint32_t life_ms){
+extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,const float*pos,std::uint64_t expires_at){
  using namespace game_effects;if(!manager||!pos||!id)return 0;if(scene_faulted)return -3;
  if(!base)base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
  if(!scene_guard_passed)return -4;
@@ -143,12 +143,12 @@ extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,con
  replaying=true;const bool made=seh_create(base,scene,*slot,id,m);replaying=false;
  if(!made){scene_faulted=true;++failed;return -3;}
  std::uintptr_t object=0;memcpy(&object,slot->handle+TM_OFF_VFX_HANDLE_OBJECT,sizeof(object));
- slot->used=true;slot->expires=GetTickCount64()+life_ms;
+ slot->used=true;slot->expires=expires_at;
  // An empty handle right after creation is reported but the slot is kept until it expires (the handle may be filled later).
  if(!object){++failed;return 2;}
  ++created;return 1;}
 extern "C" int tm_effect_scene_guard_passed(){return game_effects::scene_guard_passed.load()?1:0;}
-extern "C" void tm_effect_scene_tick(){
- using namespace game_effects;const auto now=GetTickCount64();for(auto&s:slots)if(s.used&&now>=s.expires)release_slot(s);}
+extern "C" void tm_effect_scene_tick(std::uint64_t replay_time){
+ using namespace game_effects;for(auto&s:slots)if(s.used&&replay_time>=s.expires)release_slot(s);}
 extern "C" void tm_effect_scene_release_all(){using namespace game_effects;for(auto&s:slots)release_slot(s);}
 extern "C" void tm_effect_scene_stats(std::uint64_t*c,std::uint64_t*nr,std::uint64_t*f,std::uint64_t*ns){using namespace game_effects;*c=created;*nr=not_resident;*f=failed;*ns=no_slot;}

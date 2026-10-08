@@ -599,13 +599,13 @@ pub fn tick(group:usize,now:u64){
    // Recorded one-shot effects (option bit 256): created at their recorded time while the replay plays forward. After a seek (or
    // a jump of more than half a second) the cursor is only moved, so scrubbing never fires a burst; playing on from there creates
    // the effects again, which is how they reappear after a rewind.
-   effects::tick();
+   effects::tick(t);
    if s.options&256==0&&effects::ready(){if let Some(loaded)=&s.loaded{let ev=&loaded.world.effects;
     let jumped=s.fx_t==0||t<s.fx_t||t-s.fx_t>500_000_000;
     if jumped{effects::release_all();}
     let mut i=if jumped{ev.partition_point(|e|e.time<=t)}else{s.fx_cursor.min(ev.len())};
     if !jumped{let mut made=0;while i<ev.len()&&ev[i].time<=t&&made<16{
-     if let Some(sh)=if loaded.anchors.is_empty(){Some([0.0f32;3])}else{loaded.anchors.translation(ev[i].time,live.0,live.1)}{let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];let code=effects::spawn_scene(ev[i].id,p,3000);let ok=code==1;if ok{made+=1;}let (before,after)=(code,code);
+     if let Some(sh)=if loaded.anchors.is_empty(){Some([0.0f32;3])}else{loaded.anchors.translation(ev[i].time,live.0,live.1)}{let p=[ev[i].pos[0]+sh[0],ev[i].pos[1]+sh[1],ev[i].pos[2]+sh[2]];let code=effects::spawn_scene(ev[i].id,p,ev[i].time.saturating_add(6_000_000_000));let ok=code==1;if ok{made+=1;}let (before,after)=(code,code);
       static LOGGED:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);if LOGGED.fetch_add(1,std::sync::atomic::Ordering::Relaxed)<40{crate::log_game(&format!("EFFECT_REPLAY: id {} at t={:.2}s -> ({:.1},{:.1},{:.1}) called={} scene-create result {:?} (1 created, 2 created but empty handle, -1 FXR not resident, -4 check failed, -5 no scene, -7 no CSSfxImp) {:?} shift=({:.1},{:.1},{:.1}) replayed player at {:?}, recorded effect at {:?}",ev[i].id,ev[i].time as f64/1e9,p[0],p[1],p[2],ok,before,after,sh[0],sh[1],sh[2],read_transform(chr).map(|t|t[2]),ev[i].pos));}}
      i+=1;}}
     s.fx_cursor=i;s.fx_t=t;}}}
