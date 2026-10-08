@@ -14,6 +14,8 @@
 #include <fstream>
 namespace native_lights { namespace {
 std::atomic_bool armed=false,linked=false;
+std::atomic_bool shadow_requested=false;
+bool shadow_verified=false;
 std::atomic<ULONGLONG> heartbeat=0;
 std::mutex telemetry;
 View state;
@@ -43,6 +45,7 @@ template<std::size_t N>bool bytes(std::uintptr_t rva,const unsigned char (&expec
 void report(const char* message){
  std::unique_lock lock(telemetry,std::try_to_lock);if(!lock.owns_lock())return;
  state.available=verified;state.faulted=faulted;state.rendered=unsigned(owned.size());state.created=created;state.removed=removed;state.lock_skips=lock_skips;
+ state.shadow_available=shadow_verified;state.submitted_ids.clear();for(const auto& o:owned)state.submitted_ids.push_back(o.editor_id);
  if(state.status==message)return;state.status=message;
  wchar_t directory[MAX_PATH]{};if(GetTempPathW(MAX_PATH,directory)){std::ofstream f(std::filesystem::path(directory)/L"TheaterModeGame.log",std::ios::app);f<<"NATIVE_LIGHTS "<<message<<" live="<<owned.size()<<" created="<<created<<" removed="<<removed<<'\n';}
 }
@@ -50,6 +53,8 @@ bool guard(){
  if(checked)return verified;checked=true;base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
  constexpr unsigned char pf[]=TM_LIGHT_GUARD_POINT_FACTORY,sf[]=TM_LIGHT_GUARD_SPOT_FACTORY,ps[]=TM_LIGHT_GUARD_POINT_SET,sm[]=TM_LIGHT_GUARD_SPOT_MATRIX,ss[]=TM_LIGHT_GUARD_SPOT_SHAPE,retain[]=TM_LIGHT_GUARD_RETAIN,release[]=TM_LIGHT_GUARD_REMOVE_RELEASE,tl[]=TM_LIGHT_GUARD_TRYLOCK,ul[]=TM_LIGHT_GUARD_UNLOCK,pu[]=TM_LIGHT_GUARD_POINT_LIGHT_UPDATE,su[]=TM_LIGHT_GUARD_SPOT_LIGHT_UPDATE;
  verified=base&&bytes(TM_VAL_POINT_LIGHT_FACTORY,pf)&&bytes(TM_VAL_SPOT_LIGHT_FACTORY,sf)&&bytes(TM_VAL_POINT_LIGHT_SET_POSITION,ps)&&bytes(TM_VAL_SPOT_LIGHT_SET_MATRIX,sm)&&bytes(TM_VAL_SPOT_LIGHT_SET_SHAPE,ss)&&bytes(TM_VAL_LIGHT_RETAIN,retain)&&bytes(TM_VAL_LIGHT_REMOVE_RELEASE,release)&&bytes(TM_VAL_LIGHT_TRY_LOCK,tl)&&bytes(TM_VAL_LIGHT_UNLOCK,ul)&&bytes(TM_VAL_POINT_LIGHT_UPDATE,pu)&&bytes(TM_VAL_SPOT_LIGHT_UPDATE,su);
+ constexpr unsigned char pointShadow[]=TM_LIGHT_GUARD_POINT_SHADOW_CHECK,spotShadow[]=TM_LIGHT_GUARD_SPOT_SHADOW_CHECK;
+ shadow_verified=verified&&bytes(TM_VAL_POINT_SHADOW_CHECK,pointShadow)&&bytes(TM_VAL_SPOT_SHADOW_CHECK,spotShadow);
  if(!verified){faulted=true;armed=false;report("FAILED exact-target native API guard; no allocations");}
  return verified;
 }
@@ -100,8 +105,11 @@ bool apply(const Owned& o,const light_editor::Light& l){
   float specular[4]={l.specular_rgb[0]*l.intensity,l.specular_rgb[1]*l.intensity,l.specular_rgb[2]*l.intensity,1};
   memcpy(p+TM_OFF_LIGHT_DIFFUSE,diffuse,sizeof(diffuse));memcpy(p+TM_OFF_LIGHT_SPECULAR,specular,sizeof(specular));
   memcpy(p+TM_OFF_LIGHT_SOURCE_RADIUS,&l.source_radius,sizeof(float));
-  // First prototype intentionally has no shadow-resource allocation or volumetrics.
-  p[TM_OFF_LIGHT_SHADOW]=0;p[TM_OFF_LIGHT_ENABLED]=l.enabled&&l.intensity>0?1:0;
+  // Native render packet generation consumes these documented live properties.
+  // The engine owns shadow resource allocation; Theater never allocates a shadow map.
+  const bool shadow=shadow_requested.load()&&shadow_verified&&l.shadows;
+  p[TM_OFF_LIGHT_SHADOW]=shadow?1:0;p[TM_OFF_LIGHT_ENABLED]=l.enabled&&l.intensity>0?1:0;
+  if(shadow){memcpy(p+TM_OFF_LIGHT_SHADOW_INTENSITY,&l.shadow_strength,4);memcpy(p+TM_OFF_LIGHT_SHADOW_SPEC_LEVEL,&l.shadow_level,4);memcpy(p+TM_OFF_LIGHT_SHADOW_BIAS,&l.shadow_bias,4);}
   if(l.type==light_editor::Type::Point){alignas(16) float pos[4]={float(l.transform.position[0]),float(l.transform.position[1]),float(l.transform.position[2]),l.radius};api<PointSet>(TM_VAL_POINT_LIGHT_SET_POSITION)(o.body,pos);}
   else {
    alignas(16) float matrix[16];camera_runtime::encode_pose(l.transform,matrix);
@@ -121,11 +129,12 @@ bool release(Owned& o){
  __except(EXCEPTION_EXECUTE_HANDLER){faulted=true;armed=false;return false;}
 }
 bool valid(const light_editor::Light& l){
- return unsigned(l.type)<=1&&cinematic::valid(l.transform)&&std::all_of(l.transform.position.begin(),l.transform.position.end(),[](double x){return std::isfinite(static_cast<float>(x));})&&l.radius>0&&l.radius<=500&&std::isfinite(l.radius)&&l.intensity>=0&&l.intensity<=100&&std::isfinite(l.intensity)&&l.cone_degrees>=1&&l.cone_degrees<=179&&std::isfinite(l.cone_degrees)&&l.source_radius>=0&&l.source_radius<=500&&std::isfinite(l.source_radius)&&std::all_of(std::begin(l.rgb),std::end(l.rgb),[](float x){return std::isfinite(x)&&x>=0&&x<=1;})&&std::all_of(std::begin(l.specular_rgb),std::end(l.specular_rgb),[](float x){return std::isfinite(x)&&x>=0&&x<=1;});
+ return l.shadow_level>=1&&l.shadow_level<=5&&std::isfinite(l.shadow_strength)&&l.shadow_strength>=0&&l.shadow_strength<=1&&l.shadow_bias>=-7&&l.shadow_bias<=7&&unsigned(l.type)<=1&&cinematic::valid(l.transform)&&std::all_of(l.transform.position.begin(),l.transform.position.end(),[](double x){return std::isfinite(static_cast<float>(x));})&&l.radius>0&&l.radius<=500&&std::isfinite(l.radius)&&l.intensity>=0&&l.intensity<=100&&std::isfinite(l.intensity)&&l.cone_degrees>=1&&l.cone_degrees<=179&&std::isfinite(l.cone_degrees)&&l.source_radius>=0&&l.source_radius<=500&&std::isfinite(l.source_radius)&&std::all_of(std::begin(l.rgb),std::end(l.rgb),[](float x){return std::isfinite(x)&&x>=0&&x<=1;})&&std::all_of(std::begin(l.specular_rgb),std::end(l.specular_rgb),[](float x){return std::isfinite(x)&&x>=0&&x<=1;});
 }
 }
-View view(){std::lock_guard lock(telemetry);auto v=state;v.enabled=armed;return v;}
+View view(){std::lock_guard lock(telemetry);auto v=state;v.enabled=armed;v.shadows=shadow_requested;return v;}
 void enable(bool value){armed=value&&!faulted.load();}
+void shadows(bool value){shadow_requested=value&&!faulted.load();}
 void host_connected(bool value){linked=value;if(value)heartbeat=GetTickCount64();else armed=false;}
 }
 extern "C" void tm_native_lights_disable(){native_lights::enable(false);}
@@ -179,5 +188,5 @@ extern "C" void tm_native_lights_tick(int active){using namespace native_lights;
    if(!matches(*it)||!apply(*it,l)){faulted=true;armed=false;report("FAILED native light write; cleanup queued");return;}
   }
  }
- report("Native lights submitted; visual validation required");
+ report(shadow_requested&&shadow_verified?"Native lights submitted; shadow requests enabled; visual validation required":"Native lights submitted; shadow requests off; visual validation required");
 }

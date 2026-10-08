@@ -8,9 +8,15 @@ add_library(TheaterRenderBackend STATIC
  native_ui/EldenRingCameraIntercept.asm
  native_ui/EldenRingTimingAdapter.cpp
  native_ui/EldenRingWeatherAdapter.cpp
+  native_ui/WindController.cpp
  native_ui/EldenRingLightAdapter.cpp
  native_ui/NativeLightBackend.cpp
  native_ui/LightEditor.cpp
+ native_ui/ParticleEditor.cpp
+ native_ui/NativeParticleBackend.cpp
+ native_ui/NativeParticlePreview.cpp
+ native_ui/ParticleCatalog.cpp
+ native_ui/ColorGrading.cpp
  native_ui/EldenRingHudAdapter.cpp
  native_ui/EldenRingEffectAdapter.cpp
 
@@ -89,6 +95,10 @@ if(BUILD_TESTING)
   add_executable(action-track-tests src/action_track_tests.cpp src/replay_player.cpp src/erplay.cpp)
   target_compile_features(action-track-tests PRIVATE cxx_std_20)
   add_test(NAME action-track-tests COMMAND action-track-tests)
+  add_executable(particle-track-tests src/particle_track_tests.cpp src/particle_track.cpp)
+  target_include_directories(particle-track-tests PRIVATE shared)
+  target_compile_features(particle-track-tests PRIVATE cxx_std_20)
+  add_test(NAME particle-track-tests COMMAND particle-track-tests)
   add_executable(erplay-tests src/erplay_tests.cpp src/erplay.cpp)
   target_compile_features(erplay-tests PRIVATE cxx_std_20)
   target_compile_definitions(erplay-tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)

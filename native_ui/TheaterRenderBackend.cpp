@@ -1,6 +1,8 @@
 // Independent DX12 backend. Design references: FreecamMod and dx12-imgui-overlay.
 // No game offsets or character writes are implemented in this translation unit.
 #include "NativeLightBackend.h"
+#include "NativeParticleBackend.h"
+#include "ColorGrading.h"
 #include <windows.h>
 #include "EldenRingTimingAdapter.h"
 #include "EldenRingWeatherAdapter.h"
@@ -12,7 +14,7 @@
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <d3d12.h>
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
 #include <wrl/client.h>
 #include <MinHook.h>
 #include <imgui.h>
@@ -47,6 +49,16 @@ struct Frame{ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12Resource> sce
 struct Input{HWND hwnd;UINT msg;WPARAM w;LPARAM l;};
 class TheaterRenderBackend {
 public:
+ color_grading::Pass grading_pass;
+ ULONGLONG grading_output_checked=0;bool grading_output_sdr=false;
+ bool sdr_output(){
+  const auto now=GetTickCount64();if(grading_output_checked&&now-grading_output_checked<1000)return grading_output_sdr;
+  grading_output_checked=now;grading_output_sdr=false;
+  ComPtr<IDXGIOutput> output;ComPtr<IDXGIOutput6> output6;DXGI_OUTPUT_DESC1 description{};
+  if(SUCCEEDED(chain->GetContainingOutput(&output))&&SUCCEEDED(output.As(&output6))&&SUCCEEDED(output6->GetDesc1(&description)))
+   grading_output_sdr=description.ColorSpace==DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+  return grading_output_sdr;
+ }
  std::recursive_mutex graphics;std::mutex ipc,input_mutex;
  // Messages from the game side (bone replay) for the overlay event log; drained by draw().
  std::mutex events_mutex;std::deque<std::string> events;
@@ -102,7 +114,7 @@ public:
  void command(std::uint32_t kind,std::uint64_t value=0,const char*text=nullptr){if(kind==TheaterUI::kCommandCleanView){clean_view();return;}if(kind==TheaterUI::kCommandToggleUi){toggle_ui(false);return;}
   if(kind==TheaterUI::kCommandSetVisibility){set_visibility(value==0?TheaterUI::UiVisibility::Shown:TheaterUI::UiVisibility::Hidden);return;}
   if(kind==theater_ui::play||kind==theater_ui::restart||kind==theater_ui::toggle_playback)game_timing::enable(true);
-  if(kind==theater_ui::stop){game_timing::enable(false);camera_runtime::stop();if(emergency)emergency();}std::lock_guard lock(ipc);
+  if(kind==theater_ui::stop){game_timing::enable(false);camera_runtime::stop();native_particles::stop_preview();if(emergency)emergency();}std::lock_guard lock(ipc);
   // A scrub produces many seeks and the pipe sends one request per round trip, so only the newest pending seek matters.
   if(kind==theater_ui::seek&&!commands.empty()&&commands.back().command==theater_ui::seek){commands.back().value=value;return;}
   if(commands.size()<32){theater_ui::Request r;r.command=kind;r.value=value;if(text)strncpy_s(r.text,text,_TRUNCATE);commands.push_back(r);}}
@@ -146,6 +158,7 @@ public:
   if(fence->GetCompletedValue()>=fence_value)return true;
   return SUCCEEDED(fence->SetEventOnCompletion(fence_value,fence_event))&&WaitForSingleObject(fence_event,2000)==WAIT_OBJECT_0;}
  void release_resources(){ui_ready=false;if(context){ImGui::SetCurrentContext(context);if(dx12_ready)ImGui_ImplDX12_Shutdown();if(win32_ready)ImGui_ImplWin32_Shutdown();ImGui::DestroyContext(context);}
+  grading_output_checked=0;grading_pass.reset();color_grading::report(false,"Renderer resources released");
   context=nullptr;diagnostic_frames=0;dx12_ready=win32_ready=false;frames.clear();list.Reset();rtvs.Reset();srvs.Reset();fence.Reset();device.Reset();descriptors.clear();if(fence_event){CloseHandle(fence_event);fence_event=nullptr;}}
  bool initialize_resources(){DXGI_SWAP_CHAIN_DESC desc{};if(!chain||!queue||FAILED(chain->GetDesc(&desc))||FAILED(chain->GetDevice(IID_PPV_ARGS(&device)))||!desc.BufferCount)return false;
   hwnd=desc.OutputWindow;if(!IsWindow(hwnd))return false;
@@ -199,7 +212,7 @@ public:
   const auto vis=TheaterUI::UiVisibility(visibility.load());
   const bool hint=vis==TheaterUI::UiVisibility::Hidden; // permanent "F4 Show UI" hint
   const bool needed=vis==TheaterUI::UiVisibility::Shown||hint||(vis!=TheaterUI::UiVisibility::HiddenClean&&recording_now());
-  if(!needed&&!context)return;
+  if(!needed&&!color_grading::settings().enabled&&!context)return;
   const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
   if(!context&&!initialize_resources()){log("DX12_RESOURCE_INIT_FAILED; overlay disabled; replay integration unchanged");release_resources();failed=true;return;}
   ImGui::SetCurrentContext(context);std::deque<Input> pending;
@@ -226,9 +239,22 @@ public:
   if(!active){std::lock_guard lock(input_mutex);inputs.clear();mouse_dx=0;mouse_dy=0;mouse_buttons=0;applied_buttons=0;virtual_mouse={-1,-1};ImGui::GetIO().ClearEventsQueue();ImGui::GetIO().ClearInputKeys();ImGui::GetIO().ClearInputMouse();ImGui::GetIO().AddFocusEvent(false);}
   else {ImGui::GetIO().AddFocusEvent(true);feed_virtual_mouse();}
   stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");draw(composite?ImTextureID(f.scene_srv.ptr):0);
-  ImGui::Render();if(!needed)return;
+  ImGui::Render();
+  const auto gradeValues=color_grading::settings();bool grade=false;
+  bool loadedWorld=false;{std::lock_guard lock(ipc);loadedWorld=host_linked.load()&&snapshot.connected&&snapshot.player_found;}
+  const auto bufferDesc=f.buffer->GetDesc();
+  const bool sdr=sdr_output()&&
+      (bufferDesc.Format==DXGI_FORMAT_R8G8B8A8_UNORM||bufferDesc.Format==DXGI_FORMAT_B8G8R8A8_UNORM);
+  if(!gradeValues.enabled)color_grading::report(false,"Disabled");
+  else if(color_grading::neutral(gradeValues))color_grading::report(true,"Neutral values: color pass bypassed");
+  else if(!loadedWorld)color_grading::report(false,"Waiting for connected player / loaded world");
+  else if(!active)color_grading::report(false,"Suspended while game is unfocused");
+  else if(!sdr)color_grading::report(false,"Unavailable for this swap-chain color space / format (SDR 8-bit only)");
+  else if(!prepare_scene(f))color_grading::report(false,"Scene texture unavailable; grading bypassed");
+  else if(grading_pass.prepare(device.Get(),bufferDesc.Format)&&grading_pass.prepare_lut(device.Get(),index)){grade=true;color_grading::report(true,"Active: SDR Look effects");}
+  if(!needed&&!grade)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
-  if(composite){
+  if(composite||grade){
    D3D12_RESOURCE_BARRIER copies[2]{};for(auto&b:copies){b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
    copies[0].Transition.pResource=f.buffer.Get();copies[0].Transition.StateBefore=D3D12_RESOURCE_STATE_PRESENT;copies[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
    copies[1].Transition.pResource=f.scene.Get();copies[1].Transition.StateBefore=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;copies[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
@@ -236,7 +262,20 @@ public:
    for(auto&b:copies)std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(2,copies);
   }
   D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={f.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET};list->ResourceBarrier(1,&barrier);
-  list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvs.Get();list->SetDescriptorHeaps(1,&heap);stage("FRAME_RENDER_DRAW_DATA");ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
+  list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvs.Get();list->SetDescriptorHeaps(1,&heap);
+  if(grade){
+   grading_pass.record(list.Get(),f.scene_srv,UINT(bufferDesc.Width),bufferDesc.Height,gradeValues,index);
+   if(composite){
+    // The editor viewport must sample the graded image, not the earlier raw scene copy.
+    D3D12_RESOURCE_BARRIER copies[2]{};for(auto&b:copies){b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+    copies[0].Transition.pResource=f.buffer.Get();copies[0].Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;copies[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+    copies[1].Transition.pResource=f.scene.Get();copies[1].Transition.StateBefore=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;copies[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(2,copies);list->CopyResource(f.scene.Get(),f.buffer.Get());
+    for(auto&b:copies)std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(2,copies);
+    list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);
+   }
+  }
+  stage("FRAME_RENDER_DRAW_DATA");ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
   if(FAILED(list->Close())){failed=true;return;}ID3D12CommandList*cmd=list.Get();stage("FRAME_EXECUTE");queue->ExecuteCommandLists(1,&cmd);f.fence=++fence_value;if(FAILED(queue->Signal(fence.Get(),f.fence))){failed=true;log("DX12_QUEUE_SIGNAL_FAILED; rendering disabled");}stage("FRAME_SUBMITTED");++diagnostic_frames;
  }
  static LRESULT CALLBACK wndproc(HWND,UINT,WPARAM,LPARAM);

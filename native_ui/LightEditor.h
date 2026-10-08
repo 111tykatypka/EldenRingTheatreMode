@@ -20,6 +20,7 @@ struct View {std::vector<Light> lights;std::uint64_t selected=0;std::string stat
 View view();
 bool snapshot(View& out); // Nonblocking game-task copy; no native pointers.
 void create(Type type,const cinematic::State& camera);
+bool duplicate(std::uint64_t id);
 void select(std::uint64_t id);
 void edit(Light light);
 void remove(std::uint64_t id);

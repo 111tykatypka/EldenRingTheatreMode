@@ -1,0 +1,75 @@
+{
+  "format_version": 1,
+  "repositories": [
+    {
+      "name": "BinderTool",
+      "path": "research/references/BinderTool",
+      "origin": "https://github.com/Atvaark/BinderTool.git",
+      "commit": "eb46414d2ecbe0445479eaccc11b4dd76610b214",
+      "commit_date": "2018-01-14T21:33:57+01:00",
+      "tracked_files": 61
+    },
+    {
+      "name": "DSMapStudio",
+      "path": "research/references/DSMapStudio",
+      "origin": "https://github.com/soulsmods/DSMapStudio.git",
+      "commit": "97bc264cbc3e82a783eb017f57edf651f8ba000b",
+      "commit_date": "2024-07-20T00:42:16+01:00",
+      "tracked_files": 1
+    },
+    {
+      "name": "misspia-elden-ring-data",
+      "path": "research/references/misspia-elden-ring-data",
+      "origin": "https://github.com/misspia/elden-ring-data.git",
+      "commit": "d77f19e1d16de8b3af595fb78ddcb6347086e5bf",
+      "commit_date": "2025-03-12T19:40:39-04:00",
+      "tracked_files": 90
+    },
+    {
+      "name": "Paramdex",
+      "path": "research/references/Paramdex",
+      "origin": "https://github.com/soulsmods/Paramdex.git",
+      "commit": "ff7245e524329bc3eab00036723d2bd53384cedf",
+      "commit_date": "2026-03-06T18:35:13-05:00",
+      "tracked_files": 5310
+    },
+    {
+      "name": "SoulsFormats",
+      "path": "research/references/SoulsFormats",
+      "origin": "https://github.com/JKAnderson/SoulsFormats.git",
+      "commit": "9c0da6b0721372b34f36b4be503ec020dca1043a",
+      "commit_date": "2025-05-26T19:47:59-04:00",
+      "tracked_files": 201
+    },
+    {
+      "name": "Yabber",
+      "path": "research/references/Yabber",
+      "origin": "https://github.com/JKAnderson/Yabber.git",
+      "commit": "d98cca857e637272657f4af9dce7c7116ad77b03",
+      "commit_date": "2025-05-26T19:43:06-04:00",
+      "tracked_files": 35
+    }
+  ],
+  "files": [
+    {
+      "path": "research/fxr_reference_sheet.csv",
+      "bytes": 1429283,
+      "sha256": "a9ea550af347f3cbd48f1a97b7dcd6b1b5538de346725c410c0306c272d8dc67"
+    },
+    {
+      "path": "native_ui/ParticleReferenceData.inc",
+      "bytes": 1609857,
+      "sha256": "844fb2fd63d26a2c823d30ee205f40799d515b45bb74daee7e30d847ca186de5"
+    },
+    {
+      "path": "research/format_tools_reference_inventory.json",
+      "bytes": 15486,
+      "sha256": "f75f2f586c7121b29b6629becd107c95b250a4815b2a8b2138d535d0aa4ada11"
+    },
+    {
+      "path": "research/misspia_elden_ring_data_inventory.json",
+      "bytes": 9150,
+      "sha256": "d9ee8e70537b1e868f5b8329e45d6bf38651022ed16e3b09210056f873cf409e"
+    }
+  ]
+}

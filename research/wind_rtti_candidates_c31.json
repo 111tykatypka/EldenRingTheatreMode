@@ -1,0 +1,152 @@
+[
+  {
+    "address": "143c825c0",
+    "rva": "3c825c0",
+    "encoding": "ascii",
+    "value": ".?AVCSChrCliffWindModule@CS@@"
+  },
+  {
+    "address": "143c825f0",
+    "rva": "3c825f0",
+    "encoding": "ascii",
+    "value": ".?AV?$DLRuntimeClassImpl@VCSChrCliffWindModule@CS@@$0A@@DLRF@@"
+  },
+  {
+    "address": "143c87e68",
+    "rva": "3c87e68",
+    "encoding": "ascii",
+    "value": ".?AVGUIWindowBase@GuiFramework@@"
+  },
+  {
+    "address": "143c934c0",
+    "rva": "3c934c0",
+    "encoding": "ascii",
+    "value": ".?AVMenuWindow@CS@@"
+  },
+  {
+    "address": "143c93da0",
+    "rva": "3c93da0",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_base@PEAVMenuWindow@CS@@AEAVSceneProxy@2@AEBUSpec@CommandSelectDialog@2@@std@@"
+  },
+  {
+    "address": "143c94100",
+    "rva": "3c94100",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_706cabb2e9412448f6afd49f4d748b8b>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@AEBUSpec@CommandSelectDialog@5@@std@@"
+  },
+  {
+    "address": "143c94470",
+    "rva": "3c94470",
+    "encoding": "ascii",
+    "value": ".?AVMenuWindowProxy@CS@@"
+  },
+  {
+    "address": "143c96540",
+    "rva": "3c96540",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_base@PEAVMenuWindow@CS@@AEAVSceneProxy@2@@std@@"
+  },
+  {
+    "address": "143c96590",
+    "rva": "3c96590",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_base@PEAVMenuWindow@CS@@AEBVSceneObjProxy@2@@std@@"
+  },
+  {
+    "address": "143c965e0",
+    "rva": "3c965e0",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_101e2b6891658dff29bd1a967c6c8984>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c96670",
+    "rva": "3c96670",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_606f6780271773a44095900f2b003a3c>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c96700",
+    "rva": "3c96700",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_66ed6be75434a173089c909b6988a205>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c96790",
+    "rva": "3c96790",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_d19c047fe4335e3ad34f8a278d052b1c>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEBVSceneObjProxy@5@@std@@"
+  },
+  {
+    "address": "143c96820",
+    "rva": "3c96820",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_84fd8c366deaa384bee79e0b5a2c6fde>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c96c60",
+    "rva": "3c96c60",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_86336d7a94b545dd8c26626cff9e0ce7>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c96cf0",
+    "rva": "3c96cf0",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_c241713487675b4a49053acc74c47307>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c96d80",
+    "rva": "3c96d80",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_db619793182e77d0cb23646ce353cc3a>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c984f0",
+    "rva": "3c984f0",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_base@PEAVMenuWindow@CS@@$$V@std@@"
+  },
+  {
+    "address": "143c987d0",
+    "rva": "3c987d0",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_9eb8c916a006a502654b96e2a0dc19db>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@AEBUSpec@CommandSelectDialog@5@@std@@"
+  },
+  {
+    "address": "143c98880",
+    "rva": "3c98880",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_b408876159fe4b291f836fec9826a7cb>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c98910",
+    "rva": "3c98910",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_df379def6625f2b0d29b135551f619fd>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@$$V@std@@"
+  },
+  {
+    "address": "143c99060",
+    "rva": "3c99060",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@V<lambda_bab8f85a446070cfd2fcbcde7679d5c5>@@V?$allocator@H@std@@PEAVMenuWindow@CS@@AEAVSceneProxy@5@@std@@"
+  },
+  {
+    "address": "143c9c280",
+    "rva": "3c9c280",
+    "encoding": "ascii",
+    "value": ".?AVMenuWindowJob@CS@@"
+  },
+  {
+    "address": "143c9c2b0",
+    "rva": "3c9c2b0",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_base@W4MenuCtrlType@MenuWindowJob@CS@@$$V@std@@"
+  },
+  {
+    "address": "143c9c300",
+    "rva": "3c9c300",
+    "encoding": "ascii",
+    "value": ".?AV?$_Func_impl@P6A?AW4MenuCtrlType@MenuWindowJob@CS@@XZV?$allocator@H@std@@W4123@$$V@std@@"
+  }
+]

@@ -1,0 +1,97 @@
+{
+  "0x141befb00": {
+    "prefix": "48 8b c4 55 53 56 57 41 56 48 8d 68 c8 48 81 ec",
+    "shadow_reads": [
+      [
+        {
+          "va": "0x141befe48",
+          "bytes": "f3 0f 10 8f 94 00 00 00",
+          "op": "movss",
+          "args": "xmm1, dword ptr [rdi + 0x94]"
+        },
+        {
+          "va": "0x141befe50",
+          "bytes": "f3 0f 11 8b b0 00 00 00",
+          "op": "movss",
+          "args": "dword ptr [rbx + 0xb0], xmm1"
+        },
+        {
+          "va": "0x141befe58",
+          "bytes": "80 bf ad 00 00 00 00",
+          "op": "cmp",
+          "args": "byte ptr [rdi + 0xad], 0"
+        },
+        {
+          "va": "0x141befe5f",
+          "bytes": "74 1f",
+          "op": "je",
+          "args": "0x141befe80"
+        },
+        {
+          "va": "0x141befe61",
+          "bytes": "0f 2f cf",
+          "op": "comiss",
+          "args": "xmm1, xmm7"
+        },
+        {
+          "va": "0x141befe64",
+          "bytes": "76 1a",
+          "op": "jbe",
+          "args": "0x141befe80"
+        },
+        {
+          "va": "0x141befe66",
+          "bytes": "41 80 7e 01 00",
+          "op": "cmp",
+          "args": "byte ptr [r14 + 1], 0"
+        },
+        {
+          "va": "0x141befe6b",
+          "bytes": "74 13",
+          "op": "je",
+          "args": "0x141befe80"
+        },
+        {
+          "va": "0x141befe6d",
+          "bytes": "41 8b 46 04",
+          "op": "mov",
+          "args": "eax, dword ptr [r14 + 4]"
+        },
+        {
+          "va": "0x141befe71",
+          "bytes": "39 87 b8 00 00 00",
+          "op": "cmp",
+          "args": "dword ptr [rdi + 0xb8], eax"
+        },
+        {
+          "va": "0x141befe77",
+          "bytes": "77 07",
+          "op": "ja",
+          "args": "0x141befe80"
+        },
+        {
+          "va": "0x141befe79",
+          "bytes": "b8 01 00 00 00",
+          "op": "mov",
+          "args": "eax, 1"
+        },
+        {
+          "va": "0x141befe7e",
+          "bytes": "eb 02",
+          "op": "jmp",
+          "args": "0x141befe82"
+        },
+        {
+          "va": "0x141befe80",
+          "bytes": "33 c0",
+          "op": "xor",
+          "args": "eax, eax"
+        }
+      ]
+    ]
+  },
+  "0x141bf0d60": {
+    "prefix": "48 8b c4 55 53 56 57 41 54 41 55 41 56 41 57 48",
+    "shadow_reads": []
+  }
+}

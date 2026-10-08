@@ -1,0 +1,12 @@
+{
+  "strings": [
+    {
+      "address": "142f0fac0",
+      "rva": "2f0fac0",
+      "encoding": "utf16le",
+      "value": "Disable CameraFade"
+    }
+  ],
+  "symbols": [],
+  "code": []
+}

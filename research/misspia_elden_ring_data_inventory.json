@@ -1,0 +1,396 @@
+{
+  "source": "https://github.com/misspia/elden-ring-data",
+  "commit": "d77f19e1d16de8b3af595fb78ddcb6347086e5bf",
+  "review_date": "2026-10-08",
+  "files": 90,
+  "bytes": 17995946,
+  "json_records": {
+    "ammunition.json": 63,
+    "armors.json": 578,
+    "ashes-of-war-compatibility-weapons.json": 2729,
+    "ashes-of-war-compatibility.json": 91,
+    "bolstering-materials.json": 41,
+    "bosses.json": 158,
+    "consumable-weapons.json": 47,
+    "consumables-effects.json": 104,
+    "crafting-ingredients.json": 68,
+    "crafting-materials.json": 67,
+    "great-runes-effects.json": 6,
+    "info-items.json": 103,
+    "key-items.json": 277,
+    "level-up-cost.json": 713,
+    "magic.json": 171,
+    "multiplayer-items.json": 16,
+    "player-bosses.json": 20,
+    "spell-damages.json": 408,
+    "spirit-ashes.json": 64,
+    "talismans.json": 116,
+    "weapon-stats.json": 2717,
+    "weapons-affinities.json": 2765,
+    "weapons-effects.json": 92,
+    "weapons.json": 2717
+  },
+  "inventory": [
+    {
+      "path": ".gitignore",
+      "size": 283
+    },
+    {
+      "path": ".prettierignore",
+      "size": 235
+    },
+    {
+      "path": "db/csv/Elden Ring Compatible Ash of War Sheet - Ashes_of_War.csv",
+      "size": 26167
+    },
+    {
+      "path": "db/csv/Elden Ring Compatible Ash of War Sheet - Weapons.csv",
+      "size": 1160991
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Armor.csv",
+      "size": 272076
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Bolstering Materials.csv",
+      "size": 14770
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Crafting Materials.csv",
+      "size": 20906
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Info Items.csv",
+      "size": 35469
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Key Items.csv",
+      "size": 96913
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Magic.csv",
+      "size": 84762
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Multiplayer Items.csv",
+      "size": 7096
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Other Weapons.csv",
+      "size": 39061
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Spirit Ashes.csv",
+      "size": 407166
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Talismans.csv",
+      "size": 46820
+    },
+    {
+      "path": "db/csv/Elden Ring Item Data Sheet (1.09) - Weapons.csv",
+      "size": 1190442
+    },
+    {
+      "path": "db/csv/Elden Ring NPC Data Sheet (1.05) (Trimmed) - Boss_Data.csv",
+      "size": 40040
+    },
+    {
+      "path": "db/csv/Elden Ring NPC Data Sheet (1.05) - Player_Boss_Data.csv",
+      "size": 23960
+    },
+    {
+      "path": "db/csv/Elden Ring Weapon Data Sheet (1.09) - Raw_Data.csv",
+      "size": 487191
+    },
+    {
+      "path": "db/csv/Elden Ring Weapon Data Sheet (1.09) - Spell_Data.csv",
+      "size": 26752
+    },
+    {
+      "path": "db/csv/ER - Miscellaneous Data (App Ver. 1.16) - Effects - Consumables.csv",
+      "size": 13729
+    },
+    {
+      "path": "db/csv/ER - Miscellaneous Data (App Ver. 1.16) - Effects - Great Runes.csv",
+      "size": 833
+    },
+    {
+      "path": "db/csv/ER - Miscellaneous Data (App Ver. 1.16) - Effects - Weapons.csv",
+      "size": 8290
+    },
+    {
+      "path": "db/csv/ER - Miscellaneous Data (App Ver. 1.16) - Level Up Cost.csv",
+      "size": 26395
+    },
+    {
+      "path": "db/html/view-source_https___eldenring.wiki.fextralife.com_Crafting.html",
+      "size": 678491
+    },
+    {
+      "path": "db/json/ammunition.json",
+      "size": 29496
+    },
+    {
+      "path": "db/json/armors.json",
+      "size": 566017
+    },
+    {
+      "path": "db/json/ashes-of-war-compatibility-weapons.json",
+      "size": 2347268
+    },
+    {
+      "path": "db/json/ashes-of-war-compatibility.json",
+      "size": 105181
+    },
+    {
+      "path": "db/json/bolstering-materials.json",
+      "size": 19089
+    },
+    {
+      "path": "db/json/bosses.json",
+      "size": 108701
+    },
+    {
+      "path": "db/json/consumable-weapons.json",
+      "size": 32594
+    },
+    {
+      "path": "db/json/consumables-effects.json",
+      "size": 27108
+    },
+    {
+      "path": "db/json/crafting-ingredients.json",
+      "size": 40888
+    },
+    {
+      "path": "db/json/crafting-materials.json",
+      "size": 29480
+    },
+    {
+      "path": "db/json/great-runes-effects.json",
+      "size": 1333
+    },
+    {
+      "path": "db/json/info-items.json",
+      "size": 44920
+    },
+    {
+      "path": "db/json/key-items.json",
+      "size": 158365
+    },
+    {
+      "path": "db/json/level-up-cost.json",
+      "size": 71624
+    },
+    {
+      "path": "db/json/magic.json",
+      "size": 137256
+    },
+    {
+      "path": "db/json/multiplayer-items.json",
+      "size": 9319
+    },
+    {
+      "path": "db/json/player-bosses.json",
+      "size": 24417
+    },
+    {
+      "path": "db/json/spell-damages.json",
+      "size": 109214
+    },
+    {
+      "path": "db/json/spirit-ashes.json",
+      "size": 461861
+    },
+    {
+      "path": "db/json/talismans.json",
+      "size": 60220
+    },
+    {
+      "path": "db/json/weapon-stats.json",
+      "size": 2587526
+    },
+    {
+      "path": "db/json/weapons-affinities.json",
+      "size": 2761739
+    },
+    {
+      "path": "db/json/weapons-effects.json",
+      "size": 16067
+    },
+    {
+      "path": "db/json/weapons.json",
+      "size": 3426402
+    },
+    {
+      "path": "package-lock.json",
+      "size": 16482
+    },
+    {
+      "path": "package.json",
+      "size": 808
+    },
+    {
+      "path": "README.md",
+      "size": 6831
+    },
+    {
+      "path": "src/Cleanser.ts",
+      "size": 1532
+    },
+    {
+      "path": "src/contants/db.ts",
+      "size": 250
+    },
+    {
+      "path": "src/contants/dbFilesMap.ts",
+      "size": 10028
+    },
+    {
+      "path": "src/formatters/ammunition.ts",
+      "size": 4079
+    },
+    {
+      "path": "src/formatters/armors.ts",
+      "size": 4405
+    },
+    {
+      "path": "src/formatters/ashesOfWarCompatibilityAshes.ts",
+      "size": 2592
+    },
+    {
+      "path": "src/formatters/ashesOfWarCompatibilityWeapons.ts",
+      "size": 3413
+    },
+    {
+      "path": "src/formatters/bolsteringMaterials.ts",
+      "size": 1241
+    },
+    {
+      "path": "src/formatters/bosses.ts",
+      "size": 3350
+    },
+    {
+      "path": "src/formatters/consumablesEffects.ts",
+      "size": 1285
+    },
+    {
+      "path": "src/formatters/consumableWeapons.ts",
+      "size": 4467
+    },
+    {
+      "path": "src/formatters/craftingIngredients.ts",
+      "size": 1578
+    },
+    {
+      "path": "src/formatters/craftingMaterials.ts",
+      "size": 1312
+    },
+    {
+      "path": "src/formatters/greatRunesEffects.ts",
+      "size": 1169
+    },
+    {
+      "path": "src/formatters/infoItems.ts",
+      "size": 1020
+    },
+    {
+      "path": "src/formatters/keyItems.ts",
+      "size": 2042
+    },
+    {
+      "path": "src/formatters/levelUpCost.ts",
+      "size": 893
+    },
+    {
+      "path": "src/formatters/magic.ts",
+      "size": 5648
+    },
+    {
+      "path": "src/formatters/multiplayerItems.ts",
+      "size": 1403
+    },
+    {
+      "path": "src/formatters/playerBosses.ts",
+      "size": 9689
+    },
+    {
+      "path": "src/formatters/spellDamages.ts",
+      "size": 2723
+    },
+    {
+      "path": "src/formatters/spiritAshes.ts",
+      "size": 4553
+    },
+    {
+      "path": "src/formatters/talismans.ts",
+      "size": 1175
+    },
+    {
+      "path": "src/formatters/weaponsAffinities.ts",
+      "size": 5089
+    },
+    {
+      "path": "src/formatters/weaponsEffects.ts",
+      "size": 866
+    },
+    {
+      "path": "src/formatters/weaponStats.ts",
+      "size": 4747
+    },
+    {
+      "path": "src/index.ts",
+      "size": 519
+    },
+    {
+      "path": "src/types/armors.ts",
+      "size": 62
+    },
+    {
+      "path": "src/types/camelCase.ts",
+      "size": 424
+    },
+    {
+      "path": "src/types/data.ts",
+      "size": 246
+    },
+    {
+      "path": "src/types/files.ts",
+      "size": 353
+    },
+    {
+      "path": "src/types/items.ts",
+      "size": 166
+    },
+    {
+      "path": "src/types/magic.ts",
+      "size": 56
+    },
+    {
+      "path": "src/types/stats.ts",
+      "size": 204
+    },
+    {
+      "path": "src/types/union.ts",
+      "size": 759
+    },
+    {
+      "path": "src/types/weapons.ts",
+      "size": 2346
+    },
+    {
+      "path": "src/utils/camelCase.ts",
+      "size": 539
+    },
+    {
+      "path": "src/utils/format.ts",
+      "size": 210
+    },
+    {
+      "path": "tsconfig.json",
+      "size": 469
+    }
+  ],
+  "scope": "Reference snapshot only; no FXR mapping or 2.7.0.0 runtime binding established"
+}

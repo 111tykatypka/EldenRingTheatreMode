@@ -1,0 +1,105 @@
+{
+  "classification": "UNVERIFIED_POINTER_TABLE",
+  "slots": [
+    {
+      "slot": 0,
+      "address": "0x142f15790",
+      "target": "0x141a45220",
+      "executable_section": true,
+      "function": [
+        {
+          "name": "FUN_141a45220",
+          "status": "decompiled"
+        }
+      ]
+    },
+    {
+      "slot": 1,
+      "address": "0x142f15798",
+      "target": "0x141a45960",
+      "executable_section": true,
+      "function": [
+        {
+          "name": "FUN_141a45960",
+          "status": "decompiled"
+        }
+      ]
+    },
+    {
+      "slot": 2,
+      "address": "0x142f157a0",
+      "target": "0x141a46320",
+      "executable_section": true,
+      "function": [
+        {
+          "name": "FUN_141a46320",
+          "status": "decompiled"
+        }
+      ]
+    },
+    {
+      "slot": 3,
+      "address": "0x142f157a8",
+      "target": "0x141a45f60",
+      "executable_section": true,
+      "function": []
+    },
+    {
+      "slot": 4,
+      "address": "0x142f157b0",
+      "target": "0x141a45f40",
+      "executable_section": true,
+      "function": []
+    },
+    {
+      "slot": 5,
+      "address": "0x142f157b8",
+      "target": "0x141a45e20",
+      "executable_section": true,
+      "function": []
+    },
+    {
+      "slot": 6,
+      "address": "0x142f157c0",
+      "target": "0x141a45d20",
+      "executable_section": true,
+      "function": [
+        {
+          "name": "FUN_141a45d20",
+          "status": "decompiled"
+        }
+      ]
+    },
+    {
+      "slot": 7,
+      "address": "0x142f157c8",
+      "target": "0x141a462d0",
+      "executable_section": true,
+      "function": []
+    },
+    {
+      "slot": 8,
+      "address": "0x142f157d0",
+      "target": "0x141a45cf0",
+      "executable_section": true,
+      "function": [
+        {
+          "name": "FUN_141a45cf0",
+          "status": "decompiled"
+        }
+      ]
+    },
+    {
+      "slot": 9,
+      "address": "0x142f157d8",
+      "target": "0x141a45e30",
+      "executable_section": true,
+      "function": [
+        {
+          "name": "thunk_FUN_14538a9df",
+          "status": "skipped_external_or_thunk"
+        }
+      ]
+    }
+  ]
+}

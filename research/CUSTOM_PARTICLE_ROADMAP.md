@@ -25,3 +25,7 @@ A transform-only particle record cannot reproduce a non-deterministic emitter. O
 5. Investigate seed/state access; report unsupported exact reconstruction rather than simulate gameplay AI.
 
 Audio requires independent event/loop/parameter tracks and stop/seek semantics. Re-triggering a sound on every evaluated frame is incorrect. State when muted/scrubbing must be explicit. Runtime verification of custom particles, sound replay and exact emitter reconstruction: UNKNOWN.
+
+## Additional reference hub (2026-10-08)
+
+See `research/SOULSMODDING_REFERENCE_INDEX.md` for the reviewed Souls Modding hub, exact FXR component-notes sheet, resource-usage candidates and limitations. Its particle list links to the same C29 spreadsheet; no duplicate catalog import is needed. The numbering guide suggests a cutscene family for 7191190, but this is not a verified semantic name. Detailed FXR property notes are the next source for density/scale/intensity research; no native property binding follows from the hub alone.

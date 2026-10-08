@@ -19,6 +19,7 @@
 #include "CinematicCamera.h"
 #include "TheaterHotkeys.h"
 #include "../LightEditor.h"
+#include "../ParticleEditor.h"
 
 namespace TheaterUI
 {
@@ -74,6 +75,7 @@ namespace TheaterUI
         void PlayDollyPath(const OverlayFrame& f);
         void DrawDollyViewport(const OverlayFrame& f);
         bool DrawLightViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled);
+        bool DrawParticleViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled);
         void DrawGameViewport(const OverlayFrame& f);
         void DrawSequencer(const OverlayFrame& f);
         void DrawToolbar(const OverlayFrame& f, float height);
@@ -120,9 +122,12 @@ namespace TheaterUI
         std::uint64_t dollySelectionAnchor_=0;
         int gizmoOperation_=0,gizmoAxis_=-1;
         bool gizmoDragging_=false;
-        bool showLightMarkers_=true,viewportLightSelected_=false,lightGizmoDragging_=false;
+        bool showLightMarkers_=true,showParticleMarkers_=true,viewportLightSelected_=false,viewportParticleSelected_=false,lightGizmoDragging_=false,particleGizmoDragging_=false;
         int lightGizmoAxis_=-1;
         light_editor::Light lightGizmoStart_;
+        particle_editor::Emitter particleGizmoStart_;
+        ImVec2 particleGizmoMouseStart_{};
+        double particleGizmoPixelsPerUnit_=1.0;
         ImVec2 lightGizmoMouseStart_{},lightGizmoScreenAxis_{};
         double lightGizmoPixelsPerUnit_=1,lightGizmoAngle_=0,lightGizmoLastCommit_=0;
         cinematic::Key gizmoStart_;

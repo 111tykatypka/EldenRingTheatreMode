@@ -16,6 +16,7 @@ mod game_profile { include!(concat!(env!("OUT_DIR"), "/game_profile.rs")); }
 mod control_protocol;
 mod camera_probe;
 mod foliage;
+mod wind;
 mod camera_quality;
 mod control_link;
 mod player_action;
@@ -27,6 +28,7 @@ mod codec;
 mod world_file;
 mod world_state;
 mod lighting_time;
+mod particles;
 mod actors;
 mod omission;
 mod weapon_loc;
@@ -58,7 +60,7 @@ fn lights_game_tick() {
     unsafe { tm_native_lights_tick(active as i32); }
     if unsafe { tm_lights_requested() } != 0 { unsafe { tm_lights_tick(active as i32); } }
 }
-extern "C" fn render_emergency_stop(){unsafe{tm_camera_runtime_stop();tm_weather_disable();tm_native_lights_disable();lighting_time::tm_lighting_time_request(-1);}log_game("EMERGENCY_STOP from overlay; camera and weather overrides disabled");}
+extern "C" fn render_emergency_stop(){unsafe extern "C"{fn tm_wind_disable();}unsafe{tm_camera_runtime_stop();tm_weather_disable();tm_wind_disable();tm_native_lights_disable();lighting_time::tm_lighting_time_request(-1);}log_game("EMERGENCY_STOP from overlay; camera, weather and wind overrides disabled");}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
 #[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
 #[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
@@ -194,12 +196,14 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     let now=monotonic_ns();
                     let weather_active=offline_allowed()&&!arrival::loading()&&unsafe{WorldChrMan::instance()}.map(|world|world.main_player.is_some()).unwrap_or(false);
                     unsafe{tm_weather_tick(weather_active as i32);}
+                    wind::tick(weather_active);
                     lighting_time::tick(weather_active);
+                    particles::tick(weather_active);
                     unsafe{tm_camera_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
                     unsafe extern "C"{fn tm_hud_game_context(active:i32);}
                     unsafe{tm_hud_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
                     camera_probe::tick(now);
-                    foliage::tick(PRESENT.load(Ordering::Acquire)!=0&&offline_allowed());
+                    foliage::tick(weather_active&&PRESENT.load(Ordering::Acquire)!=0,now);
                     camera_quality::tick(PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()&&!arrival::loading());
                     characters.tick(now);
                     {static PANICKED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);if std::panic::catch_unwind(||bone_replay::tick(0,now)).is_err()&&!PANICKED.swap(true,Ordering::Relaxed){log_game("BONE_REPLAY_ERROR: tick panicked");}}

@@ -1,0 +1,128 @@
+[
+  {
+    "va": "0x141bf1756",
+    "bytes": "f3 0f 10 86 94 00 00 00",
+    "op": "movss",
+    "args": "xmm0, dword ptr [rsi + 0x94]"
+  },
+  {
+    "va": "0x141bf175e",
+    "bytes": "f3 0f 11 87 e0 00 00 00",
+    "op": "movss",
+    "args": "dword ptr [rdi + 0xe0], xmm0"
+  },
+  {
+    "va": "0x141bf1766",
+    "bytes": "80 be ad 00 00 00 00",
+    "op": "cmp",
+    "args": "byte ptr [rsi + 0xad], 0"
+  },
+  {
+    "va": "0x141bf176d",
+    "bytes": "74 22",
+    "op": "je",
+    "args": "0x141bf1791"
+  },
+  {
+    "va": "0x141bf176f",
+    "bytes": "0f 57 d2",
+    "op": "xorps",
+    "args": "xmm2, xmm2"
+  },
+  {
+    "va": "0x141bf1772",
+    "bytes": "0f 2f c2",
+    "op": "comiss",
+    "args": "xmm0, xmm2"
+  },
+  {
+    "va": "0x141bf1775",
+    "bytes": "76 1a",
+    "op": "jbe",
+    "args": "0x141bf1791"
+  },
+  {
+    "va": "0x141bf1777",
+    "bytes": "41 80 7d 01 00",
+    "op": "cmp",
+    "args": "byte ptr [r13 + 1], 0"
+  },
+  {
+    "va": "0x141bf177c",
+    "bytes": "74 13",
+    "op": "je",
+    "args": "0x141bf1791"
+  },
+  {
+    "va": "0x141bf177e",
+    "bytes": "41 8b 45 04",
+    "op": "mov",
+    "args": "eax, dword ptr [r13 + 4]"
+  },
+  {
+    "va": "0x141bf1782",
+    "bytes": "39 86 b8 00 00 00",
+    "op": "cmp",
+    "args": "dword ptr [rsi + 0xb8], eax"
+  },
+  {
+    "va": "0x141bf1788",
+    "bytes": "77 07",
+    "op": "ja",
+    "args": "0x141bf1791"
+  },
+  {
+    "va": "0x141bf178a",
+    "bytes": "b8 01 00 00 00",
+    "op": "mov",
+    "args": "eax, 1"
+  },
+  {
+    "va": "0x141bf178f",
+    "bytes": "eb 02",
+    "op": "jmp",
+    "args": "0x141bf1793"
+  },
+  {
+    "va": "0x141bf1791",
+    "bytes": "33 c0",
+    "op": "xor",
+    "args": "eax, eax"
+  },
+  {
+    "va": "0x141bf1793",
+    "bytes": "88 87 c8 01 00 00",
+    "op": "mov",
+    "args": "byte ptr [rdi + 0x1c8], al"
+  },
+  {
+    "va": "0x141bf1799",
+    "bytes": "49 8b cc",
+    "op": "mov",
+    "args": "rcx, r12"
+  },
+  {
+    "va": "0x141bf179c",
+    "bytes": "0f b6 86 ae 00 00 00",
+    "op": "movzx",
+    "args": "eax, byte ptr [rsi + 0xae]"
+  },
+  {
+    "va": "0x141bf17a3",
+    "bytes": "88 87 c9 01 00 00",
+    "op": "mov",
+    "args": "byte ptr [rdi + 0x1c9], al"
+  },
+  {
+    "va": "0x141bf17a9",
+    "bytes": "0f b6 86 b0 00 00 00",
+    "op": "movzx",
+    "args": "eax, byte ptr [rsi + 0xb0]"
+  },
+  {
+    "va": "0x141bf17b0",
+    "bytes": "88 47 14",
+    "op": "mov",
+    "args": "byte ptr [rdi + 0x14], al"
+  }
+]

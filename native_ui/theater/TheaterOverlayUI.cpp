@@ -5,8 +5,13 @@
 #include "../CinematicCameraRuntime.h"
 #include "../EldenRingTimingAdapter.h"
 #include "../EldenRingWeatherAdapter.h"
+#include "../WindController.h"
 #include "../EldenRingLightAdapter.h"
 #include "../LightEditor.h"
+#include "../ParticleEditor.h"
+#include "../ParticleCatalog.h"
+#include "../ColorGrading.h"
+#include "../NativeParticleBackend.h"
 #include "../EldenRingHudAdapter.h"
 #include "CameraViewport.h"
 
@@ -152,6 +157,8 @@ void Overlay::LoadSettings()
     if (path.empty()) return;
     std::ifstream in(path);
     auto effects=camera_runtime::view(false);
+    auto grade=color_grading::settings();
+    auto wind=game_wind::view();
     std::string key; float value = 0;
     while (in >> key >> value)
     {
@@ -171,13 +178,29 @@ void Overlay::LoadSettings()
         else if(key=="shake_speed") effects.shake_speed=std::clamp(double(value),0.,10.);
         else if(key=="shake_smoothing") effects.shake_smoothing_seconds=std::clamp(double(value),0.,2.);
         else if(key=="shake_dolly") effects.shake_dolly=value!=0;
+        else if(key=="look_exposure")grade.exposure_ev=std::clamp(value,-5.f,5.f);
+        else if(key=="look_contrast")grade.contrast=std::clamp(value,0.f,2.f);
+        else if(key=="look_saturation")grade.saturation=std::clamp(value,0.f,2.f);
+        else if(key=="look_vibrance")grade.vibrance=value;
+        else if(key=="look_grain")grade.grain=value;
+        else if(key=="look_grain_size")grade.grain_size=value;
+        else if(key=="look_grain_speed")grade.grain_speed=value;
+        else if(key=="look_sharpen")grade.sharpen=value;
+        else if(key=="look_vignette")grade.vignette=value;
+        else if(key=="look_vignette_radius")grade.vignette_radius=value;
+        else if(key=="look_vignette_softness")grade.vignette_softness=value;
+        else if(key=="look_aberration")grade.aberration=value;
+        else if(key=="look_distortion")grade.distortion=value;
+        else if(key=="look_lut_blend")grade.lut_blend=value;
+        else if(key=="wind_strength")wind.strength=std::clamp(value,0.f,3.f);
         else if(key=="high_quality_lods")effects.high_quality_lods=value!=0;
         else if(key=="prevent_asset_fade")effects.prevent_asset_fade=value!=0;
         else if(key=="camera_near_plane")effects.near_plane=std::clamp(double(value),.001,1.);
         else if (key == "language") language = value >= 1 ? Lang::Russian : Lang::English;
         else if (key == "ui_scale") ui_.layout.uiScaleUser = std::clamp(value, 0.75f, 1.5f);
         else if (key == "panel_open") ui_.layout.panelOpen = value != 0;
-        else if (key == "tool" && value >= 0 && value <= (float)Tool::Lights) ui_.activeTool = (Tool)(int)value;
+        else if (key == "particle_markers") showParticleMarkers_=value!=0;
+        else if (key == "tool" && value >= 0 && value <= (float)Tool::Particles) ui_.activeTool = (Tool)(int)value;
         else if (key == "show_tools") showTools_ = value != 0;
         else if (key == "show_timeline") showTimeline_ = value != 0;
         else if (key == "show_event_log") showEventLog_ = value != 0;
@@ -185,6 +208,9 @@ void Overlay::LoadSettings()
         else if (key == "sound_volume") Sound::SetVolume(std::clamp(value, 0.0f, 1.0f));
         else if (key == "replay_options") gReplayOptions = (std::uint32_t)value;
     }
+    // Persist only values; enabled defaults off and survives renderer resize.
+    color_grading::configure(grade);
+    game_wind::configure(false,wind.strength);
     camera_runtime::dolly_smoothing(effects.dolly_smoothing_seconds);
     camera_runtime::close_up(effects.prevent_asset_fade,effects.near_plane);
     camera_runtime::high_quality_lods(effects.high_quality_lods);
@@ -198,11 +224,18 @@ void Overlay::SaveSettings() const
     std::error_code ec; std::filesystem::create_directories(path.parent_path(), ec);
     std::ofstream out(path, std::ios::trunc);
     const auto effects=camera_runtime::view(false);
+    const auto grade=color_grading::settings();
+    out << "wind_strength " << game_wind::view().strength << "\n";
+    out << "look_exposure " << grade.exposure_ev << "\n" << "look_contrast " << grade.contrast << "\n" << "look_saturation " << grade.saturation << "\n";
+    out << "look_vibrance " << grade.vibrance << "\nlook_grain " << grade.grain << "\nlook_grain_size " << grade.grain_size << "\nlook_grain_speed " << grade.grain_speed << "\nlook_sharpen " << grade.sharpen
+        << "\nlook_vignette " << grade.vignette << "\nlook_vignette_radius " << grade.vignette_radius << "\nlook_vignette_softness " << grade.vignette_softness
+        << "\nlook_aberration " << grade.aberration << "\nlook_distortion " << grade.distortion << "\nlook_lut_blend " << grade.lut_blend << "\n";
     out << "curve_fraction " << curveFraction_ << "\n";
     out << "game_view_fit " << gameViewFit_ << "\n";
     out << "compact_tracks " << compactTracks_ << "\n" << "actor_tracks " << expandActorTracks_ << "\n";
     out << "high_quality_lods " << effects.high_quality_lods << "\n";
     out << "light_markers " << showLightMarkers_ << "\n";
+    out << "particle_markers " << showParticleMarkers_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
         << "dolly_visibility_key " << enableDollyVisibilityKey_ << "\n"
         << "dolly_curves " << showDollyCurves_ << "\n"
@@ -553,7 +586,8 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
     auto mousePoint=[&](){return ImVec2((io.MousePos.x-pictureMin.x)*display.x/(pictureMax.x-pictureMin.x),(io.MousePos.y-pictureMin.y)*display.y/(pictureMax.y-pictureMin.y));};
     auto line=[&](Vec a,Vec b,ImU32 color,float width=1.f){auto pa=projectPoint(a),pb=projectPoint(b);if(pa&&pb)draw->AddLine(ImVec2(float(pa->x),float(pa->y)),ImVec2(float(pb->x),float(pb->y)),color,width);};
     const bool lightInteraction=hasLights&&DrawLightViewport(f,camera.pose,pictureMin,pictureMax,hovered,scaled);
-    hovered=hovered&&!lightInteraction;
+    const bool particleInteraction=showParticleMarkers_&&DrawParticleViewport(f,camera.pose,pictureMin,pictureMax,hovered&&!lightInteraction,scaled);
+    hovered=hovered&&!lightInteraction&&!particleInteraction;
     if(hasDolly){
     if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys,camera.track_settings);curveGeneration_=camera.project_generation;}
     if(camera.keys.size()>1){
@@ -604,6 +638,26 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
 }
 
 // Light definitions share the camera projection and gizmo conventions; this draws editor handles,
+bool Overlay::DrawParticleViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled)
+{
+    using namespace cinematic; using namespace cinematic::viewport;
+    auto editor=particle_editor::view(); if(editor.emitters.empty()) return false;
+    auto& io=ImGui::GetIO(); const float s=ui_.rects.uiScale; const auto display=io.DisplaySize; auto* draw=ImGui::GetBackgroundDrawList();
+    auto projectPoint=[&](Vec p){auto r=project(camera,p,display.x,display.y);if(r&&scaled){r->x=min.x+r->x/display.x*(max.x-min.x);r->y=min.y+r->y/display.y*(max.y-min.y);}return r;};
+    bool consumed=false;
+    for(const auto& e:editor.emitters){auto c=projectPoint(e.transform.position);if(!c)continue;ImVec2 p(float(c->x),float(c->y));
+        const ImU32 col=e.id==editor.selected?IM_COL32(255,180,75,255):IM_COL32(165,225,255,e.enabled?220:90);
+        draw->AddCircleFilled(p,Px(5,s),col); draw->AddCircle(p,Px(10,s),col,16,Px(1,s));
+        char label[64];snprintf(label,sizeof(label),"Particle %llu",static_cast<unsigned long long>(e.id));draw->AddText(ImVec2(p.x+Px(9,s),p.y),col,label);
+        if(hovered&&!particleGizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(io.MousePos.x-p.x,io.MousePos.y-p.y)<Px(14,s)){particle_editor::select(e.id);viewportParticleSelected_=true;particleGizmoStart_=e;particleGizmoMouseStart_=io.MousePos;particleGizmoPixelsPerUnit_=std::max(1.,double(20*display.y/std::max(1.f,max.y-min.y)));particleGizmoDragging_=true;consumed=true;}
+    }
+    if(particleGizmoDragging_){auto current=particle_editor::view();auto it=std::find_if(current.emitters.begin(),current.emitters.end(),[&](auto&e){return e.id==current.selected;});if(it!=current.emitters.end()){
+        auto draft=*it; draft.transform=particleGizmoStart_.transform; const double dx=(io.MousePos.x-particleGizmoMouseStart_.x)/particleGizmoPixelsPerUnit_,dy=(io.MousePos.y-particleGizmoMouseStart_.y)/particleGizmoPixelsPerUnit_;
+        auto right=basis(camera.orientation,0),up=basis(camera.orientation,1);for(int i=0;i<3;++i)draft.transform.position[i]+=right[i]*dx-up[i]*dy;
+        if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){draft.transform=particleGizmoStart_.transform;particle_editor::edit(draft);particleGizmoDragging_=false;}else {particle_editor::edit(draft);if(!io.MouseDown[0])particleGizmoDragging_=false;}consumed=true;}}
+    return consumed;
+}
+
 // not native illumination. Called inside the same clipped viewport window as dolly markers.
 bool Overlay::DrawLightViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled)
 {
@@ -742,7 +796,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     struct Item { Tool tool; std::uint16_t glyph; Str label; bool available; };
     const Item top[] = {
         { Tool::Scene, Glyph::Scene, Str::Scene, true }, { Tool::Camera, Glyph::Camera, Str::Camera, true },
-        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Lights, Glyph::Look, Str::Lights, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
+        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Lights, Glyph::Look, Str::Lights, true }, { Tool::Particles, Glyph::Globe, Str::Particles, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
         { Tool::Export, Glyph::Export, Str::Export, true } };
     const Item bottom[] = { { Tool::Debug, Glyph::Debug, Str::Debug, true }, { Tool::Settings, Glyph::Settings, Str::Settings, true } };
 
@@ -818,8 +872,8 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     const auto& snap = f.snapshot;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(Space::LG, s), Px(Space::MD, s)));
     // The title bar shows the tool name and is the grab area; the window id stays the same per tool.
-    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather, Str::Lights };
-    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 8)]), ui_.rects.panelMin, ui_.rects.panelMax,
+    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather, Str::Lights, Str::Particles };
+    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 9)]), ui_.rects.panelMin, ui_.rects.panelMax,
         ImVec2(Px(260, s), Px(320, s)), &ui_.layout.panelOpen);
     if (!visible) { ImGui::End(); ImGui::PopStyleVar(); return; }
     // Hiding the log returns its space to the independently scrolling tool.
@@ -992,9 +1046,9 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         if(ImGui::CollapsingHeader("Close-up visibility")){
         double nearPlane=runtime.near_plane;bool preventFade=runtime.prevent_asset_fade;
         bool closeChanged=compactDouble("Near-Z",&nearPlane,.001,1.,"%.4f",.01);
-        closeChanged|=checkbox("Reduce asset fade",&preventFade);
+        closeChanged|=checkbox("Reduce close-camera fading",&preventFade);
         if(closeChanged){camera_runtime::close_up(preventFade,nearPlane);SaveSettings();}
-        ImGui::TextDisabled("Grass fading is not yet resolved.");
+        ImGui::TextWrapped("Reversible asset/model fade settings. Dedicated grass coverage needs verification. Near-Z controls clipping separately.");
         }
         if(ImGui::CollapsingHeader("Bone camera (advanced)")){
         if(ImGui::Button("Use Bone camera")){camera_runtime::mode(3);camera_runtime::enable(true);}
@@ -1116,10 +1170,43 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::TextDisabled("Native lights: %u",native.rendered);
         if(!native.status.empty())ImGui::TextWrapped("%s",native.status.c_str());
         auto editor=light_editor::view();
+        static bool enabledOnly=false;
+        checkbox("Enabled lights only",&enabledOnly);
+        const auto enabledCount=std::count_if(editor.lights.begin(),editor.lights.end(),[](const auto& l){return l.enabled;});
+        ImGui::TextDisabled("%zu lights | %zu enabled | %u submitted",editor.lights.size(),size_t(enabledCount),native.rendered);
+        const float listHeight=ImGui::GetTextLineHeightWithSpacing()*7;
+        if(ImGui::BeginTable("##scene_lights",4,ImGuiTableFlags_ScrollY|ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerH|ImGuiTableFlags_SizingStretchProp,ImVec2(0,listHeight))){
+            ImGui::TableSetupScrollFreeze(0,1);
+            ImGui::TableSetupColumn("On",ImGuiTableColumnFlags_WidthFixed,Px(28,s));
+            ImGui::TableSetupColumn("Light",ImGuiTableColumnFlags_WidthStretch,2);
+            ImGui::TableSetupColumn("Type",ImGuiTableColumnFlags_WidthStretch,1);
+            ImGui::TableSetupColumn("State",ImGuiTableColumnFlags_WidthStretch,1);
+            ImGui::TableHeadersRow();
+            for(const auto& l:editor.lights){
+                if(enabledOnly&&!l.enabled)continue;
+                ImGui::PushID(std::to_string(l.id).c_str());ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);
+                bool enabled=l.enabled;if(ImGui::Checkbox("##enabled",&enabled)){auto edited=l;edited.enabled=enabled;light_editor::edit(edited);}
+                ImGui::TableSetColumnIndex(1);
+                if(ImGui::Selectable(l.name.c_str(),l.id==editor.selected,ImGuiSelectableFlags_None)){light_editor::select(l.id);viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}
+                if(ImGui::IsItemHovered())ImGui::SetTooltip("%s\nID: %llu",l.name.c_str(),static_cast<unsigned long long>(l.id));
+                ImGui::TableSetColumnIndex(2);ImGui::TextUnformatted(l.type==light_editor::Type::Point?"Point":"Spot");
+                const bool submitted=std::find(native.submitted_ids.begin(),native.submitted_ids.end(),l.id)!=native.submitted_ids.end();
+                ImGui::TableSetColumnIndex(3);ImGui::TextUnformatted(!l.enabled?"Off":!native.enabled?"Defined":submitted?"Submitted":"Pending");
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        if(editor.lights.empty())ImGui::TextDisabled("No custom lights. Create one at the camera.");
+        ImGui::BeginDisabled(!editor.selected);
+        if(ImGui::Button("Duplicate selected",ImVec2(-FLT_MIN,0))&&light_editor::duplicate(editor.selected)){viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}
+        ImGui::EndDisabled();
+        bool shadows=native.shadows;
+        ImGui::BeginDisabled(!native.shadow_available);
+        if(checkbox("Experimental dynamic shadows",&shadows))native_lights::shadows(shadows);
+        ImGui::EndDisabled();
+        ImGui::TextWrapped("Custom lights only. Shadows depend on engine quality and shadow resources; may reduce FPS.");
+        editor=light_editor::view();
         const auto selected=std::find_if(editor.lights.begin(),editor.lights.end(),[&](const auto& l){return l.id==editor.selected;});
-        const char* name=selected==editor.lights.end()?"Select light":selected->name.c_str();
-        if(ImGui::BeginCombo("Light",name)){
-            for(const auto& l:editor.lights){ImGui::PushID(int(l.id));if(ImGui::Selectable(l.name.c_str(),l.id==editor.selected)){light_editor::select(l.id);viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}ImGui::PopID();}ImGui::EndCombo();}
         if(selected!=editor.lights.end()){
             auto light=*selected;bool changed=false;
             changed|=checkbox("Enabled",&light.enabled);
@@ -1139,17 +1226,20 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             changed|=slider("Radius",&light.radius,.01f,500,"%.2f",ImGuiSliderFlags_Logarithmic,5);
             changed|=slider("Intensity",&light.intensity,0,100,"%.3f",ImGuiSliderFlags_Logarithmic,1);
             labelAbove("Light color RGB");ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x,Px(170,s)));changed|=ImGui::ColorPicker3("##light_color",light.rgb,ImGuiColorEditFlags_PickerHueWheel|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
-            ImGui::BeginDisabled();
-            checkbox("Shadows (not supported yet)",&light.shadows);
+            ImGui::BeginDisabled(!native.shadow_available);
+            changed|=checkbox("Cast shadows",&light.shadows);
             ImGui::BeginDisabled(!light.shadows);
-            int quality=int(light.shadow_level);labelAbove("Shadow quality level");if(ImGui::SliderInt("##shadow_quality",&quality,1,5)){light.shadow_level=quality;changed=true;}
+            int quality=int(light.shadow_level);labelAbove("Required shadow quality level");if(ImGui::SliderInt("##shadow_quality",&quality,1,5)){light.shadow_level=quality;changed=true;}
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("Native minimum quality threshold, not shadow-map resolution. A higher requirement can suppress shadows.");
             changed|=slider("Shadow strength",&light.shadow_strength,0,1,"%.2f",0,1);
             ImGui::EndDisabled();
             ImGui::EndDisabled();
             if(ImGui::CollapsingHeader("Advanced light properties")){
                 changed|=slider("Source radius",&light.source_radius,0,500,"%.2f",ImGuiSliderFlags_Logarithmic,.1f);
-                ImGui::BeginDisabled();
+                ImGui::BeginDisabled(!native.shadow_available||!light.shadows);
                 labelAbove("Shadow depth bias");changed|=ImGui::SliderInt("##shadow_bias",&light.shadow_bias,-7,7);
+                ImGui::EndDisabled();
+                ImGui::BeginDisabled();
                 changed|=slider("Scattering scale",&light.scattering,0,10,"%.2f",0,1);
                 ImGui::EndDisabled();
                 labelAbove("Specular color RGB");changed|=ImGui::ColorEdit3("##specular_color",light.specular_rgb,ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
@@ -1159,7 +1249,120 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         }
         if(ImGui::Button("Save light setup"))light_editor::save();ImGui::SameLine();if(ImGui::Button("Load setup")){light_editor::load();viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}
         if(!editor.status.empty())ImGui::TextWrapped("%s",editor.status.c_str());
-        ImGui::TextDisabled("Native illumination prototype. Shadows / softness unavailable.");
+        ImGui::TextDisabled("Shadow requests are experimental. Cone softness unavailable.");
+        break;
+    }
+    case Tool::Particles:
+    {
+        section(T(Str::ParticleSpawner));
+        if(ImGui::Button("Inspect native VFX"))native_particles::inspect();
+        const auto vfx=native_particles::view();
+        ImGui::TextWrapped("%s",vfx.status.c_str());
+        if(vfx.available)ImGui::Text("Native debug FXR ID: %u | Distance: %.2f",vfx.debug_effect_id,vfx.camera_distance);
+        static bool nativeParticleExperiment=false;
+        checkbox("Experimental native FXR preview",&nativeParticleExperiment);
+        const auto previewStatus=native_particles::preview_view();
+        ImGui::TextWrapped("%s",previewStatus.status.c_str());
+        if(ImGui::Button("Stop native particle preview"))native_particles::stop_preview();
+        ImGui::TextWrapped("Position an emitter, choose a resident FXR, then preview it.");
+        auto particles=particle_editor::view(); auto camera=camera_runtime::view(false);
+        bool show=showParticleMarkers_; if(checkbox("Show particle emitters",&show)){showParticleMarkers_=show;SaveSettings();}
+        std::size_t count=0; const auto* catalog=particle_editor::presets(count);
+        static int chosenPreset=1001;
+        const char* chosenName="Choose particle"; for(std::size_t i=0;i<count;++i)if(catalog[i].id==chosenPreset)chosenName=catalog[i].name;
+        if(ImGui::BeginCombo("Particle category / effect",chosenName)){
+            const char* last="";
+            for(std::size_t i=0;i<count;++i){
+                const char* category="Ambient";
+                switch(catalog[i].category){case particle_editor::Category::Environment:category="Environment";break;case particle_editor::Category::Weather:category="Weather";break;case particle_editor::Category::Fire:category="Fire";break;case particle_editor::Category::Smoke:category="Smoke";break;case particle_editor::Category::Magic:category="Magic";break;case particle_editor::Category::Combat:category="Combat";break;case particle_editor::Category::Water:category="Water";break;case particle_editor::Category::Custom:category="Custom";break;default:break;}
+                if(std::strcmp(last,category)!=0){if(last[0]){}ImGui::TextDisabled("%s",category);last=category;}
+                ImGui::PushID(catalog[i].id);if(ImGui::Selectable(catalog[i].name,catalog[i].id==chosenPreset))chosenPreset=catalog[i].id;ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::BeginDisabled(!camera.observed);
+        if(ImGui::Button("Add emitter at camera",ImVec2(-FLT_MIN,0)))particle_editor::create(chosenPreset,camera.pose);
+        ImGui::TextDisabled("Catalog entries are editor templates; native FXR mappings are pending.");
+        ImGui::EndDisabled();
+        if(ImGui::Button("Save particle setup"))particle_editor::save();ImGui::SameLine();if(ImGui::Button("Load setup")){particle_editor::load();viewportParticleSelected_=false;particleGizmoDragging_=false;}
+        if(ImGui::Button("Delete all emitters")){particle_editor::clear();particleGizmoDragging_=false;}
+        auto selected=std::find_if(particles.emitters.begin(),particles.emitters.end(),[&](const auto&e){return e.id==particles.selected;});
+        const char* selectedName=selected==particles.emitters.end()?"Select emitter":selected->name.c_str();
+        if(ImGui::BeginCombo("Emitter",selectedName)){for(const auto&e:particles.emitters){ImGui::PushID((int)e.id);if(ImGui::Selectable(e.name.c_str(),e.id==particles.selected)){particle_editor::select(e.id);viewportParticleSelected_=true;}ImGui::PopID();}ImGui::EndCombo();}
+        if(selected!=particles.emitters.end()){
+            static std::uint32_t loadedFxr=0;
+            static ImGuiTextFilter fxrFilter;
+            static bool favoritesOnly=false, describedOnly=false;
+            fxrFilter.Draw("Search ID / name / category",-FLT_MIN);
+            checkbox("Favorites only",&favoritesOnly);
+            checkbox("Described effects only",&describedOnly);
+            const auto& annotations=particle_catalog::entries();
+            std::vector<std::uint32_t> visibleEffects;
+            for(auto id:vfx.loaded_effect_ids){
+                const auto found=annotations.find(id);
+                if(favoritesOnly&&(found==annotations.end()||!found->second.favorite))continue;
+                const auto* ref=particle_catalog::reference(id);
+                if(describedOnly&&(found==annotations.end()||found->second.name.empty())&&(!ref||(!ref->info[0]&&!ref->behavior[0])))continue;
+                if(!fxrFilter.IsActive()||fxrFilter.PassFilter(particle_catalog::search_text(id).c_str()))visibleEffects.push_back(id);
+            }
+            ImGui::TextDisabled("%zu shown / %zu resident effects",visibleEffects.size(),vfx.loaded_effect_ids.size());
+            const auto selectedFxrLabel=loadedFxr?particle_catalog::label(loadedFxr):"Select a resident effect";
+            if(ImGui::BeginCombo("Resident game effects",selectedFxrLabel.c_str())){
+                ImGuiListClipper clipper;clipper.Begin(static_cast<int>(visibleEffects.size()));
+                while(clipper.Step())for(int i=clipper.DisplayStart;i<clipper.DisplayEnd;++i){
+                    const auto id=visibleEffects[i];const auto label=particle_catalog::label(id);
+                    ImGui::PushID(static_cast<int>(id));if(ImGui::Selectable(label.c_str(),id==loadedFxr))loadedFxr=id;ImGui::PopID();
+                }
+                if(visibleEffects.empty())ImGui::TextDisabled("No matching resident effects");
+                ImGui::EndCombo();
+            }
+            if(const auto* ref=particle_catalog::reference(loadedFxr)){
+                if(ImGui::TreeNode("Reference sheet details")){
+                    ImGui::TextWrapped("Bank: %s",ref->bank);
+                    if(ref->origin[0])ImGui::TextWrapped("Origin: %s",ref->origin);
+                    if(ref->color[0])ImGui::TextWrapped("Color: %s",ref->color);
+                    if(ref->behavior[0])ImGui::TextWrapped("Behavior: %s",ref->behavior);
+                    if(ref->info[0])ImGui::TextWrapped("Usage / notes: %s",ref->info);
+                    if(!ref->info[0]&&!ref->behavior[0])ImGui::TextDisabled("Sheet has no description for this ID.");
+                    ImGui::TextWrapped("Resources: %s",ref->resources);
+                    if(ref->refs[0])ImGui::TextWrapped("References: %s",ref->refs);
+                    ImGui::TextDisabled("Community reference; not verified against every effect in 2.7.0.0.");
+                    ImGui::TreePop();
+                }
+            }
+            static std::uint32_t editingFxr=0;
+            static char fxrName[256]{},fxrCategory[128]{};
+            static bool fxrFavorite=false;
+            if(editingFxr!=loadedFxr){
+                editingFxr=loadedFxr;fxrName[0]=fxrCategory[0]=0;fxrFavorite=false;
+                if(auto it=annotations.find(loadedFxr);it!=annotations.end()){
+                    snprintf(fxrName,sizeof(fxrName),"%s",it->second.name.c_str());
+                    snprintf(fxrCategory,sizeof(fxrCategory),"%s",it->second.category.c_str());fxrFavorite=it->second.favorite;
+                }
+            }
+            ImGui::BeginDisabled(!loadedFxr);
+            ImGui::InputText("My effect name",fxrName,sizeof(fxrName));
+            ImGui::InputText("My category",fxrCategory,sizeof(fxrCategory));
+            checkbox("Favorite effect",&fxrFavorite);
+            if(ImGui::Button("Save effect label"))particle_catalog::save(loadedFxr,{fxrName,fxrCategory,fxrFavorite});
+            ImGui::EndDisabled();
+            if(!particle_catalog::status().empty())ImGui::TextWrapped("%s",particle_catalog::status().c_str());
+            ImGui::TextDisabled("Sheet labels are community descriptions. Your saved names take priority.");
+            ImGui::BeginDisabled(!nativeParticleExperiment||!loadedFxr||previewStatus.faulted);
+            if(ImGui::Button("Preview selected FXR here (2 seconds)",ImVec2(-FLT_MIN,0)))native_particles::preview(loadedFxr,selected->transform);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("Resident effects only. Native scale / intensity are not connected yet.");
+            auto e=*selected; bool changed=false; changed|=checkbox("Enabled",&e.enabled);changed|=checkbox("Loop",&e.loop);
+            changed|=slider("Duration (s)",&e.duration_seconds,0.f,60.f,"%.2f",ImGuiSliderFlags_Logarithmic,1.f);
+            changed|=slider("Repeat delay (s)",&e.repeat_seconds,0.f,60.f,"%.2f",ImGuiSliderFlags_Logarithmic,0.f);
+            changed|=slider("Scale",&e.scale,.01f,100.f,"%.2f",ImGuiSliderFlags_Logarithmic,1.f);changed|=slider("Intensity",&e.intensity,0.f,100.f,"%.2f",ImGuiSliderFlags_Logarithmic,1.f);
+            float xyz[3];for(int i=0;i<3;++i)xyz[i]=float(e.transform.position[i]);labelAbove("Emitter position XYZ");if(ImGui::DragFloat3("##particle_xyz",xyz,.05f)){for(int i=0;i<3;++i)e.transform.position[i]=xyz[i];changed=true;}
+            auto angles=cinematic::viewport::angles(e.transform.orientation);float deg[3];for(int i=0;i<3;++i)deg[i]=float(angles[i]*180./3.141592653589793);labelAbove("Emitter rotation pitch / yaw / roll");if(ImGui::DragFloat3("##particle_rotation",deg,.2f))if(auto q=cinematic::mouse_look({0,0,0,1},deg[1]*3.141592653589793/180,deg[0]*3.141592653589793/180,deg[2]*3.141592653589793/180)){e.transform.orientation=*q;changed=true;}
+            if(ImGui::Button("Move emitter to current camera",ImVec2(-FLT_MIN,0))&&camera.observed){e.transform=camera.pose;changed=true;}
+            if(changed)particle_editor::edit(e);if(ImGui::Button("Delete selected emitter",ImVec2(-FLT_MIN,0)))particle_editor::remove(e.id);
+        }
+        if(!particles.status.empty())ImGui::TextWrapped("%s",particles.status.c_str());
+        ImGui::TextDisabled("FXR previews use native effects; emitter markers are editor controls.");
         break;
     }
     case Tool::Weather:
@@ -1186,15 +1389,71 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::TextWrapped("Rain, snow, fog, wind and regional variants. Effects depend on the loaded area and may blend gradually.");
         ImGui::TextDisabled("Runtime / visual validation required.");
         ImGui::TextWrapped("Overrides turn off on loading, lost connection or game focus loss. Weather is not stored in replays yet.");
+        ImGui::Separator();section("Wind response");
+        auto wind=game_wind::view();
+        bool windChanged=checkbox("Override foliage wind strength",&wind.enabled);
+        windChanged|=slider("Strength",&wind.strength,0.f,3.f,"%.2fx",0,1.f);
+        if(windChanged){game_wind::configure(wind.enabled,wind.strength);SaveSettings();}
+        if(ImGui::Button("Restore native wind",ImVec2(-FLT_MIN,0)))game_wind::configure(false,wind.strength);
+        ImGui::TextDisabled("Grass: %u   Wind-enabled assets: %u",wind.grass_rows,wind.asset_rows);
+        ImGui::TextWrapped("%s",wind.status==1?"Native response rows updated; visual verification required.":wind.status<0?"Native wind response unavailable; override disabled.":"Native wind response.");
+        ImGui::TextWrapped("Direction and cloth forces: unavailable. This changes foliage response, not the world's wind force. Loaded models may cache these values.");
+        if(ImGui::TreeNode("Wind diagnostics")){
+            if(checkbox("Inspect native force fields (read-only)",&wind.inspect))game_wind::inspect(wind.inspect);
+            ImGui::TextDisabled("Registry slots: %u   Readable records: %u",wind.native_slots,wind.observed_records);
+            ImGui::TextWrapped("%s",wind.probe_status==1?"Registry observed; force types and cloth consumers still unverified.":wind.probe_status==0?"Inactive / native registry not loaded.":wind.probe_status==-3?"Registry changed during read; snapshot discarded.":"Read guard failed or registry unreadable.");
+            ImGui::TextDisabled("One-second read-only sampling; no native force writes.");ImGui::TreePop();
+        }
         break;
     }
     case Tool::Look: {
-        section("Quality");
-        bool quality=camera_runtime::view(false).high_quality_lods;
-        if(checkbox("High quality LODs (character updates)",&quality)){camera_runtime::high_quality_lods(quality);SaveSettings();}
-        ImGui::TextWrapped("Experimental: requests normal updates for loaded characters in Free / Dolly camera, including offscreen NPCs.");
-        ImGui::TextDisabled("May increase CPU usage. Off by default.");
-        ImGui::TextWrapped("Does not force mesh LODs or load distant actors. In-game validation required.");
+        section("Look");
+        const auto gradeView=color_grading::view();auto grade=gradeView.settings;
+        bool changed=checkbox("Enable Look effects",&grade.enabled);
+        if(ImGui::CollapsingHeader("Color",ImGuiTreeNodeFlags_DefaultOpen)){
+            changed|=slider("Exposure (EV)",&grade.exposure_ev,-5.f,5.f,"%+.2f EV",0,0.f);
+            changed|=slider("Contrast",&grade.contrast,0.f,2.f,"%.2f",0,1.f);
+            changed|=slider("Saturation",&grade.saturation,0.f,2.f,"%.2f",0,1.f);
+            changed|=slider("Vibrance",&grade.vibrance,-1.f,1.f,"%+.2f",0,0.f);
+        }
+        if(ImGui::CollapsingHeader("LUT")){
+            static char lutPath[2048]{};
+            ImGui::SetNextItemWidth(-FLT_MIN);ImGui::InputTextWithHint("##lut_path","Paste a .cube file path",lutPath,sizeof(lutPath));
+            if(ImGui::Button("Load .cube"))color_grading::load_lut(lutPath);
+            ImGui::SameLine();if(ImGui::Button("Unload LUT"))color_grading::unload_lut();
+            changed|=slider("LUT blend",&grade.lut_blend,0.f,1.f,"%.2f",0,0.f);
+            ImGui::TextWrapped("%s",gradeView.lut_status.c_str());
+            if(!gradeView.lut_path.empty())ImGui::TextWrapped("%s",gradeView.lut_path.c_str());
+            ImGui::TextDisabled("3D Cube; use an SDR / display-referred LUT.");
+        }
+        if(ImGui::CollapsingHeader("Lens")){
+            changed|=slider("Vignette",&grade.vignette,0.f,1.f,"%.2f",0,0.f);
+            changed|=slider("Vignette radius",&grade.vignette_radius,0.f,1.f,"%.2f",0,.45f);
+            changed|=slider("Vignette softness",&grade.vignette_softness,.01f,1.f,"%.2f",0,.5f);
+            changed|=slider("Chromatic aberration",&grade.aberration,0.f,10.f,"%.1f px",0,0.f);
+            changed|=slider("Lens distortion",&grade.distortion,-.5f,.5f,"%+.2f",0,0.f);
+        }
+        if(ImGui::CollapsingHeader("Texture")){
+            changed|=slider("Film grain",&grade.grain,0.f,.25f,"%.3f",0,0.f);
+            changed|=slider("Grain size",&grade.grain_size,1.f,8.f,"%.1f px",0,1.f);
+            changed|=slider("Grain speed",&grade.grain_speed,0.f,4.f,"%.2fx",0,1.f);
+            changed|=slider("Sharpening",&grade.sharpen,0.f,2.f,"%.2f",0,0.f);
+        }
+        if(ImGui::Button("Reset Look values",ImVec2(-FLT_MIN,0))){bool enabled=grade.enabled;grade={};grade.enabled=enabled;changed=true;}
+        if(changed){color_grading::configure(grade);SaveSettings();}
+        ImGui::TextWrapped("%s",gradeView.status.c_str());
+        ImGui::TextDisabled("Right / middle click a slider to reset.");
+        if(ImGui::TreeNode("About Look effects")){
+            ImGui::TextWrapped("SDR image adjustments after game tone mapping. Theater UI stays unchanged; the native game HUD is part of the graded image.");
+            ImGui::TextWrapped("Disable to compare with the original. Values are saved; enable is off at startup. HDR is unsupported in this pass.");
+            ImGui::TextWrapped("Grain uses real time, independent of replay speed. Bloom, diffusion, local contrast and native fog controls are not implemented in this pass.");
+            ImGui::TreePop();
+        }
+        if(ImGui::CollapsingHeader("Rendering quality")){
+            bool quality=camera_runtime::view(false).high_quality_lods;
+            if(checkbox("Full character updates (experimental)",&quality)){camera_runtime::high_quality_lods(quality);SaveSettings();}
+            ImGui::TextWrapped("Requests normal loaded-character updates in Free / Dolly. May increase CPU use; does not force mesh LODs.");
+        }
         break;
     }
     case Tool::Export: section(T(Str::NotYetAvailable)); note(Str::ExportNotes); break;

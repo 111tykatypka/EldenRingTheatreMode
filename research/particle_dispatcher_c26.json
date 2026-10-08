@@ -1,0 +1,14 @@
+{
+  "sha256": "d1a84083c6c7c7902162ff098f7d86812839aa6b3575959398857e539c488134",
+  "matches": [
+    {
+      "address": "0x140d980b0",
+      "rva": "0xd980b0",
+      "bytes": "85 d2 74 0a 83 fa 01 75 0a e9 12 9f ff ff e9 dd f7 ff ff c3 48 8d 0d 35 08 50 02 e9 90 ed 1e 01",
+      "mode_1_target": "0x140d91fd0",
+      "mode_0_target": "0x140d978a0",
+      "second_jump_valid": true
+    }
+  ],
+  "unique": true
+}

@@ -14,7 +14,14 @@ std::filesystem::path path(){wchar_t directory[32768]{};auto n=GetEnvironmentVar
 }
 View view(){std::lock_guard lock(mutex);return state;}
 bool snapshot(View& out){std::unique_lock lock(mutex,std::try_to_lock);if(!lock.owns_lock())return false;out=state;return true;}
-void create(Type type,const cinematic::State& camera){if(!cinematic::valid(camera)||unsigned(type)>1)return;std::lock_guard lock(mutex);Light light;light.id=next_id++;light.type=type;light.transform=camera;light.name=(type==Type::Point?"Point ":"Spot ")+std::to_string(light.id);state.selected=light.id;state.lights.push_back(light);state.status="Light created; renderer request queued";}
+void create(Type type,const cinematic::State& camera){if(!cinematic::valid(camera)||unsigned(type)>1)return;std::lock_guard lock(mutex);if(!next_id||next_id==std::numeric_limits<std::uint64_t>::max()){state.status="Light ID space exhausted";return;}Light light;light.id=next_id++;light.type=type;light.transform=camera;light.name=(type==Type::Point?"Point ":"Spot ")+std::to_string(light.id);state.selected=light.id;state.lights.push_back(light);state.status="Light created; renderer request queued";}
+bool duplicate(std::uint64_t id){
+ std::lock_guard lock(mutex);auto source=std::find_if(state.lights.begin(),state.lights.end(),[id](const auto& l){return l.id==id;});
+ if(source==state.lights.end()||!valid(*source)||!next_id||next_id==std::numeric_limits<std::uint64_t>::max()){state.status="Cannot duplicate selected light";return false;}
+ Light copy=*source;copy.id=next_id++;copy.name=source->name+" copy "+std::to_string(copy.id);
+ const auto selected=copy.id;state.lights.push_back(std::move(copy));state.selected=selected;
+ state.status="Light duplicated at the same transform; select its handle to move it";return true;
+}
 void select(std::uint64_t id){std::lock_guard lock(mutex);if(std::any_of(state.lights.begin(),state.lights.end(),[&](auto& l){return l.id==id;}))state.selected=id;}
 void edit(Light light){if(!valid(light))return;light.transform.orientation=*cinematic::normalized(light.transform.orientation);std::lock_guard lock(mutex);for(auto& l:state.lights)if(l.id==light.id){l=std::move(light);state.status="Light updated; renderer request queued";return;}}
 void remove(std::uint64_t id){std::lock_guard lock(mutex);std::erase_if(state.lights,[&](auto& l){return l.id==id;});if(state.selected==id)state.selected=state.lights.empty()?0:state.lights.back().id;state.status="Definition removed";}

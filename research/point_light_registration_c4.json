@@ -1,0 +1,20 @@
+{
+  "function": [
+    {
+      "entry": "141a27d20",
+      "rva": "1a27d20",
+      "name": "FUN_141a27d20",
+      "signature": "undefined FUN_141a27d20()",
+      "body_bytes": 510,
+      "status": "decompiled",
+      "c_file": "decompiled/functions_00275.c"
+    }
+  ],
+  "pseudocode": [
+    {
+      "entry": "141a27d20",
+      "c_file": "decompiled/functions_00275.c",
+      "body": "\nvoid FUN_141a27d20(longlong param_1,undefined8 *param_2,undefined8 param_3,undefined4 param_4)\n\n{\n  undefined8 *puVar1;\n  int iVar2;\n  undefined8 *puStackX_10;\n  \n  if (param_2 != (undefined8 *)0x0) {\n    FUN_141aede70(param_2,param_4,param_3,param_4,0xfffffffffffffffe);\n    puStackX_10 = param_2;\n    if ((char)param_3 == '\\0') {\n      if (*(char *)(param_2 + 0x1c) == '\\0') {\n        FUN_141ebbfc0(param_2 + 1);\n        FUN_141a2b5b0(param_1 + 0x18,&puStackX_10);\n        puVar1 = puStackX_10;\n        if (puStackX_10 != (undefined8 *)0x0) {\n          iVar2 = FUN_141ebc000(puStackX_10 + 1);\n          if (iVar2 == 1) {\n            (**(code **)*puVar1)(puVar1);\n          }\n          else if (iVar2 < 1) {\n                    /* WARNING: Subroutine does not return */\n            FUN_141ebb5a0(0,0xab,&DAT_143297250);\n          }\n        }\n      }\n      else {\n        FUN_141ebbfc0(param_2 + 1);\n        FUN_141a2b5b0(param_1 + 0x38,&puStackX_10);\n        puVar1 = puStackX_10;\n        if (puStackX_10 != (undefined8 *)0x0) {\n          iVar2 = FUN_141ebc000(puStackX_10 + 1);\n          if (iVar2 == 1) {\n            (**(code **)*puVar1)(puVar1);\n          }\n          else if (iVar2 < 1) {\n                    /* WARNING: Subroutine does not return */\n            FUN_141ebb5a0(0,0xab,&DAT_143297250);\n          }\n        }\n      }\n      DAT_1447f3834 = DAT_1447f3834 + 1;\n      *(int *)(param_2 + 0x1a) = DAT_1447f3834;\n    }\n    else {\n      FUN_141f0b0a0(param_1 + 0x58,0xffffffff);\n      if (*(char *)(param_2 + 0x1c) == '\\0') {\n        FUN_141ebbfc0(param_2 + 1);\n        FUN_141a2b5b0(param_1 + 0x18,&puStackX_10);\n        puVar1 = puStackX_10;\n        if (puStackX_10 != (undefined8 *)0x0) {\n          iVar2 = FUN_141ebc000(puStackX_10 + 1);\n          if (iVar2 == 1) {\n            (**(code **)*puVar1)(puVar1);\n          }\n          else if (iVar2 < 1) {\n                    /* WARNING: Subroutine does not return */\n            FUN_141ebb5a0(0,0xab,&DAT_143297250);\n          }\n        }\n      }\n      else {\n        FUN_141ebbfc0(param_2 + 1);\n        FUN_141a2b5b0(param_1 + 0x38,&puStackX_10);\n        puVar1 = puStackX_10;\n        if (puStackX_10 != (undefined8 *)0x0) {\n          iVar2 = FUN_141ebc000(puStackX_10 + 1);\n          if (iVar2 == 1) {\n            (**(code **)*puVar1)(puVar1);\n          }\n          else if (iVar2 < 1) {\n                    /* WARNING: Subroutine does not return */\n            FUN_141ebb5a0(0,0xab,&DAT_143297250);\n          }\n        }\n      }\n      DAT_1447f3834 = DAT_1447f3834 + 1;\n      *(int *)(param_2 + 0x1a) = DAT_1447f3834;\n      FUN_141f0b0e0(param_1 + 0x58);\n    }\n  }\n  return;\n}\n\n\n\n"
+    }
+  ]
+}

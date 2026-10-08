@@ -1,0 +1,292 @@
+[
+  {
+    "address": "142a378d0",
+    "rva": "2a378d0",
+    "value": "CSChrCliffWindModule"
+  },
+  {
+    "address": "142a37b50",
+    "rva": "2a37b50",
+    "value": "CliffWindSoundObj"
+  },
+  {
+    "address": "142bc83a0",
+    "rva": "2bc83a0",
+    "value": "WindStrength"
+  },
+  {
+    "address": "142c8a488",
+    "rva": "2c8a488",
+    "value": "GraphicsPathWinding"
+  },
+  {
+    "address": "142c8adf8",
+    "rva": "2c8adf8",
+    "value": "winding"
+  },
+  {
+    "address": "142cb1720",
+    "rva": "2cb1720",
+    "value": "rewind"
+  },
+  {
+    "address": "142cdc740",
+    "rva": "2cdc740",
+    "value": "hkaiNavMeshGenerationUtilsSettings::TriangleWinding"
+  },
+  {
+    "address": "142cdc778",
+    "rva": "2cdc778",
+    "value": "WINDING_CCW"
+  },
+  {
+    "address": "142cdc788",
+    "rva": "2cdc788",
+    "value": "WINDING_CW"
+  },
+  {
+    "address": "142cdd178",
+    "rva": "2cdd178",
+    "value": "triangleWinding"
+  },
+  {
+    "address": "142d08030",
+    "rva": "2d08030",
+    "value": "USER_EDGE_IGNORE_WINDING"
+  },
+  {
+    "address": "142d43310",
+    "rva": "2d43310",
+    "value": "elbowIndex"
+  },
+  {
+    "address": "142d4a8f0",
+    "rva": "2d4a8f0",
+    "value": "__newindex"
+  },
+  {
+    "address": "142d50928",
+    "rva": "2d50928",
+    "value": "hands:%d/elbowIndex"
+  },
+  {
+    "address": "142d546d8",
+    "rva": "2d546d8",
+    "value": "HKS_OPCODE_INTRINSIC_NEWINDEX"
+  },
+  {
+    "address": "142d54740",
+    "rva": "2d54740",
+    "value": "HKS_OPCODE_INTRINSIC_NEWINDEX_LITERAL"
+  },
+  {
+    "address": "142d56dc8",
+    "rva": "2d56dc8",
+    "value": "debuggerNewIndexMeta"
+  },
+  {
+    "address": "142d84590",
+    "rva": "2d84590",
+    "value": "hclSimpleWindAction"
+  },
+  {
+    "address": "142d859c0",
+    "rva": "2d859c0",
+    "value": "windDirection"
+  },
+  {
+    "address": "142d87568",
+    "rva": "2d87568",
+    "value": "windMinSpeed"
+  },
+  {
+    "address": "142d877d8",
+    "rva": "2d877d8",
+    "value": "windMaxSpeed"
+  },
+  {
+    "address": "142d87bb0",
+    "rva": "2d87bb0",
+    "value": "windFrequency"
+  },
+  {
+    "address": "142d998b0",
+    "rva": "2d998b0",
+    "value": " kg) total mass for cloth. Forces (like wind) may have almost no effect on it."
+  },
+  {
+    "address": "142d99910",
+    "rva": "2d99910",
+    "value": " kg) total mass for cloth. Forces (like wind) may cause large accelarations."
+  },
+  {
+    "address": "142e9be00",
+    "rva": "2e9be00",
+    "value": "hkaiNavMeshGenerationSettings::TriangleWinding"
+  },
+  {
+    "address": "142ed0000",
+    "rva": "2ed0000",
+    "value": "Multiple triangles share the same edge with the same winding direction on vertex indices [{}, {}]. Edge compression behavior may not be consistent."
+  },
+  {
+    "address": "142f00b70",
+    "rva": "2f00b70",
+    "value": "necessary data rewind wasn't possible"
+  },
+  {
+    "address": "142f02010",
+    "rva": "2f02010",
+    "value": "Send failed since rewinding of the data stream failed"
+  },
+  {
+    "address": "142f02db8",
+    "rva": "2f02db8",
+    "value": "Rewind stream after send"
+  },
+  {
+    "address": "1430ecaa0",
+    "rva": "30ecaa0",
+    "value": "__newindex"
+  },
+  {
+    "address": "143b13804",
+    "rva": "3b13804",
+    "value": "RtlVirtualUnwind"
+  },
+  {
+    "address": "143b14526",
+    "rva": "3b14526",
+    "value": "RtlUnwindEx"
+  },
+  {
+    "address": "143c825c0",
+    "rva": "3c825c0",
+    "value": ".?AVCSChrCliffWindModule@CS@@"
+  },
+  {
+    "address": "143c825f0",
+    "rva": "3c825f0",
+    "value": ".?AV?$DLRuntimeClassImpl@VCSChrCliffWindModule@CS@@$0A@@DLRF@@"
+  },
+  {
+    "address": "143cedf48",
+    "rva": "3cedf48",
+    "value": ".?AVCSRemoMapWindDisableAct@CS@@"
+  },
+  {
+    "address": "143cf8cb0",
+    "rva": "3cf8cb0",
+    "value": ".?AVIGXModelWindParam@GXSR@@"
+  },
+  {
+    "address": "143d059b8",
+    "rva": "3d059b8",
+    "value": ".?AVCSFD4WindForceSfxIns@CS@@"
+  },
+  {
+    "address": "143d1a828",
+    "rva": "3d1a828",
+    "value": ".?AVhclSimpleWindAction@@"
+  },
+  {
+    "address": "143d2ddc0",
+    "rva": "3d2ddc0",
+    "value": ".?AV?$TGXStructuredBuffer@UGXRC_TB_WIND@GXSR@@@GXBS@@"
+  },
+  {
+    "address": "143d38a10",
+    "rva": "3d38a10",
+    "value": ".?AVGXForceFieldWindAreaAppearance@I@GXFFX@@"
+  },
+  {
+    "address": "143d38a50",
+    "rva": "3d38a50",
+    "value": ".?AVGXVfxDynamicWindForceFieldSeed@I@GXVFX@@"
+  },
+  {
+    "address": "144c0f7be",
+    "rva": "4c0f7be",
+    "value": "RtlUnwindEx"
+  },
+  {
+    "address": "144c1034c",
+    "rva": "4c1034c",
+    "value": "RtlVirtualUnwind"
+  },
+  {
+    "address": "142a378e8",
+    "rva": "2a378e8",
+    "value": "CSChrCliffWindModule"
+  },
+  {
+    "address": "142b5bb18",
+    "rva": "2b5bb18",
+    "value": "DisableAutoCliffWind|"
+  },
+  {
+    "address": "142b90760",
+    "rva": "2b90760",
+    "value": "WindFall"
+  },
+  {
+    "address": "142be5b28",
+    "rva": "2be5b28",
+    "value": "Module WindEffect"
+  },
+  {
+    "address": "142bf0c90",
+    "rva": "2bf0c90",
+    "value": "Sound.EnableCreateChrCliffWindOnTestMap"
+  },
+  {
+    "address": "142f19648",
+    "rva": "2f19648",
+    "value": "MeshDrawIndirectInfo"
+  },
+  {
+    "address": "142f19860",
+    "rva": "2f19860",
+    "value": "GXFlver_Common_MakeDrawIndirectArgsCS.cpo"
+  },
+  {
+    "address": "143042f88",
+    "rva": "3042f88",
+    "value": "Sea Wave WindAng"
+  },
+  {
+    "address": "143042fb0",
+    "rva": "3042fb0",
+    "value": "WindAng"
+  },
+  {
+    "address": "143042fc0",
+    "rva": "3042fc0",
+    "value": "Sea Wave WindSpeed"
+  },
+  {
+    "address": "143042fe8",
+    "rva": "3042fe8",
+    "value": "WindSpeed"
+  },
+  {
+    "address": "1430511d0",
+    "rva": "30511d0",
+    "value": "MeshletDrawIndirectArgsResource"
+  },
+  {
+    "address": "14305f310",
+    "rva": "305f310",
+    "value": "Disable Wind For Plants"
+  },
+  {
+    "address": "1430a4df0",
+    "rva": "30a4df0",
+    "value": "CGPlatformDevice::pD3DCommandSignatureForDrawIndexed"
+  },
+  {
+    "address": "143285de8",
+    "rva": "3285de8",
+    "value": "RewindScene"
+  }
+]

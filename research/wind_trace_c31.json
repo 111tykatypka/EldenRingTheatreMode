@@ -1,0 +1,578 @@
+[
+  {
+    "address": "142a378d0",
+    "value": "CSChrCliffWindModule",
+    "xrefs": [
+      {
+        "source": "140094205",
+        "target": "142a378d0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      },
+      {
+        "source": "14009420c",
+        "target": "142a378d0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142a37b50",
+    "value": "CliffWindSoundObj",
+    "xrefs": [
+      {
+        "source": "14043404e",
+        "target": "142a37b50",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142bc83a0",
+    "value": "WindStrength",
+    "xrefs": [
+      {
+        "source": "140dc383b",
+        "target": "142bc83a0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 0
+      }
+    ]
+  },
+  {
+    "address": "142cb1720",
+    "value": "rewind",
+    "xrefs": []
+  },
+  {
+    "address": "142d43310",
+    "value": "elbowIndex",
+    "xrefs": []
+  },
+  {
+    "address": "142d4a8f0",
+    "value": "__newindex",
+    "xrefs": [
+      {
+        "source": "1400e3e37",
+        "target": "142d4a8f0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      },
+      {
+        "source": "141c479a0",
+        "target": "142d4a8f0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142d50928",
+    "value": "hands:%d/elbowIndex",
+    "xrefs": [
+      {
+        "source": "14148acf7",
+        "target": "142d50928",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142d546d8",
+    "value": "HKS_OPCODE_INTRINSIC_NEWINDEX",
+    "xrefs": []
+  },
+  {
+    "address": "142d54740",
+    "value": "HKS_OPCODE_INTRINSIC_NEWINDEX_LITERAL",
+    "xrefs": []
+  },
+  {
+    "address": "142d56dc8",
+    "value": "debuggerNewIndexMeta",
+    "xrefs": [
+      {
+        "source": "1420792ff",
+        "target": "142d56dc8",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142d84590",
+    "value": "hclSimpleWindAction",
+    "xrefs": []
+  },
+  {
+    "address": "142d859c0",
+    "value": "windDirection",
+    "xrefs": []
+  },
+  {
+    "address": "142d87568",
+    "value": "windMinSpeed",
+    "xrefs": []
+  },
+  {
+    "address": "142d877d8",
+    "value": "windMaxSpeed",
+    "xrefs": []
+  },
+  {
+    "address": "142d87bb0",
+    "value": "windFrequency",
+    "xrefs": []
+  },
+  {
+    "address": "142d998b0",
+    "value": " kg) total mass for cloth. Forces (like wind) may have almost no effect on it.",
+    "xrefs": [
+      {
+        "source": "14162c78a",
+        "target": "142d998b0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142d99910",
+    "value": " kg) total mass for cloth. Forces (like wind) may cause large accelarations.",
+    "xrefs": [
+      {
+        "source": "14162c7e1",
+        "target": "142d99910",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142f00b70",
+    "value": "necessary data rewind wasn't possible",
+    "xrefs": [
+      {
+        "source": "1419c227a",
+        "target": "142f00b70",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142f02db8",
+    "value": "Rewind stream after send",
+    "xrefs": [
+      {
+        "source": "1419cd687",
+        "target": "142f02db8",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "1430ecaa0",
+    "value": "__newindex",
+    "xrefs": [
+      {
+        "source": "142038260",
+        "target": "1430ecaa0",
+        "type": "PARAM",
+        "source_type": "ANALYSIS",
+        "operand": 0,
+        "primary_ref": 0
+      },
+      {
+        "source": "142038273",
+        "target": "1430ecaa0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 0,
+        "primary_ref": 0
+      }
+    ]
+  },
+  {
+    "address": "143c825c0",
+    "value": ".?AVCSChrCliffWindModule@CS@@",
+    "xrefs": [],
+    "vtables": [
+      {
+        "col": "0x1432d24b0",
+        "vtable": "0x142a37ad8",
+        "refs": [
+          {
+            "source": "140432aa3",
+            "target": "142a37ad8",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140432aaa",
+            "target": "142a37ad8",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140432ec8",
+            "target": "142a37ad8",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140432ecf",
+            "target": "142a37ad8",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "address": "143c825f0",
+    "value": ".?AV?$DLRuntimeClassImpl@VCSChrCliffWindModule@CS@@$0A@@DLRF@@",
+    "xrefs": [],
+    "vtables": [
+      {
+        "col": "0x1432d2538",
+        "vtable": "0x142a37af0",
+        "refs": [
+          {
+            "source": "14043333b",
+            "target": "142a37af0",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140433342",
+            "target": "142a37af0",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "address": "143cedf48",
+    "value": ".?AVCSRemoMapWindDisableAct@CS@@",
+    "xrefs": [],
+    "vtables": [
+      {
+        "col": "0x14333b0d0",
+        "vtable": "0x142b4e328",
+        "refs": [
+          {
+            "source": "140a9100d",
+            "target": "142b4e328",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140a91014",
+            "target": "142b4e328",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140a91087",
+            "target": "142b4e328",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140a9108e",
+            "target": "142b4e328",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "address": "143cf8cb0",
+    "value": ".?AVIGXModelWindParam@GXSR@@",
+    "xrefs": []
+  },
+  {
+    "address": "143d059b8",
+    "value": ".?AVCSFD4WindForceSfxIns@CS@@",
+    "xrefs": [],
+    "vtables": [
+      {
+        "col": "0x143363e30",
+        "vtable": "0x142bc1c48",
+        "refs": [
+          {
+            "source": "140d8c7d1",
+            "target": "142bc1c48",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140d8c7d8",
+            "target": "142bc1c48",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140d8cb6d",
+            "target": "142bc1c48",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          },
+          {
+            "source": "140d8cb74",
+            "target": "142bc1c48",
+            "type": "DATA",
+            "source_type": "ANALYSIS",
+            "operand": 1,
+            "primary_ref": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "address": "143d1a828",
+    "value": ".?AVhclSimpleWindAction@@",
+    "xrefs": []
+  },
+  {
+    "address": "143d2ddc0",
+    "value": ".?AV?$TGXStructuredBuffer@UGXRC_TB_WIND@GXSR@@@GXBS@@",
+    "xrefs": []
+  },
+  {
+    "address": "143d38a10",
+    "value": ".?AVGXForceFieldWindAreaAppearance@I@GXFFX@@",
+    "xrefs": []
+  },
+  {
+    "address": "143d38a50",
+    "value": ".?AVGXVfxDynamicWindForceFieldSeed@I@GXVFX@@",
+    "xrefs": []
+  },
+  {
+    "address": "142a378e8",
+    "value": "CSChrCliffWindModule",
+    "xrefs": [
+      {
+        "source": "140094210",
+        "target": "142a378e8",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      },
+      {
+        "source": "140094217",
+        "target": "142a378e8",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142b5bb18",
+    "value": "DisableAutoCliffWind|",
+    "xrefs": []
+  },
+  {
+    "address": "142b90760",
+    "value": "WindFall",
+    "xrefs": []
+  },
+  {
+    "address": "142be5b28",
+    "value": "Module WindEffect",
+    "xrefs": []
+  },
+  {
+    "address": "142bf0c90",
+    "value": "Sound.EnableCreateChrCliffWindOnTestMap",
+    "xrefs": [
+      {
+        "source": "1458ebf55",
+        "target": "142bf0c90",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142f19648",
+    "value": "MeshDrawIndirectInfo",
+    "xrefs": [
+      {
+        "source": "141a6ced5",
+        "target": "142f19648",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "142f19860",
+    "value": "GXFlver_Common_MakeDrawIndirectArgsCS.cpo",
+    "xrefs": []
+  },
+  {
+    "address": "143042f88",
+    "value": "Sea Wave WindAng",
+    "xrefs": [
+      {
+        "source": "141bb8837",
+        "target": "143042f88",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "143042fb0",
+    "value": "WindAng",
+    "xrefs": [
+      {
+        "source": "141bb883e",
+        "target": "143042fb0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "143042fc0",
+    "value": "Sea Wave WindSpeed",
+    "xrefs": [
+      {
+        "source": "141bb8893",
+        "target": "143042fc0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "143042fe8",
+    "value": "WindSpeed",
+    "xrefs": [
+      {
+        "source": "141bb889a",
+        "target": "143042fe8",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "1430511d0",
+    "value": "MeshletDrawIndirectArgsResource",
+    "xrefs": [
+      {
+        "source": "141c285d0",
+        "target": "1430511d0",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "14305f310",
+    "value": "Disable Wind For Plants",
+    "xrefs": [
+      {
+        "source": "141ca2602",
+        "target": "14305f310",
+        "type": "DATA",
+        "source_type": "ANALYSIS",
+        "operand": 1,
+        "primary_ref": 1
+      }
+    ]
+  },
+  {
+    "address": "1430a4df0",
+    "value": "CGPlatformDevice::pD3DCommandSignatureForDrawIndexed",
+    "xrefs": []
+  },
+  {
+    "address": "143285de8",
+    "value": "RewindScene",
+    "xrefs": []
+  }
+]
