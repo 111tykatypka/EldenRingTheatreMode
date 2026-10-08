@@ -609,6 +609,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
+            // Recorded gear written into the player (adapter equipment.rs): OFF by default, bit 16 = on.
+            bool replayGear = (gReplayOptions.load() & 16) != 0;
+            if (ImGui::Checkbox(T(Str::ReplayEquipment), &replayGear)) { gReplayOptions = replayGear ? (gReplayOptions | 16u) : (gReplayOptions & ~16u); SaveSettings(); }
+            PushFont(Font::Meta);
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(T(Str::ReplayEquipmentNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);

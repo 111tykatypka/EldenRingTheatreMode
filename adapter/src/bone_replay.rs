@@ -318,7 +318,7 @@ fn release(s:&mut State,chr:usize,reason:&str){
  if s.module_frames>0{crate::log_game(&format!("WEAPON_LOCATION: written {} frames; the game replaced it before drawing on {} of them",s.module_frames,s.module_lost));}
  if let Some(m)=s.module_saved.take(){weapon_loc::write(chr,&m);}
  if s.equip_frames>0{crate::log_game(&format!("EQUIPMENT: written {} frames; the game replaced it before drawing on {} of them",s.equip_frames,s.equip_lost));}
- if let Some(e)=s.equip_saved.take(){if equipment::write(chr,&e){crate::log_game("EQUIPMENT: your own equipment restored");}}
+ if let Some(e)=s.equip_saved.take().filter(|_|s.equip_frames>0){if equipment::write(chr,&e){crate::log_game("EQUIPMENT: your own equipment restored");}}
  if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.release();}
  if let Some(c)=s.clock_saved.take(){world_state::write_clock(&c);crate::log_game("WORLD: your time of day restored");}
  if let Some(f)=s.flags_saved.take(){for (flag,state) in &f{world_state::write_flag(*flag,*state);}crate::log_game(&format!("WORLD: {} event flags restored to your own values",f.len()));}}
@@ -535,7 +535,9 @@ pub fn tick(group:usize,now:u64){
    s.module_written=None;
    if let Some(loaded)=&s.loaded{let m=&loaded.world.module;let i=m.partition_point(|x|x.time<=s.last_t);
     if i>0{let want=m[i-1].data;if weapon_loc::write(chr,&want){s.module_frames+=1;s.module_written=Some(want);}}}
-   s.equip_written=if f.equip.recorded()&&equipment::write(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}else{None};
+   // SAFETY (owner report: armor vanished from the inventory after replays): the recorded equipment assembly is
+   // written into the player only when the user turned "Replay equipment appearance" on (option bit 16, off by default).
+   s.equip_written=if s.options&16!=0&&f.equip.recorded()&&equipment::write(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}else{None};
    // Bones whose interpolation is invalid keep the earlier recorded frame instead of dropping the replay.
    // Local pose is interpolated per bone; model space is rebuilt from it through the learned hierarchy.
    let Some(l)=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out) else {reject(s,chr,"pose size or time invalid");return;};

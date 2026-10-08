@@ -37,7 +37,7 @@ namespace TheaterUI
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
         UiSounds, UiSoundsOn,
-        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote,
+        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote, ReplayEquipment, ReplayEquipmentNote,
         Count
     };
 
@@ -114,6 +114,9 @@ namespace TheaterUI
         { "Freeze other characters during replay", "Останавливать остальных персонажей при повторе" },
         { "While a replay plays, every character that is not part of it stops moving and attacking (no one gets in the way or hits your replayed body). Their behaviour comes back when the replay ends.",
           "Пока идёт повтор, все персонажи, не входящие в запись, не двигаются и не атакуют (никто не мешает и не бьёт воспроизводимое тело). Поведение возвращается после повтора." },
+        { "Replay equipment appearance (experimental)", "Показывать экипировку из записи (эксперимент)" },
+        { "Off by default. Writes the recorded gear into your character while a replay plays. It never edits your inventory on purpose, but it has been reported to coincide with armor going missing, so only use it with a backup save.",
+          "Выключено по умолчанию. Записывает снаряжение из записи в персонажа во время повтора. Инвентарь намеренно не меняется, но сообщалось о пропаже брони, поэтому используйте только с резервной копией сохранения." },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 
