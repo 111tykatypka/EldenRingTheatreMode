@@ -317,6 +317,7 @@ fn release(s:&mut State,chr:usize,reason:&str){
  if let Some(t)=saved_for_now(s,chr){write_transform(chr,&t);}
  if s.module_frames>0{crate::log_game(&format!("WEAPON_LOCATION: written {} frames; the game replaced it before drawing on {} of them",s.module_frames,s.module_lost));}
  if let Some(m)=s.module_saved.take(){weapon_loc::write(chr,&m);}
+ crate::item_probe::clear_hide(chr);
  if s.equip_frames>0{crate::log_game(&format!("EQUIPMENT: written {} frames; the game replaced it before drawing on {} of them",s.equip_frames,s.equip_lost));}
  if let Some(e)=s.equip_saved.take().filter(|_|s.equip_frames>0){if equipment::write(chr,&e){crate::log_game("EQUIPMENT: your own equipment restored");}}
  if let Some(a)=s.loaded.as_mut().and_then(|l|l.actors.as_mut()){a.release();}

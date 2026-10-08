@@ -619,6 +619,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
+            // Summon Torrent with the game's own whistle effect when the recording has him: ON by default, bit 32 = off.
+            bool summonHorse = (gReplayOptions.load() & 32) == 0;
+            if (ImGui::Checkbox(T(Str::ReplaySummonHorse), &summonHorse)) { gReplayOptions = summonHorse ? (gReplayOptions & ~32u) : (gReplayOptions | 32u); SaveSettings(); }
+            PushFont(Font::Meta);
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(T(Str::ReplaySummonHorseNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);

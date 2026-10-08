@@ -235,7 +235,7 @@ struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,tr
 #[derive(Clone)]
 struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32,chr_id:i32,pos:[f32;3],before:HashSet<(usize,u64)>}
 pub struct Player{tracks:Vec<(ActorInfo,ActorTrack,Vec<i16>)>,controlled:HashMap<u32,Controlled>,next_match:u64,local:Vec<u8>,model:Vec<u8>,logged:bool,categories:HashMap<u32,u32>,warned:HashSet<u32>,skeletons:HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,
- meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>,failed:bool,frozen:HashMap<usize,(u64,u32)>,next_scan:u64}
+ meta:HashMap<u32,ActorMeta>,options:u32,request:Option<Request>,tries:HashMap<u32,(u32,u64)>,next_log:u64,last_existence:HashMap<u32,Existence>,failed:bool,frozen:HashMap<usize,(u64,u32)>,next_scan:u64,whistled:bool}
 const MAX_PUPPETS:usize=8;
 impl Player{
  pub fn new(actors:Vec<(ActorInfo,ActorTrack)>,context:&[EntityContext],skeletons:&HashMap<u32,crate::skeleton::Definition>,lifetime:lifetime::Timeline,meta:HashMap<u32,ActorMeta>)->Self{
@@ -243,7 +243,7 @@ impl Player{
   let tracks=actors.into_iter().map(|(info,mut t)|{
    let n=t.len();let picks:Vec<PlayerFrame>=(0..3).filter_map(|k|t.get(k*(n.saturating_sub(1))/2).map(|f|f.body.clone())).collect();
    let parents=skeletons.get(&info.id).map(|d|d.parents.clone()).unwrap_or_else(||crate::replay_interpolation::learn_parents(picks.iter().map(|f|(&f.local[..],&f.model[..]))));(info,t,parents)}).collect();
-  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new(),failed:false,frozen:HashMap::new(),next_scan:0}}
+  Self{tracks,controlled:HashMap::new(),next_match:0,local:Vec::new(),model:Vec::new(),logged:false,categories,warned:HashSet::new(),skeletons:skeletons.clone(),lifetime,meta,options:0,request:None,tries:HashMap::new(),next_log:0,last_existence:HashMap::new(),failed:false,frozen:HashMap::new(),next_scan:0,whistled:false}}
  pub fn len(&self)->usize{self.tracks.len()}
  pub fn set_options(&mut self,options:u32){self.options=options;}
  /// Freezes the AI of every live character the replay does not drive (option bit 8 switches it off): the documented
@@ -359,7 +359,14 @@ impl Player{
       let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0); // a held body cannot be hurt or killed meanwhile
       self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags,gravity,transform,puppet:false,saved_1c5:saved,hidden:false});taken.push(chr);newly+=1;}
      Plan::Puppet(why)=>{
-      if cat!=0{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} is a companion or summon (category {cat}); stand-ins are only made for ordinary characters. Summon it yourself first. ({why})",info.id));}}
+      if cat!=0&&unposable&&self.options&32==0&&!self.whistled{
+       // Torrent is recorded and alive but his body has no loaded skeleton: use the game's own whistle once.
+       self.whistled=true;
+       match live_player().map(crate::item_probe::summon_torrent){
+        Some(Ok(id))=>crate::log_game(&format!("TORRENT_WHISTLE: applied special effect {id} so that Torrent is summoned for actor {} (the game's own whistle; he stays until you dismiss him)",info.id)),
+        Some(Err(e))=>crate::log_game(&format!("TORRENT_WHISTLE_UNAVAILABLE: {e}")),
+        None=>crate::log_game("TORRENT_WHISTLE_UNAVAILABLE: no player")}}
+      else if cat!=0{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} is a companion or summon (category {cat}); stand-ins are only made for ordinary characters. Summon it yourself first. ({why})",info.id));}}
       else if puppets_on{let here=read_transform(live_player().unwrap_or(0)).map(|p|p[2]).unwrap_or([0.0;4]);self.request_puppet(&info,now,[here[0]+2.0,here[1],here[2]],why);}
       else if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} npc_param={} {why}; replay puppets are off (Settings > Replay world, or THEATER_PUPPETS=1)",info.id,info.npc_param));}}
      Plan::Unavailable(why)=>{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} {why}",info.id));}}

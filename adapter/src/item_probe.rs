@@ -70,3 +70,51 @@ fn vfx_of(chr:usize,id:i32)->String{
  for e in se.entries().take(256){if e.param_id==id{
   if let Some(p)=e.param_data{let p=unsafe{p.as_ref()};return format!(" vfx[{},{},{},{}]",p.vfx_id(),p.vfx_id1(),p.vfx_id2(),p.vfx_id3());}}}
  String::new()}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Special effects that matter to what is drawn. The CheatEngine table's stateInfo list names state 184 "Hide Weapon",
+// and the game drinks a flask / uses an item by switching such an effect on. Both uses below go through the game's
+// own `apply_speffect` / `remove_speffect` and only for effects whose param changes no HP, FP or stamina.
+use eldenring::cs::{ChrInsExt,EquipParamGoods,SoloParamRepository,SpEffectParam};
+use fromsoftware_shared::FromStatic;
+use std::sync::{Mutex,OnceLock};
+
+const HIDE_WEAPON_STATE:u16=184;
+const SCAN_MAX:u32=700_000;
+/// Every SpEffect param id whose state info is "Hide Weapon" (found once, by scanning the param table).
+fn hide_set()->&'static Vec<i32>{
+ static SET:OnceLock<Vec<i32>>=OnceLock::new();
+ SET.get_or_init(||{
+  let started=std::time::Instant::now();let mut v=Vec::new();
+  if let Ok(repo)=unsafe{SoloParamRepository::instance()}{for id in 0..=SCAN_MAX{if let Some(p)=repo.get::<SpEffectParam>(id){if p.state_info()==HIDE_WEAPON_STATE{v.push(id as i32);}}}}
+  crate::log_game(&format!("HIDE_WEAPON_EFFECTS: {} special effects have state info {HIDE_WEAPON_STATE} ({:?}); scan of ids 0..={SCAN_MAX} took {:?}",v.len(),&v[..v.len().min(40)],started.elapsed()));v})}
+/// The hide-weapon effect currently active on `chr`, 0 for none.
+pub fn active_hide(chr:usize)->i32{
+ let set=hide_set();effect_ids(chr).and_then(|ids|ids.into_iter().find(|i|set.contains(i))).unwrap_or(0)}
+/// Effects we added ourselves (to take exactly those back).
+static APPLIED:Mutex<i32>=Mutex::new(0);
+fn pure_visual(p:&eldenring::param::SP_EFFECT_PARAM_ST)->bool{
+ p.change_hp_rate()==0.0&&p.change_hp_point()==0&&p.change_mp_rate()==0.0&&p.change_mp_point()==0&&p.change_stamina_rate()==0.0&&p.change_stamina_point()==0}
+fn apply(chr:usize,id:i32){let c=unsafe{&mut *(chr as *mut ChrIns)};ChrInsExt::apply_speffect(c,id,true);}
+fn remove(chr:usize,id:i32){let c=unsafe{&mut *(chr as *mut ChrIns)};ChrInsExt::remove_speffect(c,id);}
+/// Makes the player's hide-weapon state equal the recorded one (`want` = recorded effect id, 0 = none).
+pub fn set_hide(chr:usize,want:i32){
+ let now=active_hide(chr);let mut applied=APPLIED.lock().unwrap();
+ if want==now{return;}
+ if *applied!=0&&*applied!=want{let old=*applied;remove(chr,old);*applied=0;crate::log_game(&format!("HIDE_WEAPON: removed effect {old}"));}
+ if want==0{return;}
+ let ok=unsafe{SoloParamRepository::instance()}.ok().and_then(|r|r.get::<SpEffectParam>(want as u32)).is_some_and(|p|p.state_info()==HIDE_WEAPON_STATE&&pure_visual(p));
+ if !ok{static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||crate::log_game(&format!("HIDE_WEAPON: effect {want} is not a pure hide-weapon effect; not applied")));return;}
+ apply(chr,want);*applied=want;crate::log_game(&format!("HIDE_WEAPON: applied effect {want}"));}
+/// Takes back an effect we applied (call when the replay ends).
+pub fn clear_hide(chr:usize){let mut applied=APPLIED.lock().unwrap();if *applied!=0{let id=*applied;remove(chr,id);*applied=0;crate::log_game(&format!("HIDE_WEAPON: removed effect {id} at the end of the replay"));}}
+/// The game\'s own Spectral Steed Whistle (goods 130): applies the special effect that item uses. Only if that effect
+/// changes no HP / FP / stamina. Returns what happened for the log.
+pub fn summon_torrent(chr:usize)->Result<i32,String>{
+ let repo=unsafe{SoloParamRepository::instance()}.map_err(|_|"param repository not available".to_string())?;
+ let goods=repo.get::<EquipParamGoods>(130).ok_or("goods 130 (Spectral Steed Whistle) not found")?;
+ let id=goods.ref_id_default();if id<=0{return Err(format!("whistle references special effect {id}"));}
+ let p=repo.get::<SpEffectParam>(id as u32).ok_or_else(||format!("whistle special effect {id} not found"))?;
+ crate::log_game(&format!("TORRENT_WHISTLE: goods 130 -> special effect {id} (state info {}, change hp {}/{} mp {}/{} stamina {}/{}, endurance {})",p.state_info(),p.change_hp_rate(),p.change_hp_point(),p.change_mp_rate(),p.change_mp_point(),p.change_stamina_rate(),p.change_stamina_point(),p.effect_endurance()));
+ if !pure_visual(p){return Err(format!("special effect {id} changes HP/FP/stamina; not applied"));}
+ apply(chr,id);Ok(id)}

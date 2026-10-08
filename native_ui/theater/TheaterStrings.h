@@ -37,7 +37,7 @@ namespace TheaterUI
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
         UiSounds, UiSoundsOn,
-        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote, ReplayEquipment, ReplayEquipmentNote,
+        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote, ReplayEquipment, ReplayEquipmentNote, ReplaySummonHorse, ReplaySummonHorseNote,
         Count
     };
 
@@ -117,6 +117,9 @@ namespace TheaterUI
         { "Replay equipment appearance (experimental)", "Показывать экипировку из записи (эксперимент)" },
         { "Off by default. Writes the recorded gear into your character while a replay plays. It never edits your inventory on purpose, but it has been reported to coincide with armor going missing, so only use it with a backup save.",
           "Выключено по умолчанию. Записывает снаряжение из записи в персонажа во время повтора. Инвентарь намеренно не меняется, но сообщалось о пропаже брони, поэтому используйте только с резервной копией сохранения." },
+        { "Summon Torrent when the recording has him", "Призывать Торрента, если он есть в записи" },
+        { "Uses the game's own Spectral Steed Whistle effect once per replay when the recording contains Torrent but he is not out. He stays out until you dismiss him.",
+          "Один раз за повтор применяет эффект Свистка призрачного коня игры, если в записи есть Торрент, а его нет рядом. Он остаётся, пока вы его не отпустите." },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 
