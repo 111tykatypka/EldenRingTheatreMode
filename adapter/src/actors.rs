@@ -319,7 +319,12 @@ impl Player{
    for info in wanted{
     let unique_recorded=self.tracks.iter().filter(|(other,_,_)|other.npc_param==info.npc_param).count()==1;
     let found=Self::find(&info,&taken,self.categories.get(&info.id).copied().unwrap_or(0),unique_recorded);
-    let live_state=found.and_then(live_state);
+    // A companion (Torrent) whose live body exists but has no skeleton loaded (not summoned: importer is null) cannot be
+    // posed, so for planning it counts as missing and a stand-in is requested when puppets are on.
+    let cat=self.categories.get(&info.id).copied().unwrap_or(0);
+    let unposable=cat!=0&&found.is_some_and(|c|crate::skeleton::read(c,info.id).is_none());
+    if unposable&&self.warned.insert(info.id|0x8000_0000){crate::log_game(&format!("ACTOR_NO_SKELETON: id={} (category {cat}) has a live body but no loaded skeleton (Torrent must be summoned to be driven); treating it as missing",info.id));}
+    let live_state=if unposable{None}else{found.and_then(live_state)};
     match plan(existence[&info.id],live_state){
      Plan::Drive=>{let chr=found.unwrap();let c=unsafe{&*(chr as *const ChrIns)};
       let Some(transform)=read_transform(chr) else {continue};

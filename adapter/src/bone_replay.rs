@@ -85,7 +85,7 @@ impl Store{
  fn index_at(&self,t:u64)->usize{let n=self.len();let (mut lo,mut hi)=(0,n);while lo<hi{let m=(lo+hi)/2;if self.time(m)<=t{lo=m+1}else{hi=m}}lo.saturating_sub(1).min(n-1)}
  fn get(&mut self,i:usize)->Option<Frame>{match self{Store::Memory(v)=>v.get(i).cloned(),Store::Chunked(t)=>t.get(i).cloned()}}}
 // The game thread hands frames to the world file writer thread; it never waits for the disk.
-struct Recorder{path:String,tx:SyncSender<Message>,frames:u64,first:u64,last:u64,dropped:u64,next_world:u64,flags:world_file::FlagGroups,actors:crate::actors::Recorder,skeleton:Option<crate::skeleton::Definition>,skeleton_warned:bool,module:Option<[u8;weapon_loc::BYTES]>}
+struct Recorder{path:String,tx:SyncSender<Message>,frames:u64,first:u64,last:u64,dropped:u64,next_world:u64,flags:world_file::FlagGroups,actors:crate::actors::Recorder,skeleton:Option<crate::skeleton::Definition>,skeleton_warned:bool,module:Option<[u8;weapon_loc::BYTES]>,probe:crate::item_probe::Probe}
 #[derive(Default)]struct Accuracy{frames:u64,exact_bones:u64,max_drawn_cm:f32,sum_drawn_cm:f64}
 struct Loaded{path:String,store:Store,parents:Arc<Vec<i16>>,seconds:f64,world:Arc<WorldData>,actors:Option<crate::actors::Player>,anchors:Arc<crate::replay_interpolation::AnchorTrack>}
 #[derive(PartialEq)]enum Loading{None,Busy(String),Missing(String),Failed(String)}
@@ -432,7 +432,7 @@ pub fn tick(group:usize,now:u64){
      Ok(tx)=>{
       let flags=world_state::read_flags();let _=tx.send(Message::Flags(now,flags.clone()));
       crate::log_game(&format!("BONE_REPLAY: recording started for {path} ({} event flag groups)",flags.len()));
-      s.recording=Some(Recorder{path,tx,frames:0,first:0,last:0,dropped:0,next_world:now,flags,actors:crate::actors::Recorder::new(),skeleton:None,skeleton_warned:false,module:None});s.last_second=0;}
+      s.recording=Some(Recorder{path,tx,frames:0,first:0,last:0,dropped:0,next_world:now,flags,actors:crate::actors::Recorder::new(),skeleton:None,skeleton_warned:false,module:None,probe:Default::default()});s.last_second=0;}
      Err(e)=>{crate::log_game(&format!("BONE_REPLAY_ERROR: cannot create the world file for {path}: {e}"));status("BONE REPLAY ERROR: cannot write the recording file (see log)");}}}}
   if !recording&&s.recording.is_some(){finish_recording(s);}
   s.record_paused=l.recording==RECORD_PAUSED;
@@ -507,6 +507,7 @@ pub fn tick(group:usize,now:u64){
    }
    let first_definition=if r.frames==0{definition.clone()}else{None};
    match r.tx.try_send(Message::PlayerPose(frame,first_definition)){Ok(())=>{if r.frames==0{r.first=now;r.skeleton=definition;}r.frames+=1;r.last=now;}Err(_)=>r.dropped+=1}
+   r.probe.sample(chr,now.saturating_sub(r.first) as f64/1e9);
    if let Some(m)=weapon_loc::read(chr){if r.module!=Some(m){r.module=Some(m);let _=r.tx.try_send(Message::PlayerModule(vec![world_file::ModuleSample{time:now,data:m}]));}}
    r.actors.sample(now,chr,&r.tx);}}
  if !s.owning{return;}
