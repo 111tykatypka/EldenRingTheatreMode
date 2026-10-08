@@ -6,8 +6,31 @@ use eldenring::cs::ChrIns;
 use std::mem::offset_of;
 
 #[derive(Default)]
-pub struct Probe{item:Option<u32>,sfx:Option<[i32;3]>,effects:Option<Vec<i32>>,loc:Option<[u8;crate::weapon_loc::BYTES]>}
+pub struct Probe{window:Option<Window>,item:Option<u32>,sfx:Option<[i32;3]>,effects:Option<Vec<i32>>,loc:Option<[u8;crate::weapon_loc::BYTES]>}
+/// After an item is queued for use: for a few seconds, 10 times a second, report which bytes of the player's
+/// assembly, action-flag module, model instance and the front of the ChrIns itself changed (offset old->new).
+/// The weapon hiding while a flask is drunk must be one of them, since weapon_loc does not change then.
+struct Window{until:f64,next:f64,regions:Vec<(&'static str,usize,Vec<u8>)>}
+fn region_list(chr:usize)->Vec<(&'static str,usize,usize)>{
+ let mut v=vec![("ChrIns",chr,0x500usize)];
+ let ptr=|o:usize|crate::companions::word(chr+o).filter(|p|*p>0x10000);
+ if let Some(a)=ptr(offset_of!(eldenring::cs::PlayerIns,chr_asm)){v.push(("ChrAsm",a,std::mem::size_of::<eldenring::cs::ChrAsm>()));}
+ if let Some(a)=crate::weapon_loc::module(chr){v.push(("ActionFlag",a,0x258));}
+ if let Some(a)=ptr(offset_of!(ChrIns,chr_model_ins)){v.push(("ModelIns",a,0x300));}
+ v}
+fn snapshot(chr:usize)->Vec<(&'static str,usize,Vec<u8>)>{
+ region_list(chr).into_iter().filter_map(|(n,a,l)|{let mut b=vec![0u8;l];crate::companions::copy(a,&mut b).then_some((n,a,b))}).collect()}
 impl Probe{
+ fn watch(&mut self,chr:usize,seconds:f64){
+  let Some(w)=&mut self.window else {return};
+  if seconds>w.until{self.window=None;crate::log_game("ITEM_DIFF: window closed");return;}
+  if seconds<w.next{return;}w.next=seconds+0.1;
+  let now=snapshot(chr);
+  for (name,addr,new) in &now{
+   let Some((_,_,old))=w.regions.iter().find(|(n,a,_)|n==name&&a==addr) else {continue};
+   let diffs:Vec<String>=old.iter().zip(new).enumerate().filter(|(_,(a,b))|a!=b).take(40).map(|(i,(a,b))|format!("{i:#x}:{a:02X}->{b:02X}")).collect();
+   if !diffs.is_empty(){crate::log_game(&format!("ITEM_DIFF t={seconds:.2}s {name}: {}",diffs.join(" ")));}}
+  w.regions=now;}
  /// Call once per recorded frame; `seconds` is time since recording start for the log lines.
  pub fn sample(&mut self,chr:usize,seconds:f64){
   let item=crate::companions::dword(chr+offset_of!(ChrIns,tae_queued_use_item));
@@ -15,7 +38,9 @@ impl Probe{
   let sfx=match sfx{[Some(a),Some(b),Some(c)]=>Some([a as i32,b as i32,c as i32]),_=>None};
   if item!=self.item||sfx!=self.sfx{
    crate::log_game(&format!("ITEM_PROBE t={seconds:.2}s: queued_use_item={} sfx cast/fire/effect={:?}",item.map(|v|format!("0x{v:08X}")).unwrap_or("?".into()),sfx));
+   if self.item.is_some()&&item.is_some_and(|v|v!=0&&v!=u32::MAX){self.window=Some(Window{until:seconds+6.0,next:seconds,regions:snapshot(chr)});crate::log_game("ITEM_DIFF: window opened (6 s, 10 Hz)");}
    self.item=item;self.sfx=sfx;}
+  self.watch(chr,seconds);
   if let Some(ids)=effect_ids(chr){
    if self.effects.as_ref()!=Some(&ids){
     let old=self.effects.clone().unwrap_or_default();

@@ -60,6 +60,15 @@ fn set_flag(a:Option<usize>,on:bool){if let Some(a)=a{unsafe{std::ptr::write_vol
 fn debug_flags(chr:usize)->Option<usize>{
  let base=unsafe{crate::GetModuleHandleW(std::ptr::null())} as usize;
  (base!=0&&read_ptr(chr+profile::OFF_CHRINS_DEBUG_CALLBACK)==base+profile::VAL_CHRINS_DEBUG_CALLBACK_RVA).then_some(chr+profile::OFF_CHRINS_DEBUG_FLAGS)}
+/// Handle read without dereferencing the body (a stale address then reads as None instead of crashing).
+fn safe_handle(chr:usize)->Option<u64>{
+ let base=chr+std::mem::offset_of!(ChrIns,field_ins_handle);
+ let (sel,block)=(crate::companions::dword(base)?,crate::companions::dword(base+4)?);Some(sel as u64|((block as u64)<<32))}
+/// Does a body reached through the creator's pointer read as the character that was requested?
+fn hint_matches(h:usize,r:&Request)->bool{
+ let d=|o:usize|crate::companions::dword(h+o);
+ let handle=d(std::mem::offset_of!(ChrIns,field_ins_handle));
+ handle.is_some_and(|s|s!=u32::MAX)&&(d(std::mem::offset_of!(ChrIns,character_id)).is_some_and(|v|v as i32==r.chr_id)||d(std::mem::offset_of!(ChrIns,npc_param_id)).is_some_and(|v|v as i32==r.npc_param))}
 fn handle_of(c:&ChrIns)->u64{c.field_ins_handle.selector.0 as u64|((i32::from(c.field_ins_handle.block_id) as u32 as u64)<<32)}
 /// MSVC RTTI class name of an object (vtable[-1] -> complete object locator -> type descriptor).
 fn rtti_name(obj:usize)->Option<String>{
@@ -288,7 +297,9 @@ impl Player{
    if r.before.contains(&(*a,handle_of(c))){return false;}
    let p=c.modules.physics.position;let d=((p.0-r.pos[0]).powi(2)+(p.1-r.pos[1]).powi(2)+(p.2-r.pos[2]).powi(2)).sqrt();
    (c.npc_param_id==r.npc_param||c.character_id as i32==r.chr_id)&&c.event_entity_id==0&&d<10.0}).collect();
-  if candidates.is_empty(){if let Some(h)=hint{if live_now.contains(&h)&&!self.controlled.values().any(|x|x.chr==h)&&!r.before.contains(&(h,handle_of(unsafe{&*(h as *const ChrIns)}))){candidates.push(h);}}}
+  // The creator's own pointer to the body it just made is authoritative even when the body is not (yet) in the
+  // world's character list; it must differ from the previous one and read as the requested character.
+  if candidates.is_empty(){if let Some(h)=hint{if !self.controlled.values().any(|x|x.chr==h)&&!r.before.iter().any(|(a,_)|*a==h)&&hint_matches(h,&r){candidates.push(h);}}}
   if candidates.is_empty(){
    if now.saturating_sub(r.at)>6_000_000_000{
     let new_bodies:Vec<String>=live_now.iter().filter(|a|!r.before.contains(&(**a,handle_of(unsafe{&*(**a as *const ChrIns)})))).filter_map(|a|{let c=unsafe{&*(*a as *const ChrIns)};let p=c.modules.physics.position;let d=((p.0-r.pos[0]).powi(2)+(p.1-r.pos[1]).powi(2)+(p.2-r.pos[2]).powi(2)).sqrt();(d<60.0).then(||format!("npc_param={} chr={} entity={} {:.0} m",c.npc_param_id,c.character_id,c.event_entity_id,d))}).collect();
@@ -334,7 +345,8 @@ impl Player{
       let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0); // a held body cannot be hurt or killed meanwhile
       self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags,gravity,transform,puppet:false,saved_1c5:saved,hidden:false});taken.push(chr);newly+=1;}
      Plan::Puppet(why)=>{
-      if puppets_on{let here=read_transform(live_player().unwrap_or(0)).map(|p|p[2]).unwrap_or([0.0;4]);self.request_puppet(&info,now,[here[0]+2.0,here[1],here[2]],why);}
+      if cat!=0{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} is a companion or summon (category {cat}); stand-ins are only made for ordinary characters. Summon it yourself first. ({why})",info.id));}}
+      else if puppets_on{let here=read_transform(live_player().unwrap_or(0)).map(|p|p[2]).unwrap_or([0.0;4]);self.request_puppet(&info,now,[here[0]+2.0,here[1],here[2]],why);}
       else if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} npc_param={} {why}; replay puppets are off (Settings > Replay world, or THEATER_PUPPETS=1)",info.id,info.npc_param));}}
      Plan::Unavailable(why)=>{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} {why}",info.id));}}
      // The recording says this character does not exist now (not yet, gone, left): its real body, if the game has
@@ -351,7 +363,9 @@ impl Player{
   for (info,track,parents) in &mut self.tracks{
    let Some(ctl)=self.controlled.get_mut(&info.id) else {continue};let chr=ctl.chr;let is_puppet=ctl.puppet;let was_hidden=std::mem::replace(&mut ctl.hidden,false);let saved_render=ctl.saved_1c5&RENDER!=0;
    // The character must still be the same one (a reload can reuse the address).
-   if !alive.contains(&chr)||handle_of(unsafe{&*(chr as *const ChrIns)})!=ctl.handle{self.controlled.remove(&info.id);continue;}
+   // A puppet made by the debug creator may not be in the world list; it is checked by its handle alone, read safely.
+   let still_there=if is_puppet{safe_handle(chr)==Some(ctl.handle)}else{alive.contains(&chr)&&handle_of(unsafe{&*(chr as *const ChrIns)})==ctl.handle};
+   if !still_there{self.controlled.remove(&info.id);continue;}
    if debug_flags(chr).is_none(){if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}
    // Recording says it does not exist right now: a puppet is hidden (never deleted mid-replay, so a seek
    // back can show it again); a live body is given back.
@@ -408,8 +422,9 @@ impl Player{
   let alive=live();let n=self.controlled.len();let mut puppets=0;
   self.request=None;self.unfreeze_all();
   for (_,c) in self.controlled.drain(){
+   if c.puppet{if safe_handle(c.chr)==Some(c.handle){puppets+=1;unload_puppet(c.chr);}continue;}
    if !alive.contains(&c.chr)||handle_of(unsafe{&*(c.chr as *const ChrIns)})!=c.handle{continue;}
-   if c.puppet{puppets+=1;unload_puppet(c.chr);}else{restore(&c);}}
+   restore(&c);}
   if n>0{crate::log_game(&format!("ACTORS: {n} characters given back to the game ({puppets} puppets asked to unload)"));}}
 }
 fn live_player()->Option<usize>{let w=unsafe{WorldChrMan::instance()}.ok()?;w.main_player.as_ref().map(|p|&p.chr_ins as *const _ as usize)}
