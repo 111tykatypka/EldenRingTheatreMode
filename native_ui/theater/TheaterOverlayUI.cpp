@@ -1137,9 +1137,9 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
-            // Recorded one-shot effects (adapter effects.rs): OFF by default, bit 256 = on.
-            bool replayFx = (gReplayOptions.load() & 256) != 0;
-            if (ImGui::Checkbox(T(Str::ReplayEffects), &replayFx)) { gReplayOptions = replayFx ? (gReplayOptions | 256u) : (gReplayOptions & ~256u); SaveSettings(); }
+            // Recorded one-shot effects (adapter effects.rs): ON by default, bit 256 = off.
+            bool replayFx = (gReplayOptions.load() & 256) == 0;
+            if (ImGui::Checkbox(T(Str::ReplayEffects), &replayFx)) { gReplayOptions = replayFx ? (gReplayOptions & ~256u) : (gReplayOptions | 256u); SaveSettings(); }
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);

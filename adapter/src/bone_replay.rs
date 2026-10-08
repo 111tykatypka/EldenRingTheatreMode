@@ -238,6 +238,7 @@ fn follow_loaded(s:&mut State,l:&Link){
    let mut anchors=crate::replay_interpolation::AnchorTrack::default();
    for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.frame(),f.place.global);}}}
    crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
+   crate::log_game(&format!("BONE_REPLAY: {} recorded effects in the file; replay of them is {}",world_data.effects.len(),if effects::ready(){"available"}else{"unavailable (hook not installed)"}));
    Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors,anchors:Arc::new(anchors)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
 // The replay time for this game frame, in source time. The host sends the timeline about 20 times a
@@ -586,7 +587,7 @@ pub fn tick(group:usize,now:u64){
    // Recorded one-shot effects (option bit 256): created at their recorded time while the replay plays forward. After a seek (or
    // a jump of more than half a second) the cursor is only moved, so scrubbing never fires a burst; playing on from there creates
    // the effects again, which is how they reappear after a rewind.
-   if s.options&256!=0&&effects::ready(){if let Some(loaded)=&s.loaded{let ev=&loaded.world.effects;
+   if s.options&256==0&&effects::ready(){if let Some(loaded)=&s.loaded{let ev=&loaded.world.effects;
     let jumped=s.fx_t==0||t<s.fx_t||t-s.fx_t>500_000_000;
     let mut i=if jumped{ev.partition_point(|e|e.time<=t)}else{s.fx_cursor.min(ev.len())};
     if !jumped{let mut made=0;while i<ev.len()&&ev[i].time<=t&&made<16{

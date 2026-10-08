@@ -125,8 +125,8 @@ namespace TheaterUI
         { "While a replay plays or a recording runs, grass, trees, rocks and models do not fade away when the camera comes close. Only the in-memory parameter tables change, and they are restored exactly.",
           "Пока идёт повтор или запись, трава, деревья, скалы и модели не исчезают при приближении камеры. Таблицы параметров изменяются только в памяти и возвращаются." },
         { "Replay particles and hit effects (experimental)", "Воспроизводить частицы и эффекты ударов (экспериментально)" },
-        { "Effects the game creates at a position (hit sparks, blood, impacts) are saved into the replay while recording and created again in sync with the timeline when played forward. Off by default; sounds and effects that follow a character are not covered yet.",
-          "Эффекты, которые игра создаёт в точке (искры, кровь, удары), сохраняются в повтор при записи и снова создаются синхронно с таймлайном при воспроизведении вперёд. По умолчанию выключено; звуки и эффекты, привязанные к персонажу, пока не поддерживаются." },
+        { "Effects the game creates at a position (hit sparks, blood, impacts) are saved into the replay while recording and created again in sync with the timeline when played forward. Sounds and effects that follow a character are not covered yet.",
+          "Эффекты, которые игра создаёт в точке (искры, кровь, удары), сохраняются в повтор при записи и снова создаются синхронно с таймлайном при воспроизведении вперёд. Звуки и эффекты, привязанные к персонажу, пока не поддерживаются." },
         { "Weather", "Погода" }, { "Weather editor", "Редактор погоды" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
