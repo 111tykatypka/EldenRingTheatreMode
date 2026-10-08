@@ -43,3 +43,69 @@ Evidence: `light_registration_c19.json`, `spot_light_constructor_c19.json`, exac
 Next concrete milestone: read-only manager and existing-light enumeration on the proven renderer task, logging type, stable ID, generation and lifecycle through load/unload. Then establish a paired public factory/removal path. Only after that, expose a Lights tab with Add Point/Add Spot, transform, color/intensity/range and capability-gated cone/shadow controls. Never call a deleting destructor while an object is still registered. An editor track stores IDs/properties separately from native handles and reconciles on seek; no per-frame respawning.
 
 No Lights tab with fake controls or unvalidated allocations was added in C19. Runtime/visual evidence for custom light creation: **UNKNOWN**.
+
+## C20 native inspector — 2026-10-08
+
+This section supersedes C19's unknown manager lookup. It does **not** supersede the unresolved allocation/lifetime requirements.
+
+### STATIC_VERIFIED observations
+
+- `141CCB9AD`: RIP-relative load resolves to graphics-root slot `1447F37A8`; `141CCB9B9` reads its `+C518` light manager. Multiple factory and removal callers corroborate this path.
+- Constructor `141A27880` installs manager vtable `142F116C8`. Point/spot constructors install `142F15630` / `142F15790`. RVAs and structural offsets are centralized in `shared/GameProfile.h`; runtime checks both discovery instructions and manager vtable.
+- Two pointer collections have begin/end/capacity at `+20/+28/+30` and `+40/+48/+50`. Both may contain mixed light types. The selection flag is `light+E0`, not point versus spot. IDs at `+D0` are assigned by registration.
+- Removal `141A2AD40` searches collections under manager `+58` lock, notifies listeners for the first collection and invokes `141AEDEB0`. It does **not** immediately erase the entry.
+- `141AEDEB0` writes `+F0=0`, `+EC=-abs(fade)`, and `+F4=1` for nonzero fade. Interpretation: deferred fade-out request. Hidden floating-point argument ABI must be established before a call.
+- `141A277A0` releases pointer ranges through intrusive reference counts. `141A2B2D0` reallocates vector capacity; it is not a removal drain. `141A2AFF0` shifts spatial origin; it is not a fade update.
+- Point `+190` contains four spatial floats. Culling consumes XYZ and twice W. Position/radius is HIGH CONFIDENCE; coordinate convention/units remain UNKNOWN. Spot `+190` is matrix-like and its cone/range setter semantics remain UNKNOWN.
+
+Evidence captured in `light_manager_access_c20.json`, `light_manager_constructor_c20.json`, `light_remove_c20.json`, `light_fadeout_c20.json`, and exact-target SQLite callers/vtable references. Disassembly buffers can extend past a function; do not infer extra instructions belong to the initial function. Research addresses are preferred VAs with base `140000000`.
+
+### Implemented runtime inspection
+
+`native_ui/EldenRingLightAdapter.{h,cpp}` copies a page of existing-light diagnostics using checked `ReadProcessMemory`. No factory, native lock, destructor, hook, or game-memory write is used. The existing Rust `Draw_Pre` callback invokes the inspector only after user opt-in, with loaded-world/offline gating. Host connection heartbeat also gates scans. UI/IPC threads only set requests or read copied snapshots; editor protocol remains v12.
+
+Manual Refresh or opt-in 1 Hz monitoring. Maximum 32 displayed rows per page is a work/UI budget, not a limit on native collection size. Both full collection counts are reported. Root, manager/vtable and collection headers are reread after copying; inconsistent snapshots are discarded. This is **best-effort observation**, not a transaction: elements can change in place and address reuse/ABA is not detectable. Observed generation is an editor observation counter, not a native generation token. No borrowed native pointer is retained for later dereferencing.
+
+On context loss counts/rows clear; monitor waits for return. Monitoring defaults off and is not persisted. New Lights toolbar/tab includes Refresh, monitor, A/B selection and paging. Disabled creation buttons explicitly state why allocation is not enabled. Raw spatial values are labeled unverified.
+
+### Remaining blockers before creation
+
+1. Identify the renderer update that consumes fade-out and erases/releases the registered reference; prove map unload and outstanding render-task references.
+2. Verify factory/removal x64 ABI including XMM argument registers and descriptor layout.
+3. Establish creation/removal task affinity and locking contract; Draw_Pre inspection is **not** proof that allocation is legal there.
+4. Validate manager lookup/enumeration in the user's exact runtime and observe replacement across loading.
+5. Establish color/intensity/range/cone units, shader participation and resource/shadow limits.
+
+Then implement one explicitly activated point light with owned handle and idempotent deferred removal, followed by spot lights and master-ReplayTime light tracks. Never directly call deleting destructors or continuously allocate per frame.
+
+Build: COMPILE_VERIFIED Release AMD64. Automated tests: NOT_RUN (not requested). Runtime/visual creation and inspector behavior: UNKNOWN, user testing required.
+
+## C21 — lighting editor correction
+
+The Lights tab is now for authoring rather than native inventory. It contains Create point/spot, a selectable light list, move-to-current-camera, position/spot rotation, radius, intensity, RGB wheel, cone/softness, shadow definitions and advanced property definitions. This is **editor-side data only**, visibly marked NOT rendered. `LightEditor` is separate from the native inspector. Native allocation is not enabled; UI creation must not be mistaken for a rendered light. Editor setups persist to `%LOCALAPPDATA%/EldenRingTheaterMode/lights.ertlights` with version 2 and version 1 loading.
+
+### New exact-target findings
+
+[STATIC_VERIFIED] Manager update `141A2B070` invokes light vtable `+10`, tests `+EC` and `+F4` for zero and removes finished lights from both collections through swap/pop and intrusive release. Point/spot virtual updates call fade advancement `141AEDF10`. This closes the **static registered-reference drain** gap from C20. It does not by itself prove native task ownership, outstanding render-job lifetimes or safe caller ABI. Evidence: `light_update_c21.json`, exact-target pseudocode/call graph and referenced update functions.
+
+[STATIC_VERIFIED] Native light property UI `141AED460` associates fields with actual labels. `light_native_properties_c21.json` records independently extracted facts, and `light_property_editor_c21.json` records instruction evidence. Important correction: `+90` is **SrcRadius**, not color. Diffuse/specular are at `+70/+80`; `Shadow` is `+AD`, `ShadowSpecLevel` `+B8`, `ShadowIntensity` `+94`. `+B4` is an integer depth-bias control, not a free float renderer write. Editor draft bias uses the evidenced integer range; it is not a native write. Shader units, HDR conversion, quality ordering and shadow allocation are still unproven.
+
+[STATIC_VERIFIED] Manager lock helper `141F0B0A0` spins on the lock bit at lock object `+8`; `141F0B0E0` clears it. It is **not recursive**. Reentering it from a hook whose caller already owns it can deadlock. Evidence: `light_manager_lock_c21.json`. No allocation hook was installed.
+
+### Sun/time control
+
+The manual day/night slider queues `WorldAreaTime::request_time(hour,minute,second)` through the exact pinned SDK. Only the existing PostPhysics callback acquires `WorldAreaTime::instance_mut()` and issues the request. No arbitrary clock/date offset writes or save patches are introduced. This does not change global timescale or ReplayTime. Clock values shown are observed `clock.hours/minutes/seconds`, independently of the requested slider value. Native transition and sun/shadow behavior require runtime validation and depend on region.
+
+This is a **native world-time edit**, not an isolated render-only sun override. Native world time may be autosaved. The manual tool does not enable the deliberately disabled replay-clock/event-flag overrides. Restore queues the original hour/minute/second on the same observed clock instance. Host loss and emergency Stop request restoration where the loaded-world callback is still valid. Loading/context loss discards old-instance ownership, so restoration is not guaranteed across loading, process termination or autosave. There is no separate sun yaw/pitch binding yet.
+
+Status: Release x64 COMPILE_VERIFIED. UI layout, day/night change and native rendering are NOT runtime/visually verified. No automated tests were requested/run.
+
+Next backend step: verify native update caller/lock ownership and x64 factory/removal arguments, establish a retained-handle lifetime contract, then connect one point-light definition to renderer creation and deferred removal. Spot matrices/cone setter, shadows and shader color/intensity mapping follow. Use the discovered property editor labels, not the previous guessed field meanings.
+
+## C22 — viewport authoring
+
+The user reports the manual day/night slider works perfectly; its implementation/UI remain unchanged in C22. Light definitions now have projected point/spot icons and dolly-style world-axis translation/rotation handles. The camera projection, rotation-plane intersection and quaternion world-axis rotation math are reused, including viewport resize mapping and clean-preview clipping. No new native lighting calls are made. Icons edit persisted definitions only; actual renderer creation/shadow application remain unimplemented. New UI/interaction is compile verified but not yet visually/runtime verified. Details: notes/CUSTOM_LIGHTS_C22.md.
+
+## C24 — first native illumination backend
+
+Native factories, owned-reference retention, setters and removal/release are now bound and connected to LightEditor on Draw_Pre. Prefix byte guards and full executable version/hash guards remain. See notes/CUSTOM_LIGHTS_C24.md for ABI evidence, nonrecursive-lock rules, field mapping, prototype limits and the rejected padding caller. No new native hook was installed. This is implemented but runtime/visual validation required; thread affinity is not claimed proven from compilation. Shadow allocation and cone softness remain unavailable. Day/night implementation unchanged.

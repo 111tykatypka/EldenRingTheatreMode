@@ -309,6 +309,7 @@ void preview(bool enabled){std::lock_guard lock(mutex);
 }
 void bone(int index,cinematic::Vec offset){std::lock_guard lock(mutex);if(index>=-1&&cinematic::finite(offset)){state.bone_index=index;state.bone_offset=offset;selected_bone=index;bone_pose.reset();state.bone_available=false;}}
 void dolly_smoothing(double seconds){std::lock_guard lock(mutex);if(std::isfinite(seconds)&&seconds>=0&&seconds<=2)state.dolly_smoothing_seconds=seconds;}
+void high_quality_lods(bool enabled){std::lock_guard lock(mutex);state.high_quality_lods=enabled;}
 void close_up(bool prevent,double near_plane){std::lock_guard lock(mutex);if(std::isfinite(near_plane)&&near_plane>=.001&&near_plane<=1){state.prevent_asset_fade=prevent;state.near_plane=near_plane;}}
 void shake(double position,double rotation,double frequency,double speed,double smoothing,bool dolly){std::lock_guard lock(mutex);if(std::isfinite(position)&&position>=0&&position<=5&&std::isfinite(rotation)&&rotation>=0&&rotation<=30&&std::isfinite(frequency)&&frequency>=0&&frequency<=30&&std::isfinite(speed)&&speed>=0&&speed<=10&&std::isfinite(smoothing)&&smoothing>=0&&smoothing<=2){state.shake_position=position;state.shake_rotation=rotation;state.shake_frequency=frequency;state.shake_speed=speed;state.shake_smoothing_seconds=smoothing;state.shake_dolly=dolly;}}
 std::optional<cinematic::State> bone_world(const float*root,const float*qs){
@@ -341,6 +342,11 @@ extern "C" int tm_camera_asset_fade_requested(){
  using namespace camera_runtime;std::unique_lock lock(mutex,std::try_to_lock);if(!lock.owns_lock())return -1;
  const auto now=clock_now();const auto focused=GetForegroundWindow(),game=game_window.load();
  return state.prevent_asset_fade&&state.enabled&&state.writing&&(state.mode==1||state.mode==2)&&game_allowed&&linked&&now-host_heartbeat<1000000000ULL&&game&&focused&&GetAncestor(focused,GA_ROOT)==GetAncestor(game,GA_ROOT)?1:0;
+}
+extern "C" int tm_camera_quality_requested(){
+ using namespace camera_runtime;std::unique_lock lock(mutex,std::try_to_lock);if(!lock.owns_lock())return 0;
+ const auto now=clock_now();const auto focused=GetForegroundWindow(),game=game_window.load();
+ return state.high_quality_lods&&state.enabled&&state.writing&&(state.mode==1||state.mode==2)&&game_allowed&&linked&&now-host_heartbeat<1000000000ULL&&game&&focused&&GetAncestor(focused,GA_ROOT)==GetAncestor(game,GA_ROOT)?1:0;
 }
 extern "C" void tm_camera_bone_publish(const float* root,const float*qs){
  auto value=camera_runtime::bone_world(root,qs);std::unique_lock lock(camera_runtime::mutex,std::try_to_lock);if(!lock.owns_lock())return;

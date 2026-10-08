@@ -1,9 +1,12 @@
+#include "../NativeLightBackend.h"
 #include "TheaterOverlayUI.h"
 #include "TheaterSounds.h"
 #include "imgui_internal.h"
 #include "../CinematicCameraRuntime.h"
 #include "../EldenRingTimingAdapter.h"
 #include "../EldenRingWeatherAdapter.h"
+#include "../EldenRingLightAdapter.h"
+#include "../LightEditor.h"
 #include "../EldenRingHudAdapter.h"
 #include "CameraViewport.h"
 
@@ -154,6 +157,7 @@ void Overlay::LoadSettings()
     {
         if (!std::isfinite(value)) continue;
         if (key == "dolly_markers") showDollyMarkers_=value!=0;
+        else if(key=="light_markers") showLightMarkers_=value!=0;
         else if(key=="dolly_visibility_key") enableDollyVisibilityKey_=value!=0;
         else if(key=="curve_fraction") curveFraction_=std::clamp(value,.15f,.85f);
         else if(key=="game_view_fit") gameViewFit_=value!=0;
@@ -167,12 +171,13 @@ void Overlay::LoadSettings()
         else if(key=="shake_speed") effects.shake_speed=std::clamp(double(value),0.,10.);
         else if(key=="shake_smoothing") effects.shake_smoothing_seconds=std::clamp(double(value),0.,2.);
         else if(key=="shake_dolly") effects.shake_dolly=value!=0;
+        else if(key=="high_quality_lods")effects.high_quality_lods=value!=0;
         else if(key=="prevent_asset_fade")effects.prevent_asset_fade=value!=0;
         else if(key=="camera_near_plane")effects.near_plane=std::clamp(double(value),.001,1.);
         else if (key == "language") language = value >= 1 ? Lang::Russian : Lang::English;
         else if (key == "ui_scale") ui_.layout.uiScaleUser = std::clamp(value, 0.75f, 1.5f);
         else if (key == "panel_open") ui_.layout.panelOpen = value != 0;
-        else if (key == "tool" && value >= 0 && value <= (float)Tool::Weather) ui_.activeTool = (Tool)(int)value;
+        else if (key == "tool" && value >= 0 && value <= (float)Tool::Lights) ui_.activeTool = (Tool)(int)value;
         else if (key == "show_tools") showTools_ = value != 0;
         else if (key == "show_timeline") showTimeline_ = value != 0;
         else if (key == "show_event_log") showEventLog_ = value != 0;
@@ -182,6 +187,7 @@ void Overlay::LoadSettings()
     }
     camera_runtime::dolly_smoothing(effects.dolly_smoothing_seconds);
     camera_runtime::close_up(effects.prevent_asset_fade,effects.near_plane);
+    camera_runtime::high_quality_lods(effects.high_quality_lods);
     camera_runtime::shake(effects.shake_position,effects.shake_rotation,effects.shake_frequency,effects.shake_speed,effects.shake_smoothing_seconds,effects.shake_dolly);
 }
 
@@ -195,6 +201,8 @@ void Overlay::SaveSettings() const
     out << "curve_fraction " << curveFraction_ << "\n";
     out << "game_view_fit " << gameViewFit_ << "\n";
     out << "compact_tracks " << compactTracks_ << "\n" << "actor_tracks " << expandActorTracks_ << "\n";
+    out << "high_quality_lods " << effects.high_quality_lods << "\n";
+    out << "light_markers " << showLightMarkers_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
         << "dolly_visibility_key " << enableDollyVisibilityKey_ << "\n"
         << "dolly_curves " << showDollyCurves_ << "\n"
@@ -331,7 +339,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     if(cameraHistoryGeneration_!=selectionTrack.history_generation){cameraHistoryGeneration_=selectionTrack.history_generation;gizmoDragging_=curveDragging_=curveBoxSelecting_=false;}
     std::erase_if(selectedDollyKeys_,[&](auto id){return !selectionTrack.track_current||std::none_of(selectionTrack.keys.begin(),selectionTrack.keys.end(),[&](const auto&key){return key.id==id;});});
     if(!selectedDollyKeys_.contains(selectedDollyKey_))selectedDollyKey_=selectedDollyKeys_.empty()?0:*selectedDollyKeys_.begin();
-    if(!inputFocused_){gizmoDragging_=false;curveDragging_=false;curveBoxSelecting_=false;scrubbing_=false;draggingNavigator_=false;camera_runtime::end_edit();}
+    if(!inputFocused_){lightGizmoDragging_=false;gizmoDragging_=false;curveDragging_=false;curveBoxSelecting_=false;scrubbing_=false;draggingNavigator_=false;camera_runtime::end_edit();}
     if(playDollyRequested_){playDollyRequested_=false;if(f.focused)PlayDollyPath(f);}
     ui_.visibility = f.visibility;
     ui_.hiddenAt = f.hiddenAt;
@@ -371,7 +379,10 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         DrawGameViewport(f);
         DrawDollyViewport(f);
         DrawCameraModes(f);
-        if(f.focused&&!io.WantTextInput&&bindingWaiting_<0&&!ImGui::IsAnyItemActive()&&ImGui::IsKeyPressed(ImGuiKey_Delete,false))DeleteSelectedDollyKeys();
+        if(f.focused&&!io.WantTextInput&&bindingWaiting_<0&&!ImGui::IsAnyItemActive()&&ImGui::IsKeyPressed(ImGuiKey_Delete,false)){
+            if(viewportLightSelected_){light_editor::remove(light_editor::view().selected);lightGizmoDragging_=false;}
+            else DeleteSelectedDollyKeys();
+        }
         DrawDialogs(f);
         UiSoundsAfterFrame();
         if (resetLayout_) { resetLayout_ = false; SaveSettings(); }
@@ -389,6 +400,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
 
 void Overlay::SelectDollyKey(std::uint64_t id,bool toggle,bool range)
 {
+    viewportLightSelected_=false;lightGizmoDragging_=false;
     auto camera=camera_runtime::view();
     auto hit=std::find_if(camera.keys.begin(),camera.keys.end(),[&](const auto&key){return key.id==id;});
     if(hit==camera.keys.end())return;
@@ -510,7 +522,7 @@ void Overlay::DrawGameViewport(const OverlayFrame& f)
         FitAspect(a.x,a.y,std::max(1.f,b.x-a.x),std::max(1.f,b.y-a.y),io.DisplaySize.x/io.DisplaySize.y,ui_.rects.gameMin,ui_.rects.gameMax);
     }
     gameViewMin_=ui_.rects.gameMin;gameViewMax_=ui_.rects.gameMax;
-    if(f.focused&&!ImGui::GetIO().WantTextInput&&ImGui::IsWindowHovered()&&io.MousePos.x>=gameViewMin_.x&&io.MousePos.x<=gameViewMax_.x&&io.MousePos.y>=gameViewMin_.y&&io.MousePos.y<=gameViewMax_.y&&ImGui::IsMouseClicked(ImGuiMouseButton_Middle)){gizmoOperation_=1-gizmoOperation_;gizmoDragging_=false;}
+    if(f.focused&&!ImGui::GetIO().WantTextInput&&ImGui::IsWindowHovered()&&io.MousePos.x>=gameViewMin_.x&&io.MousePos.x<=gameViewMax_.x&&io.MousePos.y>=gameViewMin_.y&&io.MousePos.y<=gameViewMax_.y&&ImGui::IsMouseClicked(ImGuiMouseButton_Middle)){gizmoOperation_=1-gizmoOperation_;gizmoDragging_=false;lightGizmoDragging_=false;}
     auto*draw=ImGui::GetBackgroundDrawList();draw->AddRectFilled(ImVec2(0,0),io.DisplaySize,Color::TimelineBg.U32());
     draw->AddImage(ImTextureRef(f.game_texture),ui_.rects.gameMin,ui_.rects.gameMax);
     ImGui::End();
@@ -519,22 +531,30 @@ void Overlay::DrawGameViewport(const OverlayFrame& f)
 void Overlay::DrawDollyViewport(const OverlayFrame& f)
 {
     using namespace cinematic;using namespace cinematic::viewport;
-    if(ui_.visibility==UiVisibility::HiddenClean||!showDollyMarkers_){gizmoDragging_=false;return;}
-    auto camera=camera_runtime::view();if(!camera.observed||!camera.track_current||camera.keys.empty()){selectedDollyKey_=0;gizmoDragging_=false;return;}
+    if(ui_.visibility==UiVisibility::HiddenClean||(!showDollyMarkers_&&!showLightMarkers_)){gizmoDragging_=lightGizmoDragging_=false;return;}
+    auto camera=camera_runtime::view();const auto lights=light_editor::view();
+    const bool hasDolly=showDollyMarkers_&&camera.track_current&&!camera.keys.empty();
+    const bool hasLights=showLightMarkers_&&!lights.lights.empty();
+    if(!camera.observed||(!hasDolly&&!hasLights)){gizmoDragging_=lightGizmoDragging_=false;return;}
+    if(!hasDolly)gizmoDragging_=false;
     auto&io=ImGui::GetIO();const float s=ui_.rects.uiScale;const auto display=io.DisplaySize;
     ImGui::SetNextWindowPos(ImVec2(0,menuH_),ImGuiCond_Always);ImGui::SetNextWindowSize(ImVec2(display.x,std::max(1.f,display.y-menuH_)),ImGuiCond_Always);
-    const bool interactive=ui_.visibility==UiVisibility::Shown;
-    if(!interactive)gizmoDragging_=false;
+    const bool interactive=ui_.visibility==UiVisibility::Shown&&f.focused&&!io.WantTextInput&&bindingWaiting_<0;
+    if(!interactive)gizmoDragging_=lightGizmoDragging_=false;
     auto flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoFocusOnAppearing;
     if(!interactive||f.game_texture)flags|=ImGuiWindowFlags_NoInputs;
     ImGui::Begin("##dolly-viewport",nullptr,flags);auto*draw=ImGui::GetBackgroundDrawList();
-    const bool scaled=interactive&&f.game_texture;
+    const bool scaled=ui_.visibility==UiVisibility::Shown&&f.game_texture;
     const auto pictureMin=scaled?ui_.rects.gameMin:ImVec2(0,0),pictureMax=scaled?ui_.rects.gameMax:display;
     draw->PushClipRect(pictureMin,pictureMax,true);
-    const bool hovered=interactive&&(ImGui::IsWindowHovered()||(scaled&&ImGui::GetCurrentContext()->HoveredWindow==ImGui::FindWindowByName("###game-viewport")))&&io.MousePos.x>=pictureMin.x&&io.MousePos.x<=pictureMax.x&&io.MousePos.y>=pictureMin.y&&io.MousePos.y<=pictureMax.y;
+    if(pictureMax.x<=pictureMin.x||pictureMax.y<=pictureMin.y){gizmoDragging_=lightGizmoDragging_=false;draw->PopClipRect();ImGui::End();return;}
+    bool hovered=interactive&&(ImGui::IsWindowHovered()||(scaled&&ImGui::GetCurrentContext()->HoveredWindow==ImGui::FindWindowByName("###game-viewport")))&&io.MousePos.x>=pictureMin.x&&io.MousePos.x<=pictureMax.x&&io.MousePos.y>=pictureMin.y&&io.MousePos.y<=pictureMax.y;
     auto projectPoint=[&](Vec p){auto result=project(camera.pose,p,display.x,display.y);if(result&&scaled){result->x=pictureMin.x+result->x/display.x*(pictureMax.x-pictureMin.x);result->y=pictureMin.y+result->y/display.y*(pictureMax.y-pictureMin.y);}return result;};
     auto mousePoint=[&](){return ImVec2((io.MousePos.x-pictureMin.x)*display.x/(pictureMax.x-pictureMin.x),(io.MousePos.y-pictureMin.y)*display.y/(pictureMax.y-pictureMin.y));};
     auto line=[&](Vec a,Vec b,ImU32 color,float width=1.f){auto pa=projectPoint(a),pb=projectPoint(b);if(pa&&pb)draw->AddLine(ImVec2(float(pa->x),float(pa->y)),ImVec2(float(pb->x),float(pb->y)),color,width);};
+    const bool lightInteraction=hasLights&&DrawLightViewport(f,camera.pose,pictureMin,pictureMax,hovered,scaled);
+    hovered=hovered&&!lightInteraction;
+    if(hasDolly){
     if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys,camera.track_settings);curveGeneration_=camera.project_generation;}
     if(camera.keys.size()>1){
         auto first=camera.keys.front().time_ns,last=camera.keys.back().time_ns;auto previous=cinematic::dolly_evaluate(curveTrack_,first,camera.dolly_smoothing_seconds);
@@ -553,7 +573,7 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
         if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(io.MousePos.x-pixel.x,io.MousePos.y-pixel.y)<Px(14,s))SelectDollyKey(key.id,io.KeyCtrl,io.KeyShift);
     }
     auto selected=std::find_if(camera.keys.begin(),camera.keys.end(),[&](auto&k){return k.id==selectedDollyKey_;});
-    if(selected!=camera.keys.end())if(auto center=projectPoint(selected->state.position)){
+    if(!viewportLightSelected_&&selected!=camera.keys.end())if(auto center=projectPoint(selected->state.position)){
         const auto origin=selected->state.position;const ImU32 colors[]={IM_COL32(245,85,85,255),IM_COL32(100,220,110,255),IM_COL32(95,150,255,255)};
         const double extent=std::max(.1,center->depth*std::tan(camera.pose.fov_degrees*3.141592653589793/360)*.18);
         for(int axis=0;axis<3;++axis){
@@ -579,7 +599,75 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
         else if(f.now-gizmoLastCommit_>=1./30||!io.MouseDown[0]){camera_runtime::edit_key(draft);gizmoLastCommit_=f.now;}
         if(!io.MouseDown[0])gizmoDragging_=false;
     }
+    } // dolly markers
     draw->PopClipRect();ImGui::End();
+}
+
+// Light definitions share the camera projection and gizmo conventions; this draws editor handles,
+// not native illumination. Called inside the same clipped viewport window as dolly markers.
+bool Overlay::DrawLightViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled)
+{
+    using namespace cinematic;using namespace cinematic::viewport;
+    auto editor=light_editor::view();auto& io=ImGui::GetIO();const auto display=io.DisplaySize;
+    const float s=ui_.rects.uiScale;auto* draw=ImGui::GetBackgroundDrawList();
+    auto projectPoint=[&](Vec p){auto result=project(camera,p,display.x,display.y);if(result&&scaled){result->x=min.x+result->x/display.x*(max.x-min.x);result->y=min.y+result->y/display.y*(max.y-min.y);}return result;};
+    auto mousePoint=[&](){return ImVec2((io.MousePos.x-min.x)*display.x/(max.x-min.x),(io.MousePos.y-min.y)*display.y/(max.y-min.y));};
+    auto line=[&](Vec a,Vec b,ImU32 color,float width=1.f){auto pa=projectPoint(a),pb=projectPoint(b);if(pa&&pb)draw->AddLine(ImVec2(float(pa->x),float(pa->y)),ImVec2(float(pb->x),float(pb->y)),color,width);};
+    bool consumed=lightGizmoDragging_;
+    std::uint64_t hitId=0;double nearest=Px(14,s);
+    for(const auto& light:editor.lights){
+        auto center=projectPoint(light.transform.position);if(!center)continue;
+        ImVec2 pixel(float(center->x),float(center->y));
+        ImU32 color=viewportLightSelected_&&editor.selected==light.id?Color::AccentAmber.U32():IM_COL32(255,221,135,light.enabled?230:100);
+        if(light.type==light_editor::Type::Point){
+            draw->AddCircle(pixel,Px(6,s),color,16,Px(1.5f,s));
+            for(int i=0;i<8;++i){double a=i*6.283185307179586/8;draw->AddLine(ImVec2(pixel.x+float(std::cos(a))*Px(9,s),pixel.y+float(std::sin(a))*Px(9,s)),ImVec2(pixel.x+float(std::cos(a))*Px(13,s),pixel.y+float(std::sin(a))*Px(13,s)),color,Px(1.5f,s));}
+        }else{
+            draw->AddTriangle(ImVec2(pixel.x,pixel.y-Px(8,s)),ImVec2(pixel.x-Px(8,s),pixel.y+Px(8,s)),ImVec2(pixel.x+Px(8,s),pixel.y+Px(8,s)),color,Px(2,s));
+            const auto p=light.transform.position,forward=basis(light.transform.orientation,2),right=basis(light.transform.orientation,0),up=basis(light.transform.orientation,1);
+            const double length=std::max(.2,center->depth*.035),radius=std::min(length*2,length*std::tan(light.cone_degrees*3.141592653589793/360));
+            for(int i=0;i<24;++i){auto rim=[&](int j){double a=j*6.283185307179586/24;return add(add(add(p,mul(forward,length)),mul(right,radius*std::cos(a))),mul(up,radius*std::sin(a)));};line(rim(i),rim(i+1),color);if(i%6==0)line(p,rim(i),color);}
+        }
+        draw->AddText(ImVec2(pixel.x+Px(17,s),pixel.y-Px(6,s)),color,light.name.c_str());
+        const double distance=std::hypot(io.MousePos.x-center->x,io.MousePos.y-center->y);
+        if(hovered&&distance<nearest){nearest=distance;hitId=light.id;}
+    }
+    if(hitId&&hovered&&!gizmoDragging_&&!lightGizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)){
+        light_editor::select(hitId);editor.selected=hitId;viewportLightSelected_=true;consumed=true;
+    }
+    auto selected=std::find_if(editor.lights.begin(),editor.lights.end(),[&](const auto& l){return l.id==editor.selected;});
+    if(selected==editor.lights.end()||(lightGizmoDragging_&&selected->id!=lightGizmoStart_.id)){lightGizmoDragging_=false;return consumed;}
+    if(!viewportLightSelected_)return consumed;
+    if(auto center=projectPoint(selected->transform.position)){
+        const auto origin=selected->transform.position;
+        const ImU32 colors[]={IM_COL32(245,85,85,255),IM_COL32(100,220,110,255),IM_COL32(95,150,255,255)};
+        const double extent=std::max(.1,center->depth*std::tan(camera.fov_degrees*3.141592653589793/360)*.18);
+        for(int axis=0;axis<3;++axis){Vec direction{};direction[axis]=1;
+            if(gizmoOperation_==0){auto end=projectPoint(add(origin,mul(direction,extent)));if(!end)continue;
+                const double pixels=std::hypot(end->x-center->x,end->y-center->y);if(pixels<12)continue;
+                line(origin,add(origin,mul(direction,extent)),colors[axis],Px(3,s));draw->AddCircleFilled(ImVec2(float(end->x),float(end->y)),Px(5,s),colors[axis]);
+                if(hovered&&!consumed&&!gizmoDragging_&&!lightGizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&std::hypot(io.MousePos.x-center->x,io.MousePos.y-center->y)>Px(14,s)&&segment_distance(io.MousePos.x,io.MousePos.y,*center,*end)<Px(7,s)){
+                    lightGizmoDragging_=true;lightGizmoAxis_=axis;lightGizmoStart_=*selected;lightGizmoMouseStart_=io.MousePos;lightGizmoPixelsPerUnit_=pixels/extent;lightGizmoScreenAxis_={float((end->x-center->x)/pixels),float((end->y-center->y)/pixels)};consumed=true;
+                }
+            }else{
+                double hit=1e9;for(int i=0;i<64;++i){auto ring=[&](int j){Vec p=origin;double a=j*6.283185307179586/64;p[(axis+1)%3]+=extent*std::cos(a);p[(axis+2)%3]+=extent*std::sin(a);return p;};auto a=projectPoint(ring(i)),b=projectPoint(ring(i+1));if(a&&b){draw->AddLine(ImVec2(float(a->x),float(a->y)),ImVec2(float(b->x),float(b->y)),colors[axis],Px(2,s));hit=std::min(hit,segment_distance(io.MousePos.x,io.MousePos.y,*a,*b));}}
+                if(hovered&&!consumed&&!gizmoDragging_&&!lightGizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&hit<Px(7,s))if(auto angle=plane_angle(camera,mousePoint().x,mousePoint().y,display.x,display.y,origin,axis)){
+                    lightGizmoDragging_=true;lightGizmoAxis_=axis;lightGizmoStart_=*selected;lightGizmoMouseStart_=io.MousePos;lightGizmoAngle_=*angle;consumed=true;
+                }
+            }
+        }
+    }
+    if(lightGizmoDragging_){
+        auto draft=*selected; // Preserve color/intensity and all non-transform edits during the gesture.
+        draft.transform=lightGizmoStart_.transform;
+        if(gizmoOperation_==0){double delta=((io.MousePos.x-lightGizmoMouseStart_.x)*lightGizmoScreenAxis_.x+(io.MousePos.y-lightGizmoMouseStart_.y)*lightGizmoScreenAxis_.y)/lightGizmoPixelsPerUnit_;draft.transform.position[lightGizmoAxis_]+=delta;}
+        else if(auto angle=plane_angle(camera,mousePoint().x,mousePoint().y,display.x,display.y,lightGizmoStart_.transform.position,lightGizmoAxis_))if(auto q=rotate_world(draft.transform.orientation,lightGizmoAxis_,std::remainder(*angle-lightGizmoAngle_,6.283185307179586)))draft.transform.orientation=*q;
+        if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){draft.transform=lightGizmoStart_.transform;light_editor::edit(draft);lightGizmoDragging_=false;}
+        else if(f.now-lightGizmoLastCommit_>=1./30||!io.MouseDown[0]){light_editor::edit(draft);lightGizmoLastCommit_=f.now;}
+        if(!io.MouseDown[0])lightGizmoDragging_=false;
+        consumed=true;
+    }
+    return consumed;
 }
 
 // Panels start at their solved default rect (below the menu bar) the first time, or every time
@@ -636,11 +724,11 @@ void Overlay::DrawMenuBar()
 void Overlay::DrawRail(const OverlayFrame& f)
 {
     const float s = ui_.rects.uiScale;
-    const float btn = Px(Metric::RailButton, s);
+    const float btn = std::min(Px(Metric::RailButton, s), std::max(Px(32,s),(ImGui::GetIO().DisplaySize.y-Px(110,s))/11.f-Px(4,s)));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, Color::PanelBgSolid.Vec4());
     const bool visible = BeginPanel("###tools", T(Str::PanelTools), ui_.rects.railMin, ui_.rects.railMax,
-        ImVec2(btn + Px(8, s), (btn + Px(4, s)) * 10 + Px(60, s)), &showTools_);
+        ImVec2(btn + Px(8, s), (btn + Px(4, s)) * 11 + Px(60, s)), &showTools_);
     if (!visible) { ImGui::End(); ImGui::PopStyleColor(); ImGui::PopStyleVar(); return; }
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 o(ImGui::GetWindowPos().x, ImGui::GetCursorScreenPos().y);
@@ -654,7 +742,7 @@ void Overlay::DrawRail(const OverlayFrame& f)
     struct Item { Tool tool; std::uint16_t glyph; Str label; bool available; };
     const Item top[] = {
         { Tool::Scene, Glyph::Scene, Str::Scene, true }, { Tool::Camera, Glyph::Camera, Str::Camera, true },
-        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
+        { Tool::Look, Glyph::Look, Str::Look, true }, { Tool::Weather, Glyph::Globe, Str::Weather, true }, { Tool::Lights, Glyph::Look, Str::Lights, true }, { Tool::Replays, Glyph::Replays, Str::Replays, true },
         { Tool::Export, Glyph::Export, Str::Export, true } };
     const Item bottom[] = { { Tool::Debug, Glyph::Debug, Str::Debug, true }, { Tool::Settings, Glyph::Settings, Str::Settings, true } };
 
@@ -730,8 +818,8 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     const auto& snap = f.snapshot;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(Space::LG, s), Px(Space::MD, s)));
     // The title bar shows the tool name and is the grab area; the window id stays the same per tool.
-    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather };
-    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 7)]), ui_.rects.panelMin, ui_.rects.panelMax,
+    const Str titles[] = { Str::Scene, Str::Camera, Str::Look, Str::Replays, Str::Export, Str::Debug, Str::Settings, Str::Weather, Str::Lights };
+    const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 8)]), ui_.rects.panelMin, ui_.rects.panelMax,
         ImVec2(Px(260, s), Px(320, s)), &ui_.layout.panelOpen);
     if (!visible) { ImGui::End(); ImGui::PopStyleVar(); return; }
     // Hiding the log returns its space to the independently scrolling tool.
@@ -1004,6 +1092,76 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::PopStyleVar();
         break;
     }
+    case Tool::Lights:
+    {
+        section("Sun / time of day");
+        auto clock=light_editor::time_view();
+        float hour=clock.requested?clock.target:clock.hour;
+        ImGui::BeginDisabled(!clock.available||!snap.connected||!snap.player_found);
+        if(slider("Day / night",&hour,0.f,23.f+59.f/60.f,"%.2f h",0,12.f))light_editor::time(hour);
+        if(ImGui::Button("Restore time",ImVec2(-FLT_MIN,0)))light_editor::restore_time();
+        ImGui::EndDisabled();
+        if(clock.available)ImGui::TextDisabled("Observed: %02d:%02d",int(clock.hour),int(clock.hour*60)%60);else ImGui::TextDisabled("Clock unavailable");
+        ImGui::TextWrapped("Changes native world time and its sun/shadows where supported by the area. World time may be autosaved.");
+        ImGui::Separator();
+        section("Custom lights");
+        auto native=native_lights::view();bool renderLights=native.enabled;
+        if(checkbox("Render lights",&renderLights))native_lights::enable(renderLights);
+        if(checkbox("Show light handles",&showLightMarkers_)){lightGizmoDragging_=false;SaveSettings();}
+        auto camera=camera_runtime::view(false);
+        ImGui::BeginDisabled(!camera.observed);
+        if(ImGui::Button("Create point light",ImVec2(-FLT_MIN,0))){light_editor::create(light_editor::Type::Point,camera.pose);native_lights::enable(true);viewportLightSelected_=true;gizmoDragging_=false;}
+        if(ImGui::Button("Create spot light",ImVec2(-FLT_MIN,0))){light_editor::create(light_editor::Type::Spot,camera.pose);native_lights::enable(true);viewportLightSelected_=true;gizmoDragging_=false;}
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("Native lights: %u",native.rendered);
+        if(!native.status.empty())ImGui::TextWrapped("%s",native.status.c_str());
+        auto editor=light_editor::view();
+        const auto selected=std::find_if(editor.lights.begin(),editor.lights.end(),[&](const auto& l){return l.id==editor.selected;});
+        const char* name=selected==editor.lights.end()?"Select light":selected->name.c_str();
+        if(ImGui::BeginCombo("Light",name)){
+            for(const auto& l:editor.lights){ImGui::PushID(int(l.id));if(ImGui::Selectable(l.name.c_str(),l.id==editor.selected)){light_editor::select(l.id);viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}ImGui::PopID();}ImGui::EndCombo();}
+        if(selected!=editor.lights.end()){
+            auto light=*selected;bool changed=false;
+            changed|=checkbox("Enabled",&light.enabled);
+            ImGui::BeginDisabled(!camera.observed);
+            if(ImGui::Button("Move to current camera",ImVec2(-FLT_MIN,0))){light.transform.position=camera.pose.position;light.transform.orientation=camera.pose.orientation;light.transform.roll_degrees=camera.pose.roll_degrees;changed=true;}
+            ImGui::EndDisabled();
+            float xyz[3];for(int i=0;i<3;++i)xyz[i]=float(light.transform.position[i]);
+            labelAbove("Position XYZ");if(ImGui::DragFloat3("##light_xyz",xyz,.05f)){for(int i=0;i<3;++i)light.transform.position[i]=xyz[i];changed=true;}
+            if(light.type==light_editor::Type::Spot){
+                auto angles=cinematic::viewport::angles(light.transform.orientation);
+                float degrees[3];for(int i=0;i<3;++i)degrees[i]=float(angles[i]*180./3.141592653589793);
+                labelAbove("Rotation pitch / yaw / roll");if(ImGui::DragFloat3("##light_rotation",degrees,.2f)){
+                    if(auto rotation=cinematic::mouse_look({0,0,0,1},degrees[1]*3.141592653589793/180,degrees[0]*3.141592653589793/180,degrees[2]*3.141592653589793/180)){light.transform.orientation=*rotation;changed=true;}}
+                changed|=slider("Cone angle",&light.cone_degrees,1,179,"%.1f deg",0,45);
+                ImGui::BeginDisabled();slider("Cone softness",&light.softness,0,1,"%.2f",0,.25f);ImGui::EndDisabled();
+            }
+            changed|=slider("Radius",&light.radius,.01f,500,"%.2f",ImGuiSliderFlags_Logarithmic,5);
+            changed|=slider("Intensity",&light.intensity,0,100,"%.3f",ImGuiSliderFlags_Logarithmic,1);
+            labelAbove("Light color RGB");ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x,Px(170,s)));changed|=ImGui::ColorPicker3("##light_color",light.rgb,ImGuiColorEditFlags_PickerHueWheel|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
+            ImGui::BeginDisabled();
+            checkbox("Shadows (not supported yet)",&light.shadows);
+            ImGui::BeginDisabled(!light.shadows);
+            int quality=int(light.shadow_level);labelAbove("Shadow quality level");if(ImGui::SliderInt("##shadow_quality",&quality,1,5)){light.shadow_level=quality;changed=true;}
+            changed|=slider("Shadow strength",&light.shadow_strength,0,1,"%.2f",0,1);
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+            if(ImGui::CollapsingHeader("Advanced light properties")){
+                changed|=slider("Source radius",&light.source_radius,0,500,"%.2f",ImGuiSliderFlags_Logarithmic,.1f);
+                ImGui::BeginDisabled();
+                labelAbove("Shadow depth bias");changed|=ImGui::SliderInt("##shadow_bias",&light.shadow_bias,-7,7);
+                changed|=slider("Scattering scale",&light.scattering,0,10,"%.2f",0,1);
+                ImGui::EndDisabled();
+                labelAbove("Specular color RGB");changed|=ImGui::ColorEdit3("##specular_color",light.specular_rgb,ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
+            }
+            if(changed)light_editor::edit(light);
+            if(ImGui::Button("Delete selected light",ImVec2(-FLT_MIN,0))){light_editor::remove(light.id);lightGizmoDragging_=false;}
+        }
+        if(ImGui::Button("Save light setup"))light_editor::save();ImGui::SameLine();if(ImGui::Button("Load setup")){light_editor::load();viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}
+        if(!editor.status.empty())ImGui::TextWrapped("%s",editor.status.c_str());
+        ImGui::TextDisabled("Native illumination prototype. Shadows / softness unavailable.");
+        break;
+    }
     case Tool::Weather:
     {
         section(T(Str::WeatherEditor));
@@ -1030,7 +1188,15 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         ImGui::TextWrapped("Overrides turn off on loading, lost connection or game focus loss. Weather is not stored in replays yet.");
         break;
     }
-    case Tool::Look: section(T(Str::NotYetAvailable)); note(Str::LookNotes); break;
+    case Tool::Look: {
+        section("Quality");
+        bool quality=camera_runtime::view(false).high_quality_lods;
+        if(checkbox("High quality LODs (character updates)",&quality)){camera_runtime::high_quality_lods(quality);SaveSettings();}
+        ImGui::TextWrapped("Experimental: requests normal updates for loaded characters in Free / Dolly camera, including offscreen NPCs.");
+        ImGui::TextDisabled("May increase CPU usage. Off by default.");
+        ImGui::TextWrapped("Does not force mesh LODs or load distant actors. In-game validation required.");
+        break;
+    }
     case Tool::Export: section(T(Str::NotYetAvailable)); note(Str::ExportNotes); break;
     case Tool::Replays:
         DrawLibrary(f);

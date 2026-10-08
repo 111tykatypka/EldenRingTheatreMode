@@ -38,7 +38,7 @@ namespace TheaterUI
         UnloadReplay,
         UiSounds, UiSoundsOn,
         ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote, ReplayFreezeAi, ReplayFreezeAiNote, ReplayEquipment, ReplayEquipmentNote, ReplaySummonHorse, ReplaySummonHorseNote, NoNearFade, NoNearFadeNote, ReplayEffects, ReplayEffectsNote,
-        Weather, WeatherEditor,
+        Weather, WeatherEditor, Lights, LightsEditor,
         Count
     };
 
@@ -128,6 +128,7 @@ namespace TheaterUI
         { "Effects the game creates at a position (hit sparks, blood, impacts) are saved into the replay while recording and created again in sync with the timeline when played forward. Sounds and effects that follow a character are not covered yet.",
           "Эффекты, которые игра создаёт в точке (искры, кровь, удары), сохраняются в повтор при записи и снова создаются синхронно с таймлайном при воспроизведении вперёд. Звуки и эффекты, привязанные к персонажу, пока не поддерживаются." },
         { "Weather", "Погода" }, { "Weather editor", "Редактор погоды" },
+        { "Lights", "Свет" }, { "Lights editor", "Редактор света" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 

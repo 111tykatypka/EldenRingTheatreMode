@@ -1,0 +1,32 @@
+[
+  {
+    "address": "0x141a94050",
+    "bytes": "48 8b 49 08",
+    "mnemonic": "mov",
+    "operands": "rcx, qword ptr [rcx + 8]"
+  },
+  {
+    "address": "0x141a94054",
+    "bytes": "e9 07 fe f9 ff",
+    "mnemonic": "jmp",
+    "operands": "0x141a33e60"
+  },
+  {
+    "address": "0x141a94059",
+    "bytes": "cc",
+    "mnemonic": "int3",
+    "operands": ""
+  },
+  {
+    "address": "0x141a9405a",
+    "bytes": "43 0a e9",
+    "mnemonic": "or",
+    "operands": "bpl, r9b"
+  },
+  {
+    "address": "0x141a9405d",
+    "bytes": "41 a7",
+    "mnemonic": "cmpsd",
+    "operands": "dword ptr [rsi], dword ptr [rdi]"
+  }
+]

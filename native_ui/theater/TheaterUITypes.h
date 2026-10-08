@@ -358,7 +358,7 @@ namespace TheaterUI
     // UI-ONLY STATE (owned by TheaterUI, persisted to theater_ui.ini)
     // ------------------------------------------------------------------------
     // Five tools on the rail, plus Debug / Settings / Exit at the bottom.
-    enum class Tool : uint8_t { Scene, Camera, Look, Replays, Export, Debug, Settings, Weather, None };
+    enum class Tool : uint8_t { Scene, Camera, Look, Replays, Export, Debug, Settings, Weather, Lights, None };
 
     struct PanelLayout
     {
