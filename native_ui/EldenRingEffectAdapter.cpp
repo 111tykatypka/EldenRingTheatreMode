@@ -131,8 +131,8 @@ void release_slot(Slot&s){if(!s.used)return;if(!seh_release(base,s))scene_faulte
 extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,const float*pos,std::uint32_t life_ms){
  using namespace game_effects;if(!manager||!pos||!id)return 0;if(scene_faulted)return -3;
  if(!base)base=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
- static bool guarded=false,guard_ok=false;if(!guarded){guard_ok=scene_guard(base);guarded=true;}if(!guard_ok)return 0;
- std::uintptr_t scene=0;if(!read_mem(manager+TM_OFF_SFX_SCENE_CTRL,&scene,8)||!scene)return 0;
+ static bool guarded=false,guard_ok=false;if(!guarded){guard_ok=scene_guard(base);guarded=true;}if(!guard_ok)return -4;
+ std::uintptr_t scene=0;if(!read_mem(manager+TM_OFF_SFX_SCENE_CTRL,&scene,8)||!scene)return -5;
  if(!resident(scene,id)){++not_resident;return -1;}
  Slot*slot=nullptr;for(auto&s:slots)if(!s.used){slot=&s;break;}if(!slot){++no_slot;return -2;}
  alignas(16) float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, pos[0],pos[1],pos[2],1};
@@ -141,7 +141,8 @@ extern "C" int tm_effect_scene_spawn(std::uintptr_t manager,std::uint32_t id,con
  if(!made){scene_faulted=true;++failed;return -3;}
  std::uintptr_t object=0;memcpy(&object,slot->handle+TM_OFF_VFX_HANDLE_OBJECT,sizeof(object));
  slot->used=true;slot->expires=GetTickCount64()+life_ms;
- if(!object){release_slot(*slot);++failed;return 0;}
+ // An empty handle right after creation is reported but the slot is kept until it expires (the handle may be filled later).
+ if(!object){++failed;return 2;}
  ++created;return 1;}
 extern "C" void tm_effect_scene_tick(){
  using namespace game_effects;const auto now=GetTickCount64();for(auto&s:slots)if(s.used&&now>=s.expires)release_slot(s);}

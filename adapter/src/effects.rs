@@ -24,10 +24,10 @@ pub fn drain()->Vec<EffectEvent>{
 /// Creates one effect now (a game task only). `pos` is in today\'s physics frame.
 pub fn spawn(id:u32,pos:[f32;3])->bool{ready()&&unsafe{tm_effect_spawn(id,pos.as_ptr())}!=0}
 /// Replay path: creates the effect through the game's scene controller (only effects whose FXR is resident). 1 created, 0 refused,
-/// -1 not resident, -2 no free slot, -3 faulted. Game callback thread only.
+/// -1 not resident, -2 no free slot, -3 faulted, -4 function check failed, -5 scene controller unreadable, -7 CSSfxImp unavailable, 2 created but empty handle. Game callback thread only.
 pub fn spawn_scene(id:u32,pos:[f32;3],life_ms:u32)->i32{
  use fromsoftware_shared::FromStatic;
- let Ok(m)=(unsafe{eldenring::cs::CSSfxImp::instance()}) else {return 0};
+ let Ok(m)=(unsafe{eldenring::cs::CSSfxImp::instance()}) else {return -7};
  unsafe{tm_effect_scene_spawn(m as *const eldenring::cs::CSSfxImp as usize,id,pos.as_ptr(),life_ms)}}
 /// Stops and releases effects whose lifetime has ended.
 pub fn tick(){unsafe{tm_effect_scene_tick()}}
