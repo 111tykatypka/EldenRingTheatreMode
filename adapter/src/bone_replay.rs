@@ -483,8 +483,10 @@ pub fn tick(group:usize,now:u64){
     s.restore_left-=1;if s.restore_left==0{if let Some(g)=s.gravity_saved.take(){set_flag(gravity_flag(chr),g);}if let Some(b)=s.inv_saved.take(){crate::actors::set_invincible(chr,b);}unsafe{tm_render_lock_game_input(0)};crate::log_game("BONE_REPLAY: returned to the saved spot; controls unlocked");}}
   }
   s.host=(l.playing!=0,l.timescale,l.play_source_ns,l.received_ns);
-  // No fade-out near the camera (foliage, trees, rocks, characters): while a replay plays or a recording runs; option bit 64 = off.
-  camera_fade::tick(l.options&64==0&&(s.owning||s.recording.is_some()));
+  // No fade-out near the camera (foliage, trees, rocks, characters): applied as soon as Theater is connected, because objects
+  // that are already in the world keep the values they were created with (the owner still saw fading after a late
+  // override); areas loaded afterwards use the changed tables. Option bit 64 = off.
+  camera_fade::tick(l.options&64==0&&l.linked!=0);
   // Update-LOD override (STEP A): on while recording, or while a replay with recorded actors owns the body.
   let want_omission=l.options&4==0&&(s.recording.is_some()||(s.owning&&s.loaded.as_ref().is_some_and(|l|l.actors.is_some())));
   if want_omission&&!omission::engaged(){if let Err(e)=omission::engage(){static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||{crate::log_game(&format!("OMISSION_UNAVAILABLE: {e}"));status("OMISSION: update-level override unavailable (see log); distant actors may be recorded at a reduced rate");});}}
