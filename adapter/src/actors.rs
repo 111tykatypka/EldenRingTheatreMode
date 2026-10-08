@@ -366,6 +366,9 @@ impl Player{
         Some(Ok(id))=>crate::log_game(&format!("TORRENT_WHISTLE: applied special effect {id} so that Torrent is summoned for actor {} (the game's own whistle; he stays until you dismiss him)",info.id)),
         Some(Err(e))=>crate::log_game(&format!("TORRENT_WHISTLE_UNAVAILABLE: {e}")),
         None=>crate::log_game("TORRENT_WHISTLE_UNAVAILABLE: no player")}}
+      else if cat!=0&&unposable&&puppets_on&&self.meta.get(&info.id).is_some_and(|m|m.character_id==8002||m.character_id==8000){
+       let here=read_transform(live_player().unwrap_or(0)).map(|p|p[2]).unwrap_or([0.0;4]);
+       self.request_puppet(&info,now,[here[0]+2.0,here[1],here[2]],"Torrent has no loaded skeleton after the whistle");}
       else if cat!=0{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} is a companion or summon (category {cat}); stand-ins are only made for ordinary characters. Summon it yourself first. ({why})",info.id));}}
       else if puppets_on{let here=read_transform(live_player().unwrap_or(0)).map(|p|p[2]).unwrap_or([0.0;4]);self.request_puppet(&info,now,[here[0]+2.0,here[1],here[2]],why);}
       else if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} npc_param={} {why}; replay puppets are off (Settings > Replay world, or THEATER_PUPPETS=1)",info.id,info.npc_param));}}
@@ -401,7 +404,13 @@ impl Player{
    // A skeleton that cannot be read right now (body not updated or still loading) is skipped for this frame;
    // only a skeleton that reads fine and differs is a real mismatch.
    if let Some(d)=self.skeletons.get(&info.id){match crate::skeleton::read(chr,info.id){
-    None=>{continue;}
+    None=>{
+     // A companion that should exist now but still has no readable skeleton is given back, so that planning can summon him
+     // (the game's whistle) or make a stand-in; a hidden body that merely waits for its turn is left alone.
+     if matches!(ex,Existence::Alive|Existence::Dead)&&self.categories.get(&info.id).copied().unwrap_or(0)!=0{
+      if let Some(c)=self.controlled.remove(&info.id){restore(&c);}
+      crate::log_game(&format!("ACTOR_RELEASED_FOR_PLANNING: id={} has no readable skeleton while it should exist; planning will summon or replace it",info.id));}
+     continue;}
     Some(x) if &x==d=>{}
     Some(x)=>{
      if let Some(c)=self.controlled.remove(&info.id){restore(&c);}

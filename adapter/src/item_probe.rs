@@ -68,7 +68,7 @@ fn effect_ids(chr:usize)->Option<Vec<i32>>{
 fn vfx_of(chr:usize,id:i32)->String{
  let c=unsafe{&*(chr as *const ChrIns)};let se=unsafe{&*c.special_effect.as_ptr()};
  for e in se.entries().take(256){if e.param_id==id{
-  if let Some(p)=e.param_data{let p=unsafe{p.as_ref()};return format!(" vfx[{},{},{},{}]",p.vfx_id(),p.vfx_id1(),p.vfx_id2(),p.vfx_id3());}}}
+  if let Some(p)=e.param_data{let p=unsafe{p.as_ref()};return format!(" state={} vfx[{},{},{},{}]",p.state_info(),p.vfx_id(),p.vfx_id1(),p.vfx_id2(),p.vfx_id3());}}}
  String::new()}
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -85,8 +85,9 @@ const SCAN_MAX:u32=700_000;
 fn hide_set()->&'static Vec<i32>{
  static SET:OnceLock<Vec<i32>>=OnceLock::new();
  SET.get_or_init(||{
-  let started=std::time::Instant::now();let mut v=Vec::new();
-  if let Ok(repo)=unsafe{SoloParamRepository::instance()}{for id in 0..=SCAN_MAX{if let Some(p)=repo.get::<SpEffectParam>(id){if p.state_info()==HIDE_WEAPON_STATE{v.push(id as i32);}}}}
+  let started=std::time::Instant::now();let mut v=Vec::new();let mut rows=0u32;let mut hist=std::collections::BTreeMap::<u16,u32>::new();
+  if let Ok(repo)=unsafe{SoloParamRepository::instance()}{for id in 0..=SCAN_MAX{if let Some(p)=repo.get::<SpEffectParam>(id){rows+=1;*hist.entry(p.state_info()).or_default()+=1;if p.state_info()==HIDE_WEAPON_STATE{v.push(id as i32);}}}}
+  crate::log_game(&format!("SPEFFECT_PARAM_SCAN: {rows} rows in ids 0..={SCAN_MAX}; state info histogram {:?}",hist));
   crate::log_game(&format!("HIDE_WEAPON_EFFECTS: {} special effects have state info {HIDE_WEAPON_STATE} ({:?}); scan of ids 0..={SCAN_MAX} took {:?}",v.len(),&v[..v.len().min(40)],started.elapsed()));v})}
 /// The hide-weapon effect currently active on `chr`, 0 for none.
 pub fn active_hide(chr:usize)->i32{
