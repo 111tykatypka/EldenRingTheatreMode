@@ -101,3 +101,7 @@ This is a **native world-time edit**, not an isolated render-only sun override. 
 Status: Release x64 COMPILE_VERIFIED. UI layout, day/night change and native rendering are NOT runtime/visually verified. No automated tests were requested/run.
 
 Next backend step: verify native update caller/lock ownership and x64 factory/removal arguments, establish a retained-handle lifetime contract, then connect one point-light definition to renderer creation and deferred removal. Spot matrices/cone setter, shadows and shader color/intensity mapping follow. Use the discovered property editor labels, not the previous guessed field meanings.
+
+## C22 — viewport authoring
+
+The user reports the manual day/night slider works perfectly; its implementation/UI remain unchanged in C22. Light definitions now have projected point/spot icons and dolly-style world-axis translation/rotation handles. The camera projection, rotation-plane intersection and quaternion world-axis rotation math are reused, including viewport resize mapping and clean-preview clipping. No new native lighting calls are made. Icons edit persisted definitions only; actual renderer creation/shadow application remain unimplemented. New UI/interaction is compile verified but not yet visually/runtime verified. Details: notes/CUSTOM_LIGHTS_C22.md.
