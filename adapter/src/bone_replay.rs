@@ -457,7 +457,7 @@ pub fn tick(group:usize,now:u64){
   }
   s.host=(l.playing!=0,l.timescale,l.play_source_ns,l.received_ns);
   // Update-LOD override (STEP A): on while recording, or while a replay with recorded actors owns the body.
-  let want_omission=s.recording.is_some()||(s.owning&&s.loaded.as_ref().is_some_and(|l|l.actors.is_some()));
+  let want_omission=l.options&4==0&&(s.recording.is_some()||(s.owning&&s.loaded.as_ref().is_some_and(|l|l.actors.is_some())));
   if want_omission&&!omission::engaged(){if let Err(e)=omission::engage(){static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||{crate::log_game(&format!("OMISSION_UNAVAILABLE: {e}"));status("OMISSION: update-level override unavailable (see log); distant actors may be recorded at a reduced rate");});}}
   else if !want_omission&&omission::engaged(){omission::release();}
   // After physics: put the root back where this frame's replay time says (physics may have moved it).

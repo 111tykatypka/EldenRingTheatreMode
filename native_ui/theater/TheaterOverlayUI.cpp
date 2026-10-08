@@ -589,6 +589,16 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
+            // Update-LOD override (adapter omission.rs), on by default: bit 4 set means the user switched it off.
+            bool fullRate = (gReplayOptions.load() & 4) == 0;
+            if (ImGui::Checkbox(T(Str::ReplayFullRate), &fullRate)) { gReplayOptions = fullRate ? (gReplayOptions & ~4u) : (gReplayOptions | 4u); SaveSettings(); }
+            PushFont(Font::Meta);
+            ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(T(Str::ReplayFullRateNote));
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
             PushFont(Font::Meta);
             ImGui::PushStyleColor(ImGuiCol_Text, Color::TextSecondary.Vec4());
             ImGui::PushTextWrapPos(0.0f);

@@ -207,7 +207,7 @@ impl Recorder{
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 #[allow(dead_code)]
 pub enum Representation{Live,Puppet,Missing}
-struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,transform:Transform,puppet:bool,saved_1c5:u8}
+struct Controlled{chr:usize,handle:u64,flags:Option<u32>,gravity:Option<bool>,transform:Transform,puppet:bool,saved_1c5:u8,hidden:bool}
 /// A puppet request in flight: the game's debug creator consumes it asynchronously.
 #[derive(Clone)]
 struct Request{id:u32,at:u64,prev_last:usize,npc_param:i32,pos:[f32;3],before:HashSet<(usize,u64)>}
@@ -276,7 +276,7 @@ impl Player{
    crate::log_game(&format!("PUPPET_REJECTED: id={} control flags could not be validated; the body is left alone",r.id));self.request=None;return;};
   // Safety first: invincible (it cannot be killed, so it cannot reward), rewards already marked as given.
   write_bits(last,5,INVINCIBLE,0);write_bits(last,6,DROPPED_ITEM|DROPPED_RUNES,0);
-  self.controlled.insert(r.id,Controlled{chr:last,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:true,saved_1c5:0});
+  self.controlled.insert(r.id,Controlled{chr:last,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:true,saved_1c5:0,hidden:false});
   self.request=None;crate::log_game(&format!("PUPPET_ADOPTED: id={} body 0x{last:X}; invincible, rewards pre-marked, AI held",r.id));}
  /// Writes recorded actors at master replay time `t`. `live` is the player's current (origin id, anchor);
  /// recorded positions are rebased into the live physics frame (see replay_interpolation::rebase).
@@ -288,7 +288,7 @@ impl Player{
   for (id,ex) in existence.clone(){self.log_transition(id,ex,t);}
   if now>=self.next_match{self.next_match=now+500_000_000;
    let mut taken:Vec<usize>=self.controlled.values().map(|c|c.chr).collect();let mut newly=0;
-   let wanted:Vec<ActorInfo>=self.tracks.iter().filter(|(i,tr,_)|matches!(existence[&i.id],Existence::Alive|Existence::Dead)&&!self.controlled.contains_key(&i.id)&&active_at(&tr.times,t)).map(|(i,_,_)|*i).collect();
+   let wanted:Vec<ActorInfo>=self.tracks.iter().filter(|(i,tr,_)|!self.controlled.contains_key(&i.id)&&(matches!(existence[&i.id],Existence::NotYet|Existence::Gone|Existence::Left)||(matches!(existence[&i.id],Existence::Alive|Existence::Dead)&&active_at(&tr.times,t)))).map(|(i,_,_)|*i).collect();
    for info in wanted{
     let unique_recorded=self.tracks.iter().filter(|(other,_,_)|other.npc_param==info.npc_param).count()==1;
     let found=Self::find(&info,&taken,self.categories.get(&info.id).copied().unwrap_or(0),unique_recorded);
@@ -300,17 +300,22 @@ impl Player{
       let gravity=gravity_flag(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1);
       if flags.is_none()||gravity.is_none(){if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} control flags/gravity could not be validated; no pose/root writes",info.id));}continue;}
       let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0); // a held body cannot be hurt or killed meanwhile
-      self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags,gravity,transform,puppet:false,saved_1c5:saved});taken.push(chr);newly+=1;}
+      self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags,gravity,transform,puppet:false,saved_1c5:saved,hidden:false});taken.push(chr);newly+=1;}
      Plan::Puppet(why)=>{
       if puppets_on{let here=read_transform(live_player().unwrap_or(0)).map(|p|p[2]).unwrap_or([0.0;4]);self.request_puppet(&info,now,[here[0]+2.0,here[1],here[2]],why);}
       else if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_RECONSTRUCTION_UNAVAILABLE: id={} npc_param={} {why}; replay puppets are off (Settings > Replay world, or THEATER_PUPPETS=1)",info.id,info.npc_param));}}
      Plan::Unavailable(why)=>{if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} {why}",info.id));}}
-     Plan::Absent=>{}}}
+     // The recording says this character does not exist now (not yet, gone, left): its real body, if the game has
+     // one, is held and hidden instead of standing in the scene; it is given back when the replay ends.
+     Plan::Absent=>{if let Some(chr)=found{let c=unsafe{&*(chr as *const ChrIns)};
+      let (Some(transform),Some(flags),Some(gravity))=(read_transform(chr),debug_flags(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u32)}),gravity_flag(chr).map(|a|unsafe{std::ptr::read_volatile(a as *const u8)}==1)) else {continue};
+      let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0);set_render(chr,false);
+      self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:false,saved_1c5:saved,hidden:true});taken.push(chr);newly+=1;}}}}
    if newly>0||!self.logged{self.logged=true;crate::log_game(&format!("ACTORS: {} of {} recorded characters held by the replay ({} puppets)",self.controlled.len(),self.tracks.len(),self.controlled.values().filter(|c|c.puppet).count()));}}
   if now>=self.next_log&&!self.controlled.is_empty(){self.next_log=now+5_000_000_000;
    for (id,c) in &self.controlled{crate::log_game(&format!("ACTOR_DIAG: id={id} representation={:?} existence={:?} body=0x{:X} omission={} ai_isolation=no-move+no-attack+invincible",if c.puppet{Representation::Puppet}else{Representation::Live},existence.get(id),c.chr,crate::omission::describe(crate::omission::mode_of(c.chr))));}}
   for (info,track,parents) in &mut self.tracks{
-   let Some(ctl)=self.controlled.get(&info.id) else {continue};let chr=ctl.chr;let is_puppet=ctl.puppet;
+   let Some(ctl)=self.controlled.get_mut(&info.id) else {continue};let chr=ctl.chr;let is_puppet=ctl.puppet;let was_hidden=std::mem::replace(&mut ctl.hidden,false);let saved_render=ctl.saved_1c5&RENDER!=0;
    // The character must still be the same one (a reload can reuse the address).
    if !alive.contains(&chr)||handle_of(unsafe{&*(chr as *const ChrIns)})!=ctl.handle{self.controlled.remove(&info.id);continue;}
    if debug_flags(chr).is_none(){if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}
@@ -318,8 +323,9 @@ impl Player{
    // back can show it again); a live body is given back.
    let ex=existence[&info.id];
    if matches!(ex,Existence::NotYet|Existence::Gone|Existence::Left|Existence::Unknown){
-    if is_puppet{set_render(chr,false);}else if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}
+    if is_puppet{set_render(chr,false);}else{set_render(chr,false);if let Some(c)=self.controlled.get_mut(&info.id){c.hidden=true;}}continue;}
    if is_puppet{set_render(chr,true);}
+   else if was_hidden&&saved_render{set_render(chr,true);}
    else if let Some((dead,render))=live_state(chr){ // a live body that stopped matching the recording is released, never revived
     if plan(ex,Some((dead,render)))!=Plan::Drive&&ex==Existence::Alive{if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}}
    if self.skeletons.get(&info.id).is_some_and(|d|crate::skeleton::read(chr,info.id).as_ref()!=Some(d)){
@@ -327,7 +333,7 @@ impl Player{
     if self.warned.insert(info.id){crate::log_game(&format!("ACTOR_UNAVAILABLE: id={} skeleton identity differs; no pose applied",info.id));}continue;
    }
    let n=track.len();if !active_at(&track.times,t){
-    if is_puppet{set_render(chr,false);}else if let Some(c)=self.controlled.remove(&info.id){restore(&c);}continue;}
+    if is_puppet{set_render(chr,false);}else{set_render(chr,false);if let Some(c)=self.controlled.get_mut(&info.id){c.hidden=true;}}continue;}
    let i=track.times.partition_point(|x|*x<=t).saturating_sub(1).min(n-1);
    let (Some(a),Some(b))=(track.get(i).cloned(),track.get((i+1).min(n-1)).cloned()) else {continue};
    let span=b.body.time.saturating_sub(a.body.time);
@@ -388,6 +394,7 @@ fn role_matches(recorded:u32,observed:u32)->bool{
  semantic!=0&&observed&recorded==recorded
 }
 fn restore(c:&Controlled){
+ if c.saved_1c5&RENDER!=0{set_render(c.chr,true);}
  if c.saved_1c5&INVINCIBLE==0{write_bits(c.chr,5,0,INVINCIBLE);}
  if let (Some(a),Some(f))=(debug_flags(c.chr),c.flags){unsafe{let now=std::ptr::read_volatile(a as *const u32);let mask=(profile::VAL_DEBUG_FLAG_NO_MOVE|profile::VAL_DEBUG_FLAG_NO_ATTACK) as u32;std::ptr::write_volatile(a as *mut u32,(now&!mask)|(f&mask));}}
  if let Some(g)=c.gravity{set_flag(gravity_flag(c.chr),g);}write_transform(c.chr,&c.transform);set_flag(proxy_flag(c.chr),true);

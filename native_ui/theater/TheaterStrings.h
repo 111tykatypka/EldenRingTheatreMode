@@ -37,7 +37,7 @@ namespace TheaterUI
         CopyAll, CopyErrors, Copied, ClickToCopy,
         UnloadReplay,
         UiSounds, UiSoundsOn,
-        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote,
+        ReplayWorld, ReplayWorldFlags, ReplayWorldFlagsNote, ReplayPuppets, ReplayPuppetsNote, ReplayFullRate, ReplayFullRateNote,
         Count
     };
 
@@ -108,6 +108,9 @@ namespace TheaterUI
         { "Replay puppets (experimental)", "Заменяющие персонажи (эксперимент)" },
         { "When the recording says an enemy is alive but it is dead or gone in your game, ask the game to create a stand-in for the replay (invincible, no rewards, removed afterwards).",
           "Если в записи враг жив, а в вашей игре мертв или исчез, игра создаст замену для повтора (неуязвима, без наград, удаляется после)." },
+        { "Full update rate for distant characters", "Полная частота обновления дальних персонажей" },
+        { "The game updates far or off-screen characters less often (they lag and stutter). While recording or replaying, force every character to update each frame. Untick to use the game's own savings.",
+          "Игра реже обновляет дальних персонажей и тех, кого не видно (лаги и рывки). При записи и повторе обновлять всех каждый кадр. Снимите флажок, чтобы вернуть экономию игры." },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 
