@@ -174,6 +174,7 @@ void Overlay::LoadSettings()
         else if (key == "tool" && value >= 0 && value <= (float)Tool::Settings) ui_.activeTool = (Tool)(int)value;
         else if (key == "show_tools") showTools_ = value != 0;
         else if (key == "show_timeline") showTimeline_ = value != 0;
+        else if (key == "show_event_log") showEventLog_ = value != 0;
         else if (key == "sound_enabled") Sound::SetEnabled(value != 0);
         else if (key == "sound_volume") Sound::SetVolume(std::clamp(value, 0.0f, 1.0f));
         else if (key == "replay_options") gReplayOptions = (std::uint32_t)value;
@@ -210,6 +211,7 @@ void Overlay::SaveSettings() const
         << "tool " << (int)ui_.activeTool << "\n"
         << "show_tools " << (showTools_ ? 1 : 0) << "\n"
         << "show_timeline " << (showTimeline_ ? 1 : 0) << "\n"
+        << "show_event_log " << (showEventLog_ ? 1 : 0) << "\n"
         << "sound_enabled " << (Sound::Enabled() ? 1 : 0) << "\n"
         << "sound_volume " << Sound::Volume() << "\n"
         << "replay_options " << gReplayOptions.load() << "\n";
@@ -620,6 +622,7 @@ void Overlay::DrawMenuBar()
         ImGui::MenuItem(T(Str::PanelTools), nullptr, &showTools_);
         ImGui::MenuItem(T(Str::PanelSide), nullptr, &ui_.layout.panelOpen);
         ImGui::MenuItem(T(Str::PanelTimeline), nullptr, &showTimeline_);
+        if(ImGui::MenuItem(T(Str::EventLog), nullptr, &showEventLog_))SaveSettings();
         ImGui::EndMenu();
     }
     const char* hint = T(Str::HideUiHint);
@@ -729,9 +732,9 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     const bool visible = BeginPanel("###panel", T(titles[std::min<int>((int)ui_.activeTool, 6)]), ui_.rects.panelMin, ui_.rects.panelMax,
         ImVec2(Px(260, s), Px(320, s)), &ui_.layout.panelOpen);
     if (!visible) { ImGui::End(); ImGui::PopStyleVar(); return; }
-    // Independently scroll each tool; the compact event log stays outside the content.
+    // Hiding the log returns its space to the independently scrolling tool.
     const float availableH=std::max(1.f,ImGui::GetContentRegionAvail().y);
-    const float logReserve=std::min(Px(150,s),availableH*.4f);
+    const float logReserve=showEventLog_?std::min(Px(150,s),availableH*.4f):0.f;
     ImGui::PushID(static_cast<int>(ui_.activeTool));
     ImGui::BeginChild("##tool-content",ImVec2(0,std::max(1.f,availableH-logReserve)),ImGuiChildFlags_None,ImGuiWindowFlags_AlwaysVerticalScrollbar);
     ImGui::PushTextWrapPos(0.f);
@@ -826,75 +829,78 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     }
     case Tool::Camera:
     {
-        section("CAMERA SHORTCUTS");
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(Px(4,s),Px(2,s)));
+        section("CAMERA");
         auto runtime=camera_runtime::view();
-        ImGui::TextWrapped("Default / Free / Dolly are in the top-center camera bar. The configured Cycle Camera key works with the main overlay hidden.");
-        bool pathPreview=runtime.dolly_preview;if(checkbox("Preview Dolly path at ReplayTime (off = move and author keys)",&pathPreview))camera_runtime::preview(pathPreview);
+        auto compactSlider=[&](const char* label,float* value,float min,float max,const char* format="%.3f",ImGuiSliderFlags flags=0,float resetValue=0){
+            ImGui::PushID(label);ImGui::SetNextItemWidth(std::max(Px(85,s),ImGui::GetContentRegionAvail().x*.55f));
+            bool changed=ImGui::SliderFloat("##value",value,min,max,format,flags);
+            if(ImGui::IsItemHovered()&&(ImGui::IsMouseClicked(ImGuiMouseButton_Middle)||ImGui::IsMouseClicked(ImGuiMouseButton_Right))){*value=resetValue;changed=true;}
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("Right / middle: reset. Ctrl+click: type value.");
+            ImGui::SameLine();ImGui::TextUnformatted(label);ImGui::PopID();return changed;};
+        auto compactDouble=[&](const char* label,double* value,double min,double max,const char* format="%.3f",double resetValue=0){
+            ImGui::PushID(label);ImGui::SetNextItemWidth(std::max(Px(85,s),ImGui::GetContentRegionAvail().x*.55f));
+            bool changed=ImGui::SliderScalar("##value",ImGuiDataType_Double,value,&min,&max,format);
+            if(ImGui::IsItemHovered()&&(ImGui::IsMouseClicked(ImGuiMouseButton_Middle)||ImGui::IsMouseClicked(ImGuiMouseButton_Right))){*value=resetValue;changed=true;}
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("Right / middle: reset. Ctrl+click: type value.");
+            ImGui::SameLine();ImGui::TextUnformatted(label);ImGui::PopID();return changed;};
+        bool pathPreview=runtime.dolly_preview;if(checkbox("Preview path",&pathPreview))camera_runtime::preview(pathPreview);
         ImGui::BeginDisabled(!runtime.track_current||runtime.key_count<2);
-        if(ImGui::Button("Play path from first camera key"))PlayDollyPath(f);
+        if(ImGui::Button("Play path"))PlayDollyPath(f);
         ImGui::EndDisabled();
-        ImGui::TextWrapped("Space plays/pauses the replay without changing authoring mode. Keep preview off to move and press K during playback; enable it explicitly to watch the path.");
-        ImGui::TextWrapped("Dolly: move with the overlay hidden and capture keys at ReplayTime. Play automatically previews a path with at least two keys. Turn preview off to keep authoring.");
-        if(ImGui::Button("Advanced: use selected Bone camera")){camera_runtime::mode(3);camera_runtime::enable(true);}
-        if(checkbox("Show Dolly cameras / transform handles",&showDollyMarkers_))SaveSettings();
-        if(checkbox("Enable Dolly visibility shortcut (default P)",&enableDollyVisibilityKey_))SaveSettings();
-        if(checkbox("Show Dolly curve editor in sequencer",&showDollyCurves_))SaveSettings();
-        ImGui::TextDisabled("Markers stay visible outside F4. Open F4 to edit handles.");
-        ImGui::TextWrapped("Middle click inside Game viewport switches Move / Rotate handles.");
-        ImGui::Text("Native interception: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
-        ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
-        ImGui::TextWrapped("Runtime validation required. Test the two-second probe first; F6 immediately disables camera overrides.");
-        if(ImGui::Button("2-second +0.25 X camera probe"))camera_runtime::probe();
+        if(checkbox("Show camera handles",&showDollyMarkers_))SaveSettings();
+        if(checkbox("Visibility hotkey (P)",&enableDollyVisibilityKey_))SaveSettings();
+        if(checkbox("Show curves",&showDollyCurves_))SaveSettings();
         bool armed=runtime.enabled;
-        if(checkbox("Enable experimental Free / Dolly writes",&armed))camera_runtime::enable(armed);
-        ImGui::TextWrapped("Hide overlay with F4 to move: WASD, Q/E up/down, mouse/arrows rotate, Z/X roll, Shift fast, Ctrl slow. Gamepad input is not blocked.");
+        if(checkbox("Enable camera control",&armed))camera_runtime::enable(armed);
         float fov=static_cast<float>(runtime.pose.fov_degrees);ImGui::BeginDisabled(!runtime.enabled);
-        if(slider("Camera FOV (degrees)",&fov,1.f,178.f,"%.2f",0,60.f))camera_runtime::fov(fov);
+        if(compactSlider("FOV",&fov,1.f,178.f,"%.2f",0,60.f))camera_runtime::fov(fov);
         ImGui::EndDisabled();
         float movement=static_cast<float>(runtime.movement_speed),sensitivity=static_cast<float>(runtime.mouse_sensitivity),smooth=static_cast<float>(runtime.smoothing_seconds);
-        bool changed=slider("Move speed (units/sec)",&movement,.01f,1000.f,"%.3f",ImGuiSliderFlags_Logarithmic,3.f);
-        changed|=slider("Mouse sensitivity (rad/count)",&sensitivity,.00001f,.05f,"%.5f",ImGuiSliderFlags_Logarithmic,.0025f);
-        changed|=slider("Movement smoothing (seconds, 0 = direct)",&smooth,0.f,2.f,"%.3f");
+        bool changed=compactSlider("Move speed",&movement,.01f,1000.f,"%.3f",ImGuiSliderFlags_Logarithmic,3.f);
+        changed|=compactSlider("Sensitivity",&sensitivity,.00001f,.05f,"%.5f",ImGuiSliderFlags_Logarithmic,.0025f);
+        changed|=compactSlider("Move smooth",&smooth,0.f,2.f,"%.3f");
         float rotationSmooth=static_cast<float>(runtime.rotation_smoothing_seconds);
-        changed|=slider("Rotation smoothing (seconds, 0 = direct)",&rotationSmooth,0.f,2.f,"%.3f");
+        changed|=compactSlider("Rotate smooth",&rotationSmooth,0.f,2.f,"%.3f");
         if(changed)camera_runtime::movement(movement,sensitivity,smooth,rotationSmooth);
         double dollySmooth=runtime.dolly_smoothing_seconds;
-        if(doubleSlider("Dolly path smoothing (seconds)",&dollySmooth,0.,2.)){camera_runtime::dolly_smoothing(dollySmooth);cameraSettingsDirty_=true;cameraSettingsChangedAt_=f.now;}
-        ImGui::TextWrapped("Dolly smoothing filters the path at ReplayTime; authored keys and step cuts stay exact.");
+        if(compactDouble("Path smooth",&dollySmooth,0.,2.)){camera_runtime::dolly_smoothing(dollySmooth);cameraSettingsDirty_=true;cameraSettingsChangedAt_=f.now;}
+        if(ImGui::CollapsingHeader("Shake")){
         double shakePosition=runtime.shake_position,shakeRotation=runtime.shake_rotation,shakeFrequency=runtime.shake_frequency,shakeSpeed=runtime.shake_speed,shakeSmooth=runtime.shake_smoothing_seconds;
-        bool shakeChanged=doubleSlider("Shake position amplitude (units)",&shakePosition,0.,5.);
-        shakeChanged|=doubleSlider("Shake rotation amplitude (degrees)",&shakeRotation,0.,30.);
-        shakeChanged|=doubleSlider("Shake frequency (Hz)",&shakeFrequency,0.,30.,"%.3f",1.);
-        shakeChanged|=doubleSlider("Shake speed multiplier",&shakeSpeed,0.,10.,"%.3f",1.);
-        shakeChanged|=doubleSlider("Shake smoothing (seconds)",&shakeSmooth,0.,2.);
-        bool shakeDolly=runtime.shake_dolly;shakeChanged|=checkbox("Apply shake to Dolly cameras",&shakeDolly);
+        bool shakeChanged=compactDouble("Position",&shakePosition,0.,5.);
+        shakeChanged|=compactDouble("Rotation",&shakeRotation,0.,30.);
+        shakeChanged|=compactDouble("Frequency",&shakeFrequency,0.,30.,"%.3f",1.);
+        shakeChanged|=compactDouble("Speed",&shakeSpeed,0.,10.,"%.3f",1.);
+        shakeChanged|=compactDouble("Smoothing",&shakeSmooth,0.,2.);
+        bool shakeDolly=runtime.shake_dolly;shakeChanged|=checkbox("Dolly shake",&shakeDolly);
         if(shakeChanged){camera_runtime::shake(shakePosition,shakeRotation,shakeFrequency,shakeSpeed,shakeSmooth,shakeDolly);cameraSettingsDirty_=true;cameraSettingsChangedAt_=f.now;}
-        ImGui::TextDisabled("Mouse wheel: smooth FOV; Shift fine, Ctrl very fine (overlay hidden). Ctrl+click sliders for exact values.");
-        ImGui::TextDisabled("Shake uses real time: active during pause, independent of timescale. Saved nodes stay unshaken.");
+        ImGui::TextDisabled("Real-time shake, including paused replay.");
+        }
+        if(ImGui::CollapsingHeader("Close-up visibility")){
         double nearPlane=runtime.near_plane;bool preventFade=runtime.prevent_asset_fade;
-        bool closeChanged=doubleSlider("Camera near-Z (units)",&nearPlane,.001,1.,"%.4f",.01);
-        closeChanged|=checkbox("Prevent nearby asset fade (temporary in-memory override)",&preventFade);
+        bool closeChanged=compactDouble("Near-Z",&nearPlane,.001,1.,"%.4f",.01);
+        closeChanged|=checkbox("Reduce asset fade",&preventFade);
         if(closeChanged){camera_runtime::close_up(preventFade,nearPlane);SaveSettings();}
-        ImGui::TextDisabled("Native near-Z: %.4f. Asset override is restored outside Free/Dolly. Grass shader fading remains under investigation.",runtime.native_near_plane);
+        ImGui::TextDisabled("Grass fading is not yet resolved.");
+        }
+        if(ImGui::CollapsingHeader("Bone camera (advanced)")){
+        if(ImGui::Button("Use Bone camera")){camera_runtime::mode(3);camera_runtime::enable(true);}
         int boneIndex=runtime.bone_index;double offset[3]={runtime.bone_offset[0],runtime.bone_offset[1],runtime.bone_offset[2]};
         labelAbove("Player bone index (-1 disabled)");bool boneChanged=ImGui::InputInt("##bone-index",&boneIndex);
         for(int i=0;i<3;++i){const char*labels[]={"Bone offset right","Bone offset up","Bone offset forward"};boneChanged|=number(labels[i],&offset[i],.01,.1,"%.3f");}
         if(boneChanged)camera_runtime::bone(boneIndex,{offset[0],offset[1],offset[2]});
-        ImGui::Text("Bone source: %s (current player model-space pose + model root)",runtime.bone_available?"AVAILABLE":"UNAVAILABLE");
-        ImGui::TextWrapped("Bone indices depend on the current skeleton. No guessed head index. Bone camera uses evaluated live/replayed pose; visual coordinate alignment is not yet verified.");
-        ImGui::TextWrapped("K captures a key at ReplayTime. L deletes all keys after confirmation. Save/Load uses a .ercam sidecar beside the replay.");
-        if(ImGui::Button("Save camera path"))camera_runtime::save_path();ImGui::NewLine();if(ImGui::Button("Load camera path"))camera_runtime::load_path();
+        ImGui::Text("Bone source: %s",runtime.bone_available?"AVAILABLE":"UNAVAILABLE");
+        }
+        if(ImGui::Button("Save path"))camera_runtime::save_path();ImGui::SameLine();if(ImGui::Button("Load path"))camera_runtime::load_path();
         ImGui::Text("Dolly keys: %zu",runtime.keys.size());
-        ImGui::SeparatorText("CAMERA CUT TRACK (session only)");
-        bool cutsEnabled=runtime.cuts_enabled;if(checkbox("Evaluate Player / Dolly cuts at ReplayTime",&cutsEnabled))camera_runtime::cuts(cutsEnabled,runtime.cuts);
+        if(ImGui::CollapsingHeader("Camera cuts (session only)")){
+        bool cutsEnabled=runtime.cuts_enabled;if(checkbox("Enable cuts",&cutsEnabled))camera_runtime::cuts(cutsEnabled,runtime.cuts);
         static double cutStart=0,cutEnd=5;static int cutMode=1;
         number("Cut start (s)",&cutStart,.1,1);number("Cut end (s)",&cutEnd,.1,1);combo("Cut camera",&cutMode,"Player\0Current Dolly path\0");
         if(ImGui::Button("Add hard cut segment")&&std::isfinite(cutStart)&&std::isfinite(cutEnd)&&cutStart>=0&&cutEnd>cutStart&&cutEnd<double(UINT64_MAX)/1e9){auto cuts=runtime.cuts;std::uint64_t id=1;for(auto&c:cuts)id=std::max(id,c.id+1);cuts.push_back({id,static_cast<std::uint64_t>(cutStart*1e9),static_cast<std::uint64_t>(cutEnd*1e9),cutMode?cinematic::CutMode::Dolly:cinematic::CutMode::Player});camera_runtime::cuts(runtime.cuts_enabled,std::move(cuts));}
         for(auto cut:runtime.cuts){ImGui::PushID(static_cast<int>(cut.id));ImGui::Text("%.3f - %.3f: %s",double(cut.start_ns)/1e9,double(cut.end_ns)/1e9,cut.mode==cinematic::CutMode::Player?"Player":"Dolly");ImGui::NewLine();if(ImGui::Button("Remove cut")){auto cuts=runtime.cuts;std::erase_if(cuts,[&](auto&c){return c.id==cut.id;});camera_runtime::cuts(runtime.cuts_enabled,std::move(cuts));}ImGui::PopID();}
-        ImGui::TextDisabled("Gaps use Player camera; one Dolly path. Arm writes separately.");
-        ImGui::TextWrapped("%s",runtime.status.c_str());
-        ImGui::TextDisabled("World speed: CameraTools scalar, synchronized while replay is playing.");
-        ImGui::TextWrapped("%s",game_timing::status().c_str());
+        }
+        if(ImGui::CollapsingHeader("Keyframe details")){
         for(auto key:runtime.keys){ImGui::PushID(static_cast<int>(key.id));
             if(key.id==selectedDollyKey_)ImGui::SetNextItemOpen(true,ImGuiCond_Always);
             if(ImGui::TreeNode("edit","Key %llu at %.3fs",static_cast<unsigned long long>(key.id),double(key.time_ns)/1e9)){
@@ -915,15 +921,20 @@ void Overlay::DrawPanel(const OverlayFrame& f)
                 number("FOV degrees",&draft.state.fov_degrees,.1,1,"%.3f");
                 int interpolation=static_cast<int>(draft.outgoing);if(combo("Outgoing interpolation",&interpolation,"Linear\0Smooth\0Bezier\0Ease curve\0Catmull-Rom spline\0Step\0"))draft.outgoing=cinematic::Interpolation(interpolation);
                 checkbox("Constant position speed",&draft.constant_speed);
-                doubleSlider("Ease in",&draft.ease_in,0.,1.);doubleSlider("Ease out",&draft.ease_out,0.,1.);
+                compactDouble("Ease in",&draft.ease_in,0.,1.);compactDouble("Ease out",&draft.ease_out,0.,1.);
                 for(int i=0;i<3;++i){ImGui::PushID(i);number("Bezier handle in",&draft.tangent_in[i],.1,1);number("Bezier handle out",&draft.tangent_out[i],.1,1);ImGui::PopID();}
                 if(ImGui::Button("Apply key edit"))camera_runtime::edit_key(draft);ImGui::NewLine();if(ImGui::Button("Delete this key")){camera_runtime::delete_key(key.id);drafts.erase(key.id);}
                 ImGui::TreePop();}ImGui::PopID();}
-        section("NATIVE CAMERA DIAGNOSTICS");
-        ImGui::TextWrapped("Read-only SDK candidates, separate from the experimental render-camera copy hook.");
+        }
+        if(ImGui::CollapsingHeader("Diagnostics")){
+        ImGui::Text("Native interception: %s | observed: %s",runtime.hook_ready?"READY":"UNAVAILABLE",runtime.observed?"YES":"NO");
+        ImGui::Text("Camera writes: %s",runtime.writing?"ACTIVE (EXPERIMENTAL)":"OFF");
+        if(ImGui::Button("2-second +0.25 X camera probe"))camera_runtime::probe();
+        ImGui::TextWrapped("%s",runtime.status.c_str());
+        ImGui::TextWrapped("%s",game_timing::status().c_str());
         bool probe=theater_camera::probe_enabled.load();
         if(checkbox("Enable experimental camera reads",&probe))theater_camera::probe_enabled=probe;
-        if(!probe){ImGui::TextDisabled("SDK slot probe is OFF. Native copy observer remains active.");break;}
+        if(probe){
         const auto& c=f.camera;
         ImGui::Text("CSCamera: %s | mask: 0x%X",c.available?"FOUND":"UNAVAILABLE",c.mask);
         if(c.timestamp_ns){
@@ -940,6 +951,9 @@ void Overlay::DrawPanel(const OverlayFrame& f)
                     for(int r=0;r<4;++r)ImGui::Text("%.4f %.4f %.4f %.4f",slot.matrix[r*4],slot.matrix[r*4+1],slot.matrix[r*4+2],slot.matrix[r*4+3]);}
                 ImGui::TreePop();}ImGui::PopID();
         }
+        } // SDK probe
+        } // Diagnostics
+        ImGui::PopStyleVar();
         break;
     }
     case Tool::Look: section(T(Str::NotYetAvailable)); note(Str::LookNotes); break;
@@ -1055,9 +1069,12 @@ void Overlay::DrawPanel(const OverlayFrame& f)
 
     ImGui::PopTextWrapPos();
     ImGui::EndChild();ImGui::PopID();
-    section(T(Str::EventLog));
-    const float remaining=std::max(1.f,ImGui::GetContentRegionAvail().y);
-    DrawEventLog(remaining);
+    if(showEventLog_){
+        section(T(Str::EventLog));ImGui::SameLine();
+        if(ImGui::SmallButton("Hide##event-log")){showEventLog_=false;SaveSettings();}
+        const float remaining=std::max(1.f,ImGui::GetContentRegionAvail().y);
+        DrawEventLog(remaining);
+    }
     ImGui::End();
     ImGui::PopStyleVar();
 }
@@ -1486,14 +1503,28 @@ void Overlay::DrawDollyCurves(const OverlayFrame& f,ImVec2 min,ImVec2 max)
     ImGui::SetCursorScreenPos(ImVec2(min.x+Px(8,s),min.y+Px(4,s)));
     ImGui::TextUnformatted("Dolly curves");ImGui::SameLine();ImGui::SetNextItemWidth(Px(65,s));
     const char* channels[]={"X","Y","Z","FOV"};ImGui::Combo("##dolly-channel",&curveChannel_,channels,4);
-    auto selected=std::find_if(camera.keys.begin(),camera.keys.end(),[&](const auto&key){return key.id==selectedDollyKey_;});
-    if(selected!=camera.keys.end()){
-        ImGui::SameLine();ImGui::SetNextItemWidth(Px(85,s));int interpolation=int(selected->outgoing);
-        const char* modes[]={"Linear","Smooth","Bezier","Curve","Spline","Step"};
-        if(ImGui::Combo("##curve-interpolation",&interpolation,modes,6)){auto key=*selected;key.outgoing=cinematic::Interpolation(interpolation);camera_runtime::edit_key(key);}
+    ImGui::SameLine();if(ImGui::SmallButton("Fit")){curveZoom_=1;curvePan_=0;}
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Wheel: value zoom. Ctrl+wheel: time zoom. Shift+wheel: value pan.");
+    ImGui::SameLine();if(ImGui::SmallButton("Select all")){
+        selectedDollyKeys_.clear();for(const auto&key:camera.keys)selectedDollyKeys_.insert(key.id);
+        selectedDollyKey_=camera.keys.empty()?0:camera.keys.front().id;dollySelectionAnchor_=selectedDollyKey_;
     }
-    ImGui::SameLine();if(ImGui::SmallButton("Fit curve")){curveZoom_=1;curvePan_=0;}
-    ImGui::SameLine();ImGui::TextDisabled("Wheel: Y zoom | Ctrl+wheel: time zoom | Shift: Y pan");
+    // Apply to an explicit scope, atomically and with a single undo entry.
+    ImGui::SetCursorScreenPos(ImVec2(min.x+Px(8,s),ImGui::GetCursorScreenPos().y));
+    ImGui::SetNextItemWidth(Px(100,s));const char* scopes[]={"Selected","All keys"};
+    ImGui::Combo("##curve-scope",&curveEditScope_,scopes,2);
+    ImGui::SameLine();ImGui::SetNextItemWidth(Px(95,s));
+    const char* modes[]={"Linear","Smooth","Bezier","Curve","Spline","Step"};
+    ImGui::Combo("##curve-interpolation",&curveInterpolation_,modes,6);
+    ImGui::SameLine();ImGui::BeginDisabled(!camera.track_current||camera.keys.empty()||(!curveEditScope_&&selectedDollyKeys_.empty()));
+    if(ImGui::SmallButton("Apply")){
+        std::vector<std::uint64_t> ids;
+        for(const auto&key:camera.keys)if(curveEditScope_||selectedDollyKeys_.contains(key.id))ids.push_back(key.id);
+        camera_runtime::end_edit();curveDragging_=gizmoDragging_=curveBoxSelecting_=false;
+        camera_runtime::set_interpolation(ids,cinematic::Interpolation(curveInterpolation_));
+        camera=camera_runtime::view();
+    }
+    ImGui::EndDisabled();ImGui::SameLine();ImGui::TextDisabled("%zu selected",selectedDollyKeys_.size());
     if(!camera.track_current||camera.keys.empty()){curveDragging_=false;ImGui::TextDisabled("Load a replay and capture Dolly keys to edit its spline.");return;}
     if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys);curveGeneration_=camera.project_generation;}
     const ImVec2 a(min.x+Px(8,s),ImGui::GetCursorScreenPos().y+Px(3,s)),b(max.x-Px(8,s),max.y-Px(4,s));

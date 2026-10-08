@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <unordered_set>
 #include <atomic>
 #include <cstring>
 #include <cstdio>
@@ -213,6 +214,16 @@ void delete_keys(const std::vector<std::uint64_t>& ids){
  remember();track=std::move(next);++state.project_generation;
  if(track.keys().empty()&&state.mode==2){state.dolly_preview=false;state.cuts_enabled=false;release("Last Dolly key deleted; native camera restored");}
  state.status="Selected Dolly keys deleted";
+}
+void set_interpolation(const std::vector<std::uint64_t>& ids,cinematic::Interpolation mode){
+ std::lock_guard lock(mutex);
+ if(ids.empty()||keys_replay_path!=replay_path||static_cast<unsigned>(mode)>static_cast<unsigned>(cinematic::Interpolation::Step))return;
+ const std::unordered_set<std::uint64_t> selected(ids.begin(),ids.end());
+ auto keys=track.keys();bool changed=false;
+ for(auto&key:keys)if(key.outgoing!=mode&&selected.contains(key.id)){key.outgoing=mode;changed=true;}
+ if(!changed)return;
+ cinematic::Track next;if(!next.replace(std::move(keys)))return;
+ remember();track=std::move(next);++state.project_generation;state.status="Dolly interpolation updated for selected keys";
 }
 void begin_edit(){std::lock_guard lock(mutex);edit_group=true;edit_saved=false;}
 void end_edit(){std::lock_guard lock(mutex);edit_group=false;edit_saved=false;}

@@ -108,7 +108,7 @@ namespace TheaterUI
         std::unordered_set<std::uint64_t> curveBoxBase_;
         std::uint64_t cameraHistoryGeneration_=0;
         double cameraSettingsChangedAt_=0;
-        int curveChannel_=0;
+        int curveChannel_=0,curveInterpolation_=1,curveEditScope_=0;
         cinematic::Track curveTrack_;
         std::uint64_t curveGeneration_=UINT64_MAX;
         cinematic::Key curveStart_;
@@ -145,7 +145,7 @@ namespace TheaterUI
         int  lastLinked_ = -1, lastConnected_ = -1, lastPlayer_ = -1, lastLoaded_ = -1;
 
         // Panels and layout (Layout menu).
-        bool  showTools_ = true, showTimeline_ = true, resetLayout_ = false;
+        bool  showTools_ = true, showTimeline_ = true, showEventLog_ = true, resetLayout_ = false;
         bool  savedTools_ = true, savedTimeline_ = true, savedPanel_ = true;
         float menuH_ = 0.0f;
 

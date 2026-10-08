@@ -32,6 +32,8 @@ void clear_keys();
 void edit_key(cinematic::Key key);
 void delete_key(std::uint64_t id);
 void delete_keys(const std::vector<std::uint64_t>& ids);
+// One history entry for a bulk edit; transforms and key timing are preserved.
+void set_interpolation(const std::vector<std::uint64_t>& ids, cinematic::Interpolation mode);
 void begin_edit();
 void end_edit();
 void undo();
