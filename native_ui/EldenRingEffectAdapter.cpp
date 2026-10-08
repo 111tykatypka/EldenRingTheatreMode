@@ -62,6 +62,22 @@ std::uint64_t __fastcall update_detour(void*handle,const float*matrix){
      memcpy(fx.last,m,sizeof(m));fx.has_last=true;}}}}
  return update_original(handle,matrix);
 }
+// Decal creation (blood on walls and ground). Research capture only for now: the descriptor holds pointers that are not valid in
+// another session, so it is logged and counted, never replayed.
+using DecalCreate=void(__fastcall*)(void*,const unsigned char*,std::uint64_t);
+DecalCreate decal_original=nullptr;std::atomic<std::uint64_t> decals_seen=0;std::atomic<int> decal_logs=0;
+bool copy_desc(const unsigned char*src,unsigned char*dst){__try{memcpy(dst,src,0xE8);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
+void log_decal(void*manager,const unsigned char*desc){
+ unsigned char b[0xE8];if(!copy_desc(desc,b))return;
+ char line[1200];int n=snprintf(line,sizeof(line),"DECAL_CREATE type=%d manager=%p vtable=%p desc=",*reinterpret_cast<int*>(b+0x38),manager,manager?*reinterpret_cast<void**>(manager):nullptr);
+ for(int i=0;i<0xE8&&n<(int)sizeof(line)-4;i+=1)n+=snprintf(line+n,sizeof(line)-n,"%02X",b[i]);
+ char path[MAX_PATH]{};if(GetTempPathA(MAX_PATH,path)){strcat_s(path,"TheaterModeGame.log");FILE*f=nullptr;if(fopen_s(&f,path,"a")==0&&f){fprintf(f,"%s\n",line);fclose(f);}}
+}
+void __fastcall decal_detour(void*manager,const unsigned char*desc,std::uint64_t id){
+ ++decals_seen;
+ if(capture.load(std::memory_order_relaxed)&&decal_logs.fetch_add(1)<12&&desc)log_decal(manager,desc);
+ decal_original(manager,desc,id);
+}
 bool scene_guard(std::uintptr_t b);
 std::atomic_bool scene_guard_passed=false; // checked once before the creation function was hooked (afterwards its first bytes are a jump)
 using SceneCreate=void*(__fastcall*)(void*,void*,std::uint32_t,void*,const float*,int,int);
@@ -90,6 +106,9 @@ extern "C" int tm_effect_initialize(){
   auto site=reinterpret_cast<void*>(base+TM_VAL_VFX_SCENE_CREATE_RVA);
   if(MH_CreateHook(site,reinterpret_cast<void*>(scene_detour),reinterpret_cast<void**>(&scene_original))!=MH_OK)return 0;
   if(MH_EnableHook(site)!=MH_OK){MH_RemoveHook(site);scene_original=nullptr;return 0;}
+  {const unsigned char decal_bytes[]=TM_DECAL_CREATE_BYTES;unsigned char got[sizeof(decal_bytes)]{};SIZE_T n=0;auto dsite=reinterpret_cast<void*>(base+TM_VAL_DECAL_CREATE_RVA);
+   if(ReadProcessMemory(GetCurrentProcess(),dsite,got,sizeof(got),&n)&&n==sizeof(got)&&!memcmp(got,decal_bytes,sizeof(got))){
+    if(MH_CreateHook(dsite,reinterpret_cast<void*>(decal_detour),reinterpret_cast<void**>(&decal_original))==MH_OK){if(MH_EnableHook(dsite)!=MH_OK){MH_RemoveHook(dsite);decal_original=nullptr;}}}}
   // Transform update of an effect handle (optional: without it effects are replayed where they started).
   const unsigned char update_bytes[]={0x48,0x89,0x54,0x24,0x10,0x48,0x89,0x4c,0x24,0x08,0x56,0x57,0x48,0x81,0xec,0x88};unsigned char got[sizeof(update_bytes)]{};
   auto usite=reinterpret_cast<void*>(base+TM_VAL_VFX_HANDLE_TRANSFORM_RVA);SIZE_T n=0;
@@ -204,3 +223,5 @@ extern "C" int tm_effect_scene_set_transform(std::uint64_t tag_time,std::uint32_
   __try{reinterpret_cast<UpdateFn>(base+TM_VAL_VFX_HANDLE_TRANSFORM_RVA)(s.handle,copy);}__except(EXCEPTION_EXECUTE_HANDLER){ok=false;scene_faulted=true;}
   replaying=false;return ok?1:0;}
  return 0;}
+
+extern "C" std::uint64_t tm_effect_decal_count(){return game_effects::decals_seen.load();}

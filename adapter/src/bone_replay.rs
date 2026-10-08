@@ -260,7 +260,7 @@ fn finish_recording(s:&mut State){
  let Some(r)=s.recording.take() else {return;};
  // Effects: stop capturing and hand the last ones to the writer before the channel closes.
  effects::capture(false);{let rest=fx_relative(effects::drain(),r.first);{let up=effects::drain_updates();if !up.is_empty(){let _=r.tx.try_send(Message::EffectUpdates(up));}}let (seen,dropped,_)=effects::stats();if !rest.is_empty(){let _=r.tx.try_send(Message::Effects(rest));}
-  crate::log_game(&format!("EFFECTS: {seen} effect creations seen so far this session ({dropped} dropped by the queue)"));let (us,ud)=effects::update_stats();crate::log_game(&format!("EFFECT_UPDATES: {us} per-frame effect movements captured so far this session ({ud} dropped)"));}
+  crate::log_game(&format!("EFFECTS: {seen} effect creations seen so far this session ({dropped} dropped by the queue)"));let (us,ud)=effects::update_stats();crate::log_game(&format!("EFFECT_UPDATES: {us} per-frame effect movements captured so far this session ({ud} dropped)"));crate::log_game(&format!("DECALS: {} decals (blood splatter and similar) created by the game so far this session; research capture, not replayed yet",effects::decal_count()));}
  let seconds=r.last.saturating_sub(r.first) as f64/1e9;
  crate::log_game(&format!("BONE_REPLAY: recording stopped; {} frames over {seconds:.2} s ({} dropped while the disk was busy), {} characters; finishing {}",r.frames,r.dropped,r.actors.count(),world_path(&r.path).display()));
  crate::log_game(&format!("COMPANIONS_SUMMARY: {} companion identities, {} dropped actor samples (no lost catalog announcements)",r.actors.companions(),r.actors.drops()));

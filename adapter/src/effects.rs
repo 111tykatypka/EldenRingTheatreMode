@@ -7,7 +7,7 @@ use crate::world_file::{EffectEvent,EffectUpdate};
 #[repr(C)]#[derive(Clone,Copy,Default)]struct Raw{time_ns:u64,id:u32,pos:[f32;3]}
 unsafe extern "C"{
  fn tm_effect_initialize()->i32;fn tm_effect_capture(on:i32);fn tm_effect_drain(out:*mut Raw,max:u32)->u32;
- fn tm_effect_scene_spawn(manager:usize,id:u32,pos:*const f32,expires_at:u64,tag_time:u64)->i32;fn tm_effect_drain_updates(out:*mut RawUpdate,max:u32)->u32;fn tm_effect_scene_set_transform(tag_time:u64,id:u32,m:*const f32)->i32;fn tm_effect_scene_tick(replay_time:u64);fn tm_effect_update_stats(seen:*mut u64,dropped:*mut u64);fn tm_effect_scene_end_stats(natural:*mut u64,cap:*mut u64);fn tm_effect_scene_stats(c:*mut u64,nr:*mut u64,f:*mut u64,ns:*mut u64);fn tm_effect_scene_release_all();
+ fn tm_effect_scene_spawn(manager:usize,id:u32,pos:*const f32,expires_at:u64,tag_time:u64)->i32;fn tm_effect_drain_updates(out:*mut RawUpdate,max:u32)->u32;fn tm_effect_scene_set_transform(tag_time:u64,id:u32,m:*const f32)->i32;fn tm_effect_scene_tick(replay_time:u64);fn tm_effect_update_stats(seen:*mut u64,dropped:*mut u64);fn tm_effect_decal_count()->u64;fn tm_effect_scene_end_stats(natural:*mut u64,cap:*mut u64);fn tm_effect_scene_stats(c:*mut u64,nr:*mut u64,f:*mut u64,ns:*mut u64);fn tm_effect_scene_release_all();
  fn tm_effect_spawn(id:u32,pos:*const f32)->i32;fn tm_effect_stats(seen:*mut u64,dropped:*mut u64,replayed:*mut u64);
 }
 static READY:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
@@ -48,4 +48,5 @@ pub fn release_all(){unsafe{tm_effect_scene_release_all()}
  let (mut en,mut ec)=(0u64,0u64);unsafe{tm_effect_scene_end_stats(&mut en,&mut ec)}
  if c+nr+f+ns+en+ec!=LAST.swap(c+nr+f+ns+en+ec,std::sync::atomic::Ordering::Relaxed){crate::log_game(&format!("EFFECT_REPLAY_SUMMARY: {c} created, {nr} skipped because the effect resource was not loaded, {ns} recycled when the pool was full, {f} failed; {en} ended by themselves, {ec} stopped at the 20 s safety limit"));}}
 pub fn update_stats()->(u64,u64){let (mut a,mut b)=(0u64,0u64);if ready(){unsafe{tm_effect_update_stats(&mut a,&mut b)}}(a,b)}
+pub fn decal_count()->u64{if ready(){unsafe{tm_effect_decal_count()}}else{0}}
 pub fn stats()->(u64,u64,u64){let (mut a,mut b,mut c)=(0u64,0u64,0u64);if ready(){unsafe{tm_effect_stats(&mut a,&mut b,&mut c)}}(a,b,c)}
