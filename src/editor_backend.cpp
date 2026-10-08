@@ -354,7 +354,7 @@ void launch_game() {
         [] {
           const auto control = app.control.state();
           return game_launcher::Runtime{
-              app.sample_pipe_ready.load() && app.stop_hotkey,
+              app.sample_pipe_ready.load(),
               app.game_pid.load(), control.connected, control.ready};
         },
         log_line);
