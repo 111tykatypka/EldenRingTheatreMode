@@ -59,6 +59,14 @@ pub fn model_pointers(chr:usize)->Vec<(u32,u64)>{
    if let Some(q)=crate::companions::word(p+o2).map(|q|q as usize).filter(|q|ok(*q)){out.push((((off as u32)<<12)|o2 as u32,q as u64));}
    if out.len()>300{return out;}}}
  out}
+/// Ragdoll research: (ChrCtrl ragdoll state byte, ragdoll object address, up to 12 heap pointers inside that object).
+pub fn ragdoll_info(chr:usize)->Option<(u8,usize,Vec<(u32,u64)>)>{
+ let ctrl=crate::companions::word(chr+offset_of!(ChrIns,chr_ctrl)).filter(|p|*p>0x10000)? as usize;
+ let mut b=[0u8;1];if !crate::companions::copy(ctrl+0x128,&mut b){return None;}
+ let ragdoll=crate::companions::word(ctrl+0x28).unwrap_or(0) as usize;
+ let mut ptrs=Vec::new();
+ if ragdoll>0x10000{for off in (0..0x200usize).step_by(8){if let Some(p)=crate::companions::word(ragdoll+off).filter(|p|*p>0x10000&&*p<0x7FFF_FFFF_FFFF){let mut t=[0u8;8];if crate::companions::copy(p as usize,&mut t){ptrs.push((off as u32,p as u64));if ptrs.len()>=12{break;}}}}}
+ Some((b[0],ragdoll,ptrs))}
 fn snapshot(chr:usize)->Vec<(String,usize,Vec<u8>)>{
  region_list(chr).into_iter().filter_map(|(n,a,l)|{let mut b=vec![0u8;l];crate::companions::copy(a,&mut b).then_some((n,a,b))}).collect()}
 impl Probe{

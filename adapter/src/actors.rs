@@ -145,9 +145,9 @@ fn torrent_census(){
 // ------------------------------------------------------------------------------------------ record
 /// Per-recording identities and rate control; lives while the host records.
 struct Identity{info:ActorInfo,announced:bool,category:u32,seen:u64,skeleton:Option<crate::skeleton::Definition>}
-pub struct Recorder{npc_models:HashMap<usize,Vec<(u32,u64)>>,npc_probe_next:u64,masks:HashMap<u32,[u8;16]>,mask_logs:u32,omission_at:u64,hist:crate::omission::Histogram,ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64,observations:HashMap<u32,Observation>}
+pub struct Recorder{ragdolls:HashMap<usize,(u8,u64)>,npc_models:HashMap<usize,Vec<(u32,u64)>>,npc_probe_next:u64,masks:HashMap<u32,[u8;16]>,mask_logs:u32,omission_at:u64,hist:crate::omission::Histogram,ids:HashMap<(u64,u32,i32),Identity>,next:u32,frame:u64,warned:bool,next_context:u64,dropped:u64,companion_ids:HashSet<u32>,next_diagnostic:u64,observations:HashMap<u32,Observation>}
 impl Recorder{
- pub fn new()->Self{Self{npc_models:HashMap::new(),npc_probe_next:0,masks:HashMap::new(),mask_logs:0,omission_at:0,hist:Default::default(),ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0,observations:HashMap::new()}}
+ pub fn new()->Self{Self{ragdolls:HashMap::new(),npc_models:HashMap::new(),npc_probe_next:0,masks:HashMap::new(),mask_logs:0,omission_at:0,hist:Default::default(),ids:HashMap::new(),next:1,frame:0,warned:false,next_context:0,dropped:0,companion_ids:HashSet::new(),next_diagnostic:0,observations:HashMap::new()}}
  /// Samples nearby characters; `player` is the main player's ChrIns, `tx` the world file writer.
  pub fn sample(&mut self,now:u64,player:usize,tx:&SyncSender<Message>){
   self.frame+=1;
@@ -181,7 +181,14 @@ impl Recorder{
      let removed:Vec<String>=old.iter().filter(|e|!cur.contains(e)).map(|e|format!("{:#x}={:#x}",e.0,e.1)).take(12).collect();
      if !added.is_empty()||!removed.is_empty(){crate::log_game(&format!("NPC_MODEL_DIFF chr={} npc_param={} t={:.2}s added={added:?} removed={removed:?}",c.character_id,c.npc_param_id,now as f64/1e9));}
     }else{crate::log_game(&format!("NPC_MODEL_WATCH chr={} npc_param={} children={}",c.character_id,c.npc_param_id,cur.len()));}
-    self.npc_models.insert(chr,cur);}
+    self.npc_models.insert(chr,cur);
+    // Ragdoll research: state changes, and whether the pose arrays we record keep moving once the character is a ragdoll.
+    if let Some((state,obj,ptrs))=crate::item_probe::ragdoll_info(chr){
+     let hash=pose_arrays(chr).map(|(_,m)|{let mut b=[0u8;0x30*48];if crate::companions::copy(m,&mut b){b.chunks(8).fold(0u64,|h,c|h.rotate_left(5)^u64::from_le_bytes(c.try_into().unwrap()))}else{0}}).unwrap_or(0);
+     let prev=self.ragdolls.insert(chr,(state,hash));
+     match prev{None=>crate::log_game(&format!("RAGDOLL_WATCH chr={} npc_param={} state={state} object={obj:#x} ptrs={ptrs:?}",c.character_id,c.npc_param_id)),
+      Some((s0,h0))=>{if s0!=state{crate::log_game(&format!("RAGDOLL_STATE chr={} npc_param={} {s0}->{state} object={obj:#x} death_flag={} ptrs={ptrs:?}",c.character_id,c.npc_param_id,body_dead(chr)));}
+       else if state!=0&&h0!=hash{crate::log_game(&format!("RAGDOLL_POSE_MOVING chr={} state={state} (recorded pose array still changes)",c.character_id));}}}}}
    self.hist.add(if crate::omission::engaged(){crate::omission::force_update(chr)}else{crate::omission::mode_of(chr)});
    let key=(handle_of(c),c.event_entity_id,c.npc_param_id);
    // Reappearance after an observation gap gets a new recording identity, even if a handle was reused.
