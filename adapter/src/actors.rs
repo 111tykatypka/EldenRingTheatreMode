@@ -127,6 +127,20 @@ fn live_snapshot(diagnostic:bool)->(Vec<usize>,HashSet<usize>){
  let mut bodies:Vec<usize>=world.chr_inses_by_distance.iter().map(|e|e.chr_ins.as_ptr() as usize).chain(buddies).filter(|a|Some(*a)!=player).collect();
  bodies.sort_unstable();bodies.dedup();(bodies,set)}
 fn live()->Vec<usize>{live_snapshot(false).0}
+/// Every loaded body that is Torrent (model 8002/8000 or NpcParam 80020000), with what can be read from it: the
+/// body the replay holds may not be the one that is drawn.
+fn torrent_census(){
+ static LAST:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+ let now=crate::monotonic_ns();if now.saturating_sub(LAST.load(std::sync::atomic::Ordering::Relaxed))<5_000_000_000{return;}LAST.store(now,std::sync::atomic::Ordering::Relaxed);
+ let (bodies,buddies)=live_snapshot(false);let player=live_player();
+ let me=player.and_then(read_transform).map(|t|t[2]);
+ let mut n=0;
+ for a in bodies{let c=unsafe{&*(a as *const ChrIns)};
+  if !(c.character_id==8002||c.character_id==8000||c.npc_param_id==80020000||c.npc_id==8002){continue;}
+  n+=1;
+  let t=read_transform(a).map(|t|t[2]);let d=match(me,t){(Some(m),Some(t))=>Some(((m[0]-t[0]).powi(2)+(m[1]-t[1]).powi(2)+(m[2]-t[2]).powi(2)).sqrt()),_=>None};
+  crate::log_game(&format!("TORRENT_CENSUS: body=0x{a:X} buddy_set={} chr={} npc_param={} handle=0x{:X} load_state={:?} flags1c5=0x{:02X} bones={:?} omission={} distance={:?} ride={:?}",buddies.contains(&a),c.character_id,c.npc_param_id,handle_of(c),c.load_state,flag_byte(a,5).map(read_byte).unwrap_or(0),crate::skeleton::read(a,0).map(|d|d.parents.len()),crate::omission::describe(crate::omission::mode_of(a)),d.map(|v|(v*10.0).round()/10.0),crate::companions::ride(a)));}
+ if n==0{crate::log_game("TORRENT_CENSUS: no loaded body is Torrent");}}
 
 // ------------------------------------------------------------------------------------------ record
 /// Per-recording identities and rate control; lives while the host records.
@@ -357,6 +371,7 @@ impl Player{
       let saved=flag_byte(chr,5).map(read_byte).unwrap_or(0);write_bits(chr,5,INVINCIBLE,0);set_render(chr,false);
       self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:false,saved_1c5:saved,hidden:true});taken.push(chr);newly+=1;}}}}
    if newly>0||!self.logged{self.logged=true;crate::log_game(&format!("ACTORS: {} of {} recorded characters held by the replay ({} puppets)",self.controlled.len(),self.tracks.len(),self.controlled.values().filter(|c|c.puppet).count()));}}
+  if now>=self.next_log&&self.tracks.iter().any(|(i,_,_)|self.categories.get(&i.id).copied().unwrap_or(0)!=0){torrent_census();}
   if now>=self.next_log&&!self.controlled.is_empty(){self.next_log=now+5_000_000_000;
    for (id,c) in &self.controlled{crate::log_game(&format!("ACTOR_DIAG: id={id} representation={:?} existence={:?} body=0x{:X} omission={} live_bones={:?} recorded_bones={:?} hidden={} ai_isolation=no-move+no-attack+invincible",if c.puppet{Representation::Puppet}else{Representation::Live},existence.get(id),c.chr,crate::omission::describe(crate::omission::mode_of(c.chr)),crate::skeleton::read(c.chr,*id).map(|d|d.parents.len()),self.skeletons.get(id).map(|d|d.parents.len()),c.hidden));}}
   self.freeze_others(self.options&8==0,now);
