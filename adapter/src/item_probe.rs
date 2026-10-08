@@ -10,15 +10,24 @@ pub struct Probe{window:Option<Window>,item:Option<u32>,sfx:Option<[i32;3]>,effe
 /// After an item is queued for use: for a few seconds, 10 times a second, report which bytes of the player's
 /// assembly, action-flag module, model instance and the front of the ChrIns itself changed (offset old->new).
 /// The weapon hiding while a flask is drunk must be one of them, since weapon_loc does not change then.
-struct Window{until:f64,next:f64,regions:Vec<(&'static str,usize,Vec<u8>)>}
-fn region_list(chr:usize)->Vec<(&'static str,usize,usize)>{
- let mut v=vec![("ChrIns",chr,0x500usize)];
+struct Window{until:f64,next:f64,regions:Vec<(String,usize,Vec<u8>)>}
+/// The player's model-instance object and what it points to one level down (weapon / armor model instances).
+fn asm_children(chr:usize)->Vec<(String,usize,usize)>{
+ let Some(root)=crate::companions::word(chr+offset_of!(eldenring::cs::PlayerIns,chr_asm)+0x10).filter(|p|*p>0x10000) else {return vec![]};
+ let mut out=vec![("AsmModelIns".to_string(),root,0x800usize)];let mut seen=vec![root];
+ for off in (0..0x400usize).step_by(8){
+  let Some(p)=crate::companions::word(root+off).filter(|p|*p>0x10000&&*p<0x7FFF_FFFF_FFFF&&!seen.contains(p)) else {continue};
+  let mut probe=[0u8;8];if !crate::companions::copy(p,&mut probe){continue;}
+  seen.push(p);out.push((format!("AsmChild+{off:#x}"),p,0x200));if out.len()>=26{break;}}
+ out}
+fn region_list(chr:usize)->Vec<(String,usize,usize)>{
+ let mut v=vec![("ChrIns".to_string(),chr,0x500usize)];
  let ptr=|o:usize|crate::companions::word(chr+o).filter(|p|*p>0x10000);
- if let Some(a)=ptr(offset_of!(eldenring::cs::PlayerIns,chr_asm)){v.push(("ChrAsm",a,std::mem::size_of::<eldenring::cs::ChrAsm>()));}
- if let Some(a)=crate::weapon_loc::module(chr){v.push(("ActionFlag",a,0x258));}
- if let Some(a)=ptr(offset_of!(ChrIns,chr_model_ins)){v.push(("ModelIns",a,0x300));}
- v}
-fn snapshot(chr:usize)->Vec<(&'static str,usize,Vec<u8>)>{
+ if let Some(a)=ptr(offset_of!(eldenring::cs::PlayerIns,chr_asm)){v.push(("ChrAsm".to_string(),a,std::mem::size_of::<eldenring::cs::ChrAsm>()));}
+ if let Some(a)=crate::weapon_loc::module(chr){v.push(("ActionFlag".to_string(),a,0x258));}
+ if let Some(a)=ptr(offset_of!(ChrIns,chr_model_ins)){v.push(("ModelIns".to_string(),a,0x300));}
+ v.extend(asm_children(chr));v}
+fn snapshot(chr:usize)->Vec<(String,usize,Vec<u8>)>{
  region_list(chr).into_iter().filter_map(|(n,a,l)|{let mut b=vec![0u8;l];crate::companions::copy(a,&mut b).then_some((n,a,b))}).collect()}
 impl Probe{
  fn watch(&mut self,chr:usize,seconds:f64){

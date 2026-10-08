@@ -358,7 +358,7 @@ impl Player{
       self.controlled.insert(info.id,Controlled{chr,handle:handle_of(c),flags:Some(flags),gravity:Some(gravity),transform,puppet:false,saved_1c5:saved,hidden:true});taken.push(chr);newly+=1;}}}}
    if newly>0||!self.logged{self.logged=true;crate::log_game(&format!("ACTORS: {} of {} recorded characters held by the replay ({} puppets)",self.controlled.len(),self.tracks.len(),self.controlled.values().filter(|c|c.puppet).count()));}}
   if now>=self.next_log&&!self.controlled.is_empty(){self.next_log=now+5_000_000_000;
-   for (id,c) in &self.controlled{crate::log_game(&format!("ACTOR_DIAG: id={id} representation={:?} existence={:?} body=0x{:X} omission={} ai_isolation=no-move+no-attack+invincible",if c.puppet{Representation::Puppet}else{Representation::Live},existence.get(id),c.chr,crate::omission::describe(crate::omission::mode_of(c.chr))));}}
+   for (id,c) in &self.controlled{crate::log_game(&format!("ACTOR_DIAG: id={id} representation={:?} existence={:?} body=0x{:X} omission={} live_bones={:?} recorded_bones={:?} hidden={} ai_isolation=no-move+no-attack+invincible",if c.puppet{Representation::Puppet}else{Representation::Live},existence.get(id),c.chr,crate::omission::describe(crate::omission::mode_of(c.chr)),crate::skeleton::read(c.chr,*id).map(|d|d.parents.len()),self.skeletons.get(id).map(|d|d.parents.len()),c.hidden));}}
   self.freeze_others(self.options&8==0,now);
   for (info,track,parents) in &mut self.tracks{
    let Some(ctl)=self.controlled.get_mut(&info.id) else {continue};let chr=ctl.chr;let is_puppet=ctl.puppet;let was_hidden=std::mem::replace(&mut ctl.hidden,false);let saved_render=ctl.saved_1c5&RENDER!=0;
