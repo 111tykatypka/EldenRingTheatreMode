@@ -31,6 +31,7 @@ namespace TheaterUI
 
     struct OverlayFrame
     {
+        ImTextureID game_texture=0; // current GPU-only back-buffer copy; zero in CPU tests
         theater_ui::Snapshot snapshot;   // copy taken under the IPC lock
         bool        hostLinked = false;  // pipe round trip succeeded at least once since the last drop
         std::vector<std::string> events; // new game-side event log lines since the last frame
@@ -65,6 +66,7 @@ namespace TheaterUI
         void DrawPanel(const OverlayFrame& f);
         void DrawCameraModes(const OverlayFrame& f);
         void DrawDollyViewport(const OverlayFrame& f);
+        void DrawGameViewport(const OverlayFrame& f);
         void DrawSequencer(const OverlayFrame& f);
         void DrawToolbar(const OverlayFrame& f, float height);
         void DrawDollyCurves(const OverlayFrame& f, ImVec2 min, ImVec2 max);
@@ -85,6 +87,10 @@ namespace TheaterUI
         void SaveSettings() const;
 
         UIState ui_;
+        bool compactTracks_=true,expandActorTracks_=false,gameViewInitialized_=false;
+        ImVec2 gameViewMin_{},gameViewMax_{};
+        bool gameViewFit_=true;
+        float sequencerTop_=0,sequencerRight_=0;
         unsigned cameraSelection_ = 0; // selection, not native ownership
         bool clearDollyDialog_ = false;
         bool showDollyMarkers_=true,enableDollyVisibilityKey_=true,cameraMarkerClick_=false;

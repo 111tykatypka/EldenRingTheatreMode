@@ -152,6 +152,9 @@ void Overlay::LoadSettings()
         if (!std::isfinite(value)) continue;
         if (key == "dolly_markers") showDollyMarkers_=value!=0;
         else if(key=="dolly_visibility_key") enableDollyVisibilityKey_=value!=0;
+        else if(key=="game_view_fit") gameViewFit_=value!=0;
+        else if(key=="compact_tracks") compactTracks_=value!=0;
+        else if(key=="actor_tracks") expandActorTracks_=value!=0;
         else if(key=="dolly_curves") showDollyCurves_=value!=0;
         else if(key=="dolly_smoothing") effects.dolly_smoothing_seconds=std::clamp(double(value),0.,2.);
         else if(key=="shake_position") effects.shake_position=std::clamp(double(value),0.,5.);
@@ -181,6 +184,8 @@ void Overlay::SaveSettings() const
     std::error_code ec; std::filesystem::create_directories(path.parent_path(), ec);
     std::ofstream out(path, std::ios::trunc);
     const auto effects=camera_runtime::view(false);
+    out << "game_view_fit " << gameViewFit_ << "\n";
+    out << "compact_tracks " << compactTracks_ << "\n" << "actor_tracks " << expandActorTracks_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
         << "dolly_visibility_key " << enableDollyVisibilityKey_ << "\n"
         << "dolly_curves " << showDollyCurves_ << "\n"
@@ -339,10 +344,12 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     {
         PushFont(Font::Body);
         DrawMenuBar();
-        DrawDollyViewport(f);
         if (showTools_) DrawRail(f);
         if (ui_.layout.panelOpen) DrawPanel(f);
+        sequencerTop_=io.DisplaySize.y;sequencerRight_=io.DisplaySize.x;
         if (showTimeline_) DrawSequencer(f);
+        DrawGameViewport(f);
+        DrawDollyViewport(f);
         DrawCameraModes(f);
         DrawDialogs(f);
         UiSoundsAfterFrame();
@@ -352,7 +359,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         ImGui::PopFont();
         DrawCursor();
     }
-    else {DrawHiddenHint(f);PushFont(Font::Body);DrawDollyViewport(f);DrawCameraModes(f);ImGui::PopFont();}
+    else {gameViewInitialized_=false;DrawHiddenHint(f);PushFont(Font::Body);DrawDollyViewport(f);DrawCameraModes(f);ImGui::PopFont();}
     if(cameraSettingsDirty_&&!ImGui::IsMouseDown(ImGuiMouseButton_Left)&&f.now-cameraSettingsChangedAt_>.4){SaveSettings();cameraSettingsDirty_=false;}
     if (ui_.visibility != UiVisibility::HiddenClean) DrawRecordingPill(f);
     return ui_.rects;
@@ -401,6 +408,46 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
     ImGui::End();ImGui::PopStyleColor();
 }
 
+void Overlay::DrawGameViewport(const OverlayFrame& f)
+{
+    auto&io=ImGui::GetIO();if(!f.game_texture){gameViewInitialized_=false;return;}
+    const float s=ui_.rects.uiScale,gap=Px(6,s),top=menuH_+gap;
+    const float bottom=std::max(top+Px(80,s),sequencerTop_-gap);
+    const float right=std::min(io.DisplaySize.x,sequencerRight_);
+    ImVec2 pos(std::min(ui_.rects.areaMin.x,std::max(0.f,right-Px(240,s))),top),size(std::max(Px(240,s),right-pos.x),std::max(Px(80,s),bottom-top));
+    ImGui::SetNextWindowPos(pos,resetLayout_?ImGuiCond_Always:ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(size,resetLayout_?ImGuiCond_Always:ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(Px(240,s),Px(80,s)),ImVec2(std::max(Px(240,s),right),bottom-top));
+    ImGui::Begin("Game viewport###game-viewport",nullptr,ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse|ImGuiWindowFlags_NoCollapse);
+    auto p=ImGui::GetWindowPos(),sz=ImGui::GetWindowSize();
+    auto*window=ImGui::GetCurrentWindow();bool resizing=window->ResizeBorderHeld>=0;
+    for(int corner=0;corner<4;++corner)resizing|=ImGui::GetCurrentContext()->ActiveId==ImGui::GetWindowResizeCornerID(window,corner);
+    if(resizing&&gameViewFit_){gameViewFit_=false;SaveSettings();}
+    p.y=std::clamp(p.y,top,std::max(top,bottom-Px(80,s)));p.x=std::clamp(p.x,0.f,std::max(0.f,right-Px(240,s)));
+    if(gameViewFit_)sz=ImVec2(right-p.x,bottom-p.y);
+    sz.x=std::min(sz.x,right-p.x);
+    sz.y=std::min(sz.y,bottom-p.y);ImGui::SetWindowPos(p);ImGui::SetWindowSize(sz);
+    ImGui::RadioButton("Move XYZ",&gizmoOperation_,0);ImGui::SameLine();ImGui::RadioButton("Rotate XYZ",&gizmoOperation_,1);
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Select a Dolly camera marker, then drag its red/green/blue rotation rings.");
+    ImGui::SameLine();if(ImGui::Checkbox("Fit sequencer",&gameViewFit_))SaveSettings();
+    ImVec2 content=ImGui::GetCursorScreenPos(),end(p.x+sz.x-ImGui::GetStyle().WindowPadding.x,bottom);
+    end.y=std::min(end.y,p.y+sz.y-ImGui::GetStyle().WindowPadding.y);
+    ImVec2 targetMin,targetMax;FitAspect(content.x,content.y,std::max(1.f,end.x-content.x),std::max(1.f,end.y-content.y),io.DisplaySize.x/io.DisplaySize.y,targetMin,targetMax);
+    if(!gameViewInitialized_){ui_.rects.gameMin=targetMin;ui_.rects.gameMax=targetMax;gameViewInitialized_=true;}
+    else {const float weight=float(-std::expm1(-std::max(0.f,io.DeltaTime)/.12));
+        // Keep animation history outside SolveLayout's per-frame defaults.
+        ui_.rects.gameMin=ImVec2(gameViewMin_.x+(targetMin.x-gameViewMin_.x)*weight,gameViewMin_.y+(targetMin.y-gameViewMin_.y)*weight);
+        ui_.rects.gameMax=ImVec2(gameViewMax_.x+(targetMax.x-gameViewMax_.x)*weight,gameViewMax_.y+(targetMax.y-gameViewMax_.y)*weight);
+        ImVec2 a=ui_.rects.gameMin,b=ui_.rects.gameMax;
+        a.x=std::clamp(a.x,content.x,end.x);a.y=std::clamp(a.y,content.y,end.y);b.x=std::clamp(b.x,a.x,end.x);b.y=std::clamp(b.y,a.y,end.y);
+        FitAspect(a.x,a.y,std::max(1.f,b.x-a.x),std::max(1.f,b.y-a.y),io.DisplaySize.x/io.DisplaySize.y,ui_.rects.gameMin,ui_.rects.gameMax);
+    }
+    gameViewMin_=ui_.rects.gameMin;gameViewMax_=ui_.rects.gameMax;
+    auto*draw=ImGui::GetBackgroundDrawList();draw->AddRectFilled(ImVec2(0,0),io.DisplaySize,Color::TimelineBg.U32());
+    draw->AddImage(ImTextureRef(f.game_texture),ui_.rects.gameMin,ui_.rects.gameMax);
+    ImGui::End();
+}
+
 void Overlay::DrawDollyViewport(const OverlayFrame& f)
 {
     using namespace cinematic;using namespace cinematic::viewport;
@@ -411,11 +458,14 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
     const bool interactive=ui_.visibility==UiVisibility::Shown;
     if(!interactive)gizmoDragging_=false;
     auto flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoFocusOnAppearing;
-    if(!interactive)flags|=ImGuiWindowFlags_NoInputs;
+    if(!interactive||f.game_texture)flags|=ImGuiWindowFlags_NoInputs;
     ImGui::Begin("##dolly-viewport",nullptr,flags);auto*draw=ImGui::GetBackgroundDrawList();
-    draw->PushClipRect(ImVec2(0,menuH_),display,true);
-    const bool hovered=interactive&&ImGui::IsWindowHovered();
-    auto projectPoint=[&](Vec p){return project(camera.pose,p,display.x,display.y);};
+    const bool scaled=interactive&&f.game_texture;
+    const auto pictureMin=scaled?ui_.rects.gameMin:ImVec2(0,0),pictureMax=scaled?ui_.rects.gameMax:display;
+    draw->PushClipRect(pictureMin,pictureMax,true);
+    const bool hovered=interactive&&(ImGui::IsWindowHovered()||(scaled&&ImGui::GetCurrentContext()->HoveredWindow==ImGui::FindWindowByName("###game-viewport")))&&io.MousePos.x>=pictureMin.x&&io.MousePos.x<=pictureMax.x&&io.MousePos.y>=pictureMin.y&&io.MousePos.y<=pictureMax.y;
+    auto projectPoint=[&](Vec p){auto result=project(camera.pose,p,display.x,display.y);if(result&&scaled){result->x=pictureMin.x+result->x/display.x*(pictureMax.x-pictureMin.x);result->y=pictureMin.y+result->y/display.y*(pictureMax.y-pictureMin.y);}return result;};
+    auto mousePoint=[&](){return ImVec2((io.MousePos.x-pictureMin.x)*display.x/(pictureMax.x-pictureMin.x),(io.MousePos.y-pictureMin.y)*display.y/(pictureMax.y-pictureMin.y));};
     auto line=[&](Vec a,Vec b,ImU32 color,float width=1.f){auto pa=projectPoint(a),pb=projectPoint(b);if(pa&&pb)draw->AddLine(ImVec2(float(pa->x),float(pa->y)),ImVec2(float(pb->x),float(pb->y)),color,width);};
     if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys);curveGeneration_=camera.project_generation;}
     if(camera.keys.size()>1){
@@ -448,7 +498,7 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
             }else {
                 double hit=1e9;for(int j=0;j<64;++j){auto point=[&](int n){Vec v=origin;const double a=n*6.283185307179586/64;v[(axis+1)%3]+=extent*std::cos(a);v[(axis+2)%3]+=extent*std::sin(a);return v;};
                     auto a=projectPoint(point(j)),b=projectPoint(point(j+1));if(a&&b){draw->AddLine(ImVec2(float(a->x),float(a->y)),ImVec2(float(b->x),float(b->y)),colors[axis],Px(2,s));hit=std::min(hit,segment_distance(io.MousePos.x,io.MousePos.y,*a,*b));}}
-                if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&hit<Px(7,s))if(auto angle=plane_angle(camera.pose,io.MousePos.x,io.MousePos.y,display.x,display.y,origin,axis)){
+                if(hovered&&!gizmoDragging_&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&hit<Px(7,s))if(auto angle=plane_angle(camera.pose,mousePoint().x,mousePoint().y,display.x,display.y,origin,axis)){
                     gizmoDragging_=true;gizmoAxis_=axis;gizmoStart_=*selected;gizmoCenter_={float(center->x),float(center->y)};gizmoAngle_=*angle;gizmoMouseStart_=io.MousePos;}
             }
         }
@@ -456,7 +506,7 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
     if(gizmoDragging_){
         auto draft=gizmoStart_;
         if(gizmoOperation_==0){double delta=((io.MousePos.x-gizmoMouseStart_.x)*gizmoScreenAxis_.x+(io.MousePos.y-gizmoMouseStart_.y)*gizmoScreenAxis_.y)/gizmoPixelsPerUnit_;draft.state.position[gizmoAxis_]+=delta;}
-        else if(auto angle=plane_angle(camera.pose,io.MousePos.x,io.MousePos.y,display.x,display.y,gizmoStart_.state.position,gizmoAxis_)){if(auto rotation=rotate_world(draft.state.orientation,gizmoAxis_,std::remainder(*angle-gizmoAngle_,6.283185307179586)))draft.state.orientation=*rotation;}
+        else if(auto angle=plane_angle(camera.pose,mousePoint().x,mousePoint().y,display.x,display.y,gizmoStart_.state.position,gizmoAxis_)){if(auto rotation=rotate_world(draft.state.orientation,gizmoAxis_,std::remainder(*angle-gizmoAngle_,6.283185307179586)))draft.state.orientation=*rotation;}
         if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){camera_runtime::edit_key(gizmoStart_);gizmoDragging_=false;}
         else if(f.now-gizmoLastCommit_>=1./30||!io.MouseDown[0]){camera_runtime::edit_key(draft);gizmoLastCommit_=f.now;}
         if(!io.MouseDown[0])gizmoDragging_=false;
@@ -684,7 +734,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         const float listH = Px(Metric::TreeRowHeight, s) * std::min<std::uint32_t>(std::max<std::uint32_t>(snap.count, 1), 6);
         ImGui::BeginChild("##actors", ImVec2(0, listH));
         if (!snap.count) { PushFont(Font::Meta); ImGui::TextDisabled("-"); ImGui::PopFont(); }
-        for (unsigned i = 0; i < std::min<std::uint32_t>(snap.count, 16); ++i)
+        for (unsigned i = 0; i < (expandActorTracks_?std::min<std::uint32_t>(snap.count, 16):0u); ++i)
         {
             const auto& a = snap.actors[i];
             char label[160];
@@ -1304,12 +1354,24 @@ void Overlay::DrawSequencer(const OverlayFrame& f)
     ImGui::PushStyleColor(ImGuiCol_WindowBg, Color::TimelineBg.Alpha(255).Vec4());
     const float toolbar = Px(Layout.SequencerToolbar, s);
     const bool visible = BeginPanel("###timeline", T(Str::PanelTimeline), ui_.rects.sequencerMin, ui_.rects.sequencerMax,
-        ImVec2(Px(820, s), toolbar + Px(Layout.RulerHeight + Layout.NavigatorHeight + Metric::TrackRowHeight * 2, s) + ImGui::GetFrameHeight()+(showDollyCurves_?Px(140,s):0.f)), &showTimeline_);
+        ImVec2(Px(820, s), toolbar + Px(Layout.RulerHeight + Layout.NavigatorHeight + (compactTracks_?20.f:Metric::TrackRowHeight) * 2, s) + ImGui::GetFrameHeight()+(showDollyCurves_?Px(100,s):0.f)), &showTimeline_);
     if (!visible) { ImGui::End(); ImGui::PopStyleColor(); ImGui::PopStyleVar(); return; }
     // Expanding the sequencer for curves must not put its bottom off-screen.
     if(!ImGui::IsWindowDocked()){
         const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
         if(pos.y+size.y>ImGui::GetIO().DisplaySize.y)ImGui::SetWindowPos(ImVec2(pos.x,std::max(menuH_,ImGui::GetIO().DisplaySize.y-size.y)));
+    }
+    if(f.game_texture&&!ImGui::IsWindowDocked()){
+        const auto p=ImGui::GetWindowPos();const float minimum=menuH_+Px(150,s);
+        if(p.y<minimum)ImGui::SetWindowPos(ImVec2(p.x,minimum));
+        if(ImGui::GetWindowPos().y+ImGui::GetWindowHeight()>ImGui::GetIO().DisplaySize.y)ImGui::SetWindowSize(ImVec2(ImGui::GetWindowWidth(),ImGui::GetIO().DisplaySize.y-ImGui::GetWindowPos().y));
+    }
+    sequencerTop_=ImGui::GetWindowPos().y;sequencerRight_=ImGui::GetWindowPos().x+ImGui::GetWindowWidth();
+    if(ImGui::BeginPopupContextWindow("##sequencer-layout",ImGuiPopupFlags_MouseButtonRight)){
+        if(ImGui::MenuItem("Compact tracks",nullptr,&compactTracks_))SaveSettings();
+        if(ImGui::MenuItem("Expand actor tracks",nullptr,&expandActorTracks_))SaveSettings();
+        if(ImGui::MenuItem("Dolly curve editor",nullptr,&showDollyCurves_))SaveSettings();
+        ImGui::EndPopup();
     }
     const ImVec2 min = ImGui::GetCursorScreenPos();
     const ImVec2 max(ImGui::GetWindowPos().x + ImGui::GetWindowWidth(), ImGui::GetWindowPos().y + ImGui::GetWindowHeight());
@@ -1536,7 +1598,7 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
     auto& tv = ui_.timeline;
 
     const float tree = Px(ui_.layout.trackTreeWidth, s), ruler = Px(Layout.RulerHeight, s), nav = Px(Layout.NavigatorHeight, s);
-    const float rowH = Px(Metric::TrackRowHeight, s);
+    const float rowH = Px(compactTracks_?20.f:Metric::TrackRowHeight, s);
     const ImVec2 laneMin(min.x + tree, min.y + ruler), laneMax(max.x, max.y - nav);
     const float laneW = std::max(1.0f, laneMax.x - laneMin.x);
     const double duration = snap.duration_ns / 1e9, now = snap.time_ns / 1e9;
@@ -1562,14 +1624,14 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
     std::vector<Row> rows;
     rows.push_back({ T(Str::TrackReplay), Color::AccentGreen, 0, snap.loaded != 0, 0, false });
     rows.push_back({ T(Str::TrackCamera), Color::AccentBlue, 0, false, 0, false });
-    rows.push_back({ T(Str::TrackActors), Color::AccentAmber, 0, false, 0, true });
+    if(!compactTracks_)rows.push_back({ T(Str::TrackActors), Color::AccentAmber, 0, false, 0, true });
     for (unsigned i = 0; i < std::min<std::uint32_t>(snap.count, 16); ++i)
     {
         char name[96];
         snprintf(name, sizeof(name), "Actor %llu", (unsigned long long)snap.actors[i].id);
         rows.push_back({ name, Color::AccentAmber, 1, false, snap.actors[i].id, false });
     }
-    rows.push_back({ T(Str::TrackBookmarks), Color::EventNeutral, 0, false, 0, false });
+    if(!compactTracks_)rows.push_back({ T(Str::TrackBookmarks), Color::EventNeutral, 0, false, 0, false });
     const auto cameraView=camera_runtime::view();
     const auto cameraKeys=cameraView.track_current?cameraView.keys:std::vector<cinematic::Key>{};
 
@@ -1604,6 +1666,10 @@ void Overlay::DrawTimeline(const OverlayFrame& f, ImVec2 min, ImVec2 max)
     PushFont(Font::PanelTitle);
     dl->AddText(ImVec2(min.x + Px(Space::LG, s), min.y + (ruler - ImGui::GetFontSize()) * 0.5f), Color::TextMuted.U32(), T(Str::Tracks));
     ImGui::PopFont();
+    ImGui::SetCursorScreenPos(ImVec2(min.x+tree-Px(24,s),min.y));
+    if(ImGui::InvisibleButton("##compact-tracks",ImVec2(Px(24,s),ruler))){compactTracks_=!compactTracks_;SaveSettings();}
+    dl->AddText(ImVec2(min.x+tree-Px(19,s),min.y+Px(2,s)),Color::AccentBlue.U32(),compactTracks_?"+":"-");
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("%s tracks. Right-click sequencer for actor/curve visibility.",compactTracks_?"Expand":"Minimize");
 
     dl->PushClipRect(ImVec2(min.x, laneMin.y), ImVec2(max.x, laneMax.y), true);
     PushFont(Font::Body);

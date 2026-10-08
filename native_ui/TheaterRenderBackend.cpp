@@ -38,7 +38,7 @@ using Present=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT);
 using Resize=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT,UINT,DXGI_FORMAT,UINT);
 using Create=HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*,IUnknown*,DXGI_SWAP_CHAIN_DESC*,IDXGISwapChain**);
 using CreateHwnd=HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*,IUnknown*,HWND,const DXGI_SWAP_CHAIN_DESC1*,const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*,IDXGIOutput*,IDXGISwapChain1**);
-struct Frame{ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12Resource> buffer;D3D12_CPU_DESCRIPTOR_HANDLE rtv{};UINT64 fence{};};
+struct Frame{ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12Resource> scene;D3D12_GPU_DESCRIPTOR_HANDLE scene_srv{};bool scene_failed=false;ComPtr<ID3D12Resource> buffer;D3D12_CPU_DESCRIPTOR_HANDLE rtv{};UINT64 fence{};};
 struct Input{HWND hwnd;UINT msg;WPARAM w;LPARAM l;};
 class TheaterRenderBackend {
 public:
@@ -159,10 +159,22 @@ public:
  }
  bool recording_now(){std::lock_guard lock(ipc);return TheaterUI::Overlay::IsRecording(snapshot);}
  // Builds the v3 UI frame from a snapshot copy.
- TheaterUI::LayoutRects draw(){
+ // Allocate once per swap-chain slot, reuse after its existing fence completes.
+ bool prepare_scene(Frame& f){
+  if(f.scene)return true;if(f.scene_failed)return false;
+  auto desc=f.buffer->GetDesc();if(desc.SampleDesc.Count!=1){f.scene_failed=true;return false;}desc.Flags=D3D12_RESOURCE_FLAG_NONE;
+  D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
+  if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,nullptr,IID_PPV_ARGS(&f.scene)))){f.scene_failed=true;log("GAME_VIEW_COPY_ALLOCATION_FAILED; full-screen rendering retained");return false;}
+  auto slot=std::find(descriptors.begin(),descriptors.end(),false);if(slot==descriptors.end()){f.scene.Reset();f.scene_failed=true;return false;}
+  auto index=UINT(slot-descriptors.begin());descriptors[index]=true;auto stride=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+  D3D12_CPU_DESCRIPTOR_HANDLE cpu{srvs->GetCPUDescriptorHandleForHeapStart().ptr+index*stride};f.scene_srv={srvs->GetGPUDescriptorHandleForHeapStart().ptr+index*stride};
+  D3D12_SHADER_RESOURCE_VIEW_DESC srv{};srv.Format=desc.Format;srv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;srv.Texture2D.MipLevels=1;device->CreateShaderResourceView(f.scene.Get(),&srv,cpu);return true;
+ }
+ TheaterUI::LayoutRects draw(ImTextureID scene=0){
   TheaterUI::OverlayFrame frame;{std::lock_guard lock(ipc);frame.snapshot=snapshot;}
   {std::lock_guard lock(camera_mutex);frame.camera=camera_snapshot;}
   {std::lock_guard lock(camera_mutex);while(!camera_actions.empty()){overlay.CameraHotkey(camera_actions.front());camera_actions.pop_front();}}
+  frame.game_texture=scene;
   frame.hostLinked=host_linked.load();frame.visibility=TheaterUI::UiVisibility(visibility.load());
   frame.now=double(GetTickCount64())/1000.0;frame.hiddenAt=double(hidden_tick.load())/1000.0;
   {std::lock_guard lock(events_mutex);frame.events.assign(events.begin(),events.end());events.clear();}
@@ -199,9 +211,17 @@ public:
    else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
-  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();feed_virtual_mouse();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");draw();
+  const bool composite=vis==TheaterUI::UiVisibility::Shown&&prepare_scene(f);
+  stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();feed_virtual_mouse();stage("FRAME_IMGUI_NEWFRAME");ImGui::NewFrame();stage("FRAME_DRAW");draw(composite?ImTextureID(f.scene_srv.ptr):0);
   ImGui::Render();if(!needed)return;
   if(FAILED(f.allocator->Reset())||FAILED(list->Reset(f.allocator.Get(),nullptr))){failed=true;return;}
+  if(composite){
+   D3D12_RESOURCE_BARRIER copies[2]{};for(auto&b:copies){b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+   copies[0].Transition.pResource=f.buffer.Get();copies[0].Transition.StateBefore=D3D12_RESOURCE_STATE_PRESENT;copies[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+   copies[1].Transition.pResource=f.scene.Get();copies[1].Transition.StateBefore=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;copies[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+   list->ResourceBarrier(2,copies);list->CopyResource(f.scene.Get(),f.buffer.Get());
+   for(auto&b:copies)std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(2,copies);
+  }
   D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={f.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET};list->ResourceBarrier(1,&barrier);
   list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvs.Get();list->SetDescriptorHeaps(1,&heap);stage("FRAME_RENDER_DRAW_DATA");ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
   if(FAILED(list->Close())){failed=true;return;}ID3D12CommandList*cmd=list.Get();stage("FRAME_EXECUTE");queue->ExecuteCommandLists(1,&cmd);f.fence=++fence_value;if(FAILED(queue->Signal(fence.Get(),f.fence))){failed=true;log("DX12_QUEUE_SIGNAL_FAILED; rendering disabled");}stage("FRAME_SUBMITTED");++diagnostic_frames;
@@ -411,6 +431,15 @@ extern "C" int tm_render_test_ui(){
     &&content->Pos.y+content->Size.y<=log->Pos.y+1
     &&log->Pos.y+log->Size.y<=log->ParentWindow->InnerRect.Max.y+1;
    if(!valid)fprintf(stderr,"Scrollable panel geometry failed: tool=%u scale=%.2f size=%.0fx%.0f scroll=%.2f content_bottom=%.2f log=%.2f..%.2f parent_bottom=%.2f\n",unsigned(tool),scale,size.x,size.y,content->ScrollMax.y,content->Pos.y+content->Size.y,log->Pos.y,log->Pos.y+log->Size.y,log->ParentWindow->InnerRect.Max.y);
+  }
+ }
+ // Synthetic texture ID exercises CPU layout only; never submitted to a GPU.
+ for(auto size:{ImVec2(1280,720),ImVec2(1920,1080),ImVec2(3840,2160)}){
+  io.DisplaySize=size;b.visibility=int(TheaterUI::UiVisibility::Shown);b.mode=2;
+  for(int pass=0;pass<4;++pass){ImGui::NewFrame();
+   if(auto*seq=ImGui::FindWindowByName("###timeline")){ImGui::SetWindowPos(seq,ImVec2(50,size.y*.6f));ImGui::SetWindowSize(seq,ImVec2(size.x-70,size.y*.4f));}
+   const auto rect=b.draw(ImTextureID(1));ImGui::Render();auto*seq=ImGui::FindWindowByName("###timeline");
+   valid=valid&&ImGui::GetDrawData()->Valid&&seq&&rect.gameMax.y<=seq->Pos.y&&rect.gameMin.x>=0&&rect.gameMax.x<=size.x&&rect.gameMax.y>rect.gameMin.y;
   }
  }
  b.host_linked=false;b.visibility=int(TheaterUI::UiVisibility::Hidden);b.mode=0;ImGui::DestroyContext(c);return valid?1:0;
