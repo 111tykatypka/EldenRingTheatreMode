@@ -6,7 +6,7 @@ use eldenring::cs::ChrIns;
 use std::mem::offset_of;
 
 #[derive(Default)]
-pub struct Probe{anim:Option<i32>,window:Option<Window>,item:Option<u32>,sfx:Option<[i32;3]>,effects:Option<Vec<i32>>,loc:Option<[u8;crate::weapon_loc::BYTES]>}
+pub struct Probe{sfx_total:Option<u32>,sfx_logs:u32,anim:Option<i32>,window:Option<Window>,item:Option<u32>,sfx:Option<[i32;3]>,effects:Option<Vec<i32>>,loc:Option<[u8;crate::weapon_loc::BYTES]>}
 /// After an item is queued for use: for a few seconds, 10 times a second, report which bytes of the player's
 /// assembly, action-flag module, model instance and the front of the ChrIns itself changed (offset old->new).
 /// The weapon hiding while a flask is drunk must be one of them, since weapon_loc does not change then.
@@ -25,7 +25,15 @@ fn region_list(chr:usize)->Vec<(String,usize,usize)>{
  let ptr=|o:usize|crate::companions::word(chr+o).filter(|p|*p>0x10000);
  if let Some(a)=ptr(offset_of!(eldenring::cs::PlayerIns,chr_asm)){v.push(("ChrAsm".to_string(),a,std::mem::size_of::<eldenring::cs::ChrAsm>()));}
  if let Some(a)=crate::weapon_loc::module(chr){v.push(("ActionFlag".to_string(),a,0x258));}
- if let Some(a)=ptr(offset_of!(ChrIns,chr_model_ins)){v.push(("ModelIns".to_string(),a,0x300));}
+ if let Some(a)=ptr(offset_of!(ChrIns,chr_model_ins)){
+  // The flask in the hand is a model attached to a hand dummy polygon; its attachment must show up somewhere below the model
+  // instance: a pointer that appears while the sip lasts (a bigger window than before, plus the objects it points to).
+  v.push(("ModelIns".to_string(),a,0x1000));
+  let mut seen=vec![a];
+  for off in (0..0x1000usize).step_by(8){
+   let Some(p)=crate::companions::word(a+off).filter(|p|*p>0x10000&&*p<0x7FFF_FFFF_FFFF&&!seen.contains(p)) else {continue};
+   let mut probe=[0u8;8];if !crate::companions::copy(p,&mut probe){continue;}
+   seen.push(p);v.push((format!("ModelIns+{off:#x}"),p,0x200));if seen.len()>40{break;}}}
 v.extend(asm_children(chr));
  // Character modules by their slot in ChrInsModuleContainer (8 bytes each): time act 3, sfx 22, vfx 23, model param modifier 26.
  if let Some(container)=ptr(offset_of!(ChrIns,modules)){
@@ -49,7 +57,12 @@ impl Probe{
   for (name,addr,new) in &now{
    let Some((_,_,old))=w.regions.iter().find(|(n,a,_)|n==name&&a==addr) else {continue};
    let diffs:Vec<String>=old.iter().zip(new).enumerate().filter(|(_,(a,b))|a!=b).take(40).map(|(i,(a,b))|format!("{i:#x}:{a:02X}->{b:02X}")).collect();
-   if !diffs.is_empty(){crate::log_game(&format!("ITEM_DIFF t={seconds:.2}s {name}: {}",diffs.join(" ")));}}
+   if !diffs.is_empty(){crate::log_game(&format!("ITEM_DIFF t={seconds:.2}s {name}: {}",diffs.join(" ")));}
+   // A pointer that appears or disappears (0 <-> address) is the signature of an object being attached or removed.
+   let ptr=|v:u64|(0x1_0000_0000_00..0x7FFF_FFFF_FFFF).contains(&v);
+   let flips:Vec<String>=old.chunks_exact(8).zip(new.chunks_exact(8)).enumerate().filter_map(|(i,(a,b))|{let (a,b)=(u64::from_le_bytes(a.try_into().unwrap()),u64::from_le_bytes(b.try_into().unwrap()));
+    ((a==0&&ptr(b))||(ptr(a)&&b==0)).then(||format!("{:#x}:{a:#x}->{b:#x}",i*8))}).take(20).collect();
+   if !flips.is_empty(){crate::log_game(&format!("ITEM_PTR t={seconds:.2}s {name}: {}",flips.join(" ")));}}
   w.regions=now;}
  /// Call once per recorded frame; `seconds` is time since recording start for the log lines.
  pub fn sample(&mut self,chr:usize,seconds:f64){
@@ -61,6 +74,14 @@ impl Probe{
    if self.item.is_some()&&item.is_some_and(|v|v!=0&&v!=u32::MAX){self.window=Some(Window{until:seconds+6.0,next:seconds,regions:snapshot(chr)});crate::log_game("ITEM_DIFF: window opened (6 s, 10 Hz)");}
    self.item=item;self.sfx=sfx;}
   self.watch(chr,seconds);
+  // How many visual effects exist in the world blocks right now (WorldSfxMan: block list at +0x30, count at +0x28, stride 0x78,
+  // each block\'s total_sfx_count at +0x5C; layout from the SDK structs). Logged when the total changes: a rise at a hit, a spell or
+  // a death marks an effect being created. Read-only; says how many, not which.
+  if self.sfx_logs<600{if let Ok(m)=unsafe{eldenring::cs::WorldSfxMan::instance()}{
+   let base=m as *const _ as usize;
+   if let (Some(count),Some(list))=(crate::companions::dword(base+0x28),crate::companions::word(base+0x30)){
+    if count<=256&&list>0x10000{let total:u32=(0..count as usize).filter_map(|i|crate::companions::dword(list+i*0x78+0x5C)).filter(|n|*n<100_000).sum();
+     if self.sfx_total!=Some(total){self.sfx_logs+=1;crate::log_game(&format!("SFX_COUNT t={seconds:.2}s: {total} effects in {count} world blocks (was {:?})",self.sfx_total));self.sfx_total=Some(total);}}}}}
   // The animation the game's time-act module is playing (id and play time), logged when the id changes.
   if let Some(container)=crate::companions::word(chr+offset_of!(ChrIns,modules)).filter(|p|*p>0x10000){
    if let Some(t)=crate::companions::word(container+3*8).filter(|p|*p>0x10000){

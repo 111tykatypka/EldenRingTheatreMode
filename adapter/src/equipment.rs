@@ -48,3 +48,13 @@ pub fn write(player:usize,e:&Equip)->bool{
  unsafe{std::ptr::write_volatile(a as *mut u32,e.arm_style);std::ptr::write_volatile(s as *mut [u32;6],e.slots);
   std::ptr::write_volatile(h as *mut [u32;SLOTS],e.handles);std::ptr::write_volatile(p as *mut [i32;SLOTS],e.params);}
  true}
+/// Weapon swap only: the recorded grip (arm style) and which of the three left / right weapon slots, arrow and bolt slots are
+/// selected. Item handles and param ids of every slot (armor, talismans, weapons) stay exactly what the live assembly holds,
+/// so no item is ever put into or taken out of the player\'s equipment by this call. A swap in the game changes the selected
+/// slot, not the handles, so this reproduces it whenever the loadout matches the recording.
+pub fn write_selection(player:usize,recorded:&Equip)->bool{
+ if !recorded.recorded()||!recorded.plausible(){return false;}
+ let Some(live)=read(player) else {return false};
+ if live.arm_style==recorded.arm_style&&live.slots==recorded.slots{return true;}
+ let merged=Equip{arm_style:recorded.arm_style,slots:recorded.slots,handles:live.handles,params:live.params};
+ write(player,&merged)}

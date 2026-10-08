@@ -562,7 +562,10 @@ pub fn tick(group:usize,now:u64){
     if i>0{let want=m[i-1].data;if weapon_loc::write(chr,&want){s.module_frames+=1;s.module_written=Some(want);}}}
    // SAFETY (owner report: armor vanished from the inventory after replays): the recorded equipment assembly is
    // written into the player only when the user turned "Replay equipment appearance" on (option bit 16, off by default).
-   s.equip_written=if s.options&16!=0&&f.equip.recorded()&&equipment::write(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}else{None};
+   // Full gear is opt-in (bit 16). Weapon grip and slot selection (a weapon swap) are replayed by default (bit 128 turns that off):
+   // they never touch an item handle, only which equipped slot is shown.
+   s.equip_written=if s.options&16!=0&&f.equip.recorded()&&equipment::write(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}
+    else if s.options&128==0&&f.equip.recorded()&&equipment::write_selection(chr,&f.equip){s.equip_frames+=1;Some(f.equip)}else{None};
    // Bones whose interpolation is invalid keep the earlier recorded frame instead of dropping the replay.
    // Local pose is interpolated per bone; model space is rebuilt from it through the learned hierarchy.
    let Some(l)=crate::replay_interpolation::pose_into(&f.local,&next.local,alpha,&mut s.local_out) else {reject(s,chr,"pose size or time invalid");return;};
