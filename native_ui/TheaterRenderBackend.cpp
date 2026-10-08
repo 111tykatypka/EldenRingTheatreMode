@@ -260,7 +260,7 @@ public:
    else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
-  harvest_exports();
+  harvest_exports();video_export::set_game_size(static_cast<unsigned>(f.buffer->GetDesc().Width),f.buffer->GetDesc().Height);
   if(video_export::toggle_requested()){
    if(video_export::active()){video_export::end();}
    else{bool bgra=true;const auto d=f.buffer->GetDesc();

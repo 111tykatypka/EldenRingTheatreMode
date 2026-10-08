@@ -16,6 +16,7 @@
 
 namespace video_export {
 namespace {
+std::atomic<unsigned> game_w{0}, game_h{0};
 std::mutex state_mutex;
 Settings current_settings;
 bool settings_loaded = false;
@@ -97,13 +98,20 @@ std::string build_codec_args(const Settings& s, bool sequence, bool jpeg, const 
         if (jpeg) { snprintf(text, sizeof(text), "-c:v mjpeg -q:v %d -pix_fmt yuvj420p", std::clamp(int(std::lround(31 - q * 0.29)), 2, 31)); return vf_arg(scale, "") + text; }
         return vf_arg(scale, "") + "-c:v png -compression_level 3";
     }
+    // RGB to YUV with the BT.709 matrix (ffmpeg\'s default would be BT.601 and shift the colors), tagged as BT.709.
+    const std::string yuv = "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p";
+    const char* tags = " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv";
+    const int cq = std::clamp(int(std::lround(34 - q * 0.24)), 10, 34); // 100 -> 10 (near transparent), 75 -> 16, 50 -> 22
     switch (Codec(s.codec)) {
     case Codec::H264Nvenc:
-        snprintf(text, sizeof(text), "-c:v h264_nvenc -preset p5 -rc vbr -cq %d -b:v 0", std::clamp(int(std::lround(40 - q * 0.28)), 10, 40));
-        return vf_arg(scale, "format=yuv420p") + text;
+        snprintf(text, sizeof(text), "-c:v h264_nvenc -preset p7 -tune hq -rc vbr -cq %d -b:v 0 -spatial-aq 1 -temporal-aq 1 -rc-lookahead 32 -profile:v high", cq);
+        return vf_arg(scale, yuv) + text + tags;
+    case Codec::HevcNvenc:
+        snprintf(text, sizeof(text), "-c:v hevc_nvenc -preset p7 -tune hq -rc vbr -cq %d -b:v 0 -spatial-aq 1 -temporal-aq 1 -rc-lookahead 32 -profile:v main -tag:v hvc1", cq);
+        return vf_arg(scale, yuv) + text + tags;
     case Codec::H264Cpu:
-        snprintf(text, sizeof(text), "-c:v libx264 -preset medium -crf %d", std::clamp(int(std::lround(40 - q * 0.28)), 10, 40));
-        return vf_arg(scale, "format=yuv420p") + text;
+        snprintf(text, sizeof(text), "-c:v libx264 -preset slow -crf %d", cq);
+        return vf_arg(scale, yuv) + text + tags;
     case Codec::Mjpeg:
         snprintf(text, sizeof(text), "-c:v mjpeg -q:v %d -pix_fmt yuvj420p", std::clamp(int(std::lround(31 - q * 0.29)), 2, 31));
         return vf_arg(scale, "") + text;
@@ -182,13 +190,15 @@ std::string find_ffmpeg() {
 }
 
 Settings settings() { std::lock_guard lock(state_mutex); return current_settings; }
+void set_game_size(unsigned width, unsigned height) { game_w = width; game_h = height; }
+bool game_size(unsigned& width, unsigned& height) { width = game_w; height = game_h; return width && height; }
 
 void configure(const Settings& value) {
     {
         std::lock_guard lock(state_mutex);
         current_settings = value;
         current_settings.container = std::clamp(current_settings.container, 0, 2);
-        current_settings.codec = std::clamp(current_settings.codec, 0, 3);
+        current_settings.codec = std::clamp(current_settings.codec, 0, 4);
         current_settings.fps = std::clamp(current_settings.fps, 1, 240);
         current_settings.quality = std::clamp(current_settings.quality, 1, 100);
         current_settings.out_width = current_settings.out_width > 0 ? std::clamp(current_settings.out_width & ~1, 64, 7680) : 0;
@@ -228,7 +238,7 @@ void load_settings() {
     std::lock_guard lock(state_mutex);
     current_settings = s;
     current_settings.container = std::clamp(current_settings.container, 0, 2);
-    current_settings.codec = std::clamp(current_settings.codec, 0, 3);
+    current_settings.codec = std::clamp(current_settings.codec, 0, 4);
     current_settings.fps = std::clamp(current_settings.fps, 1, 240);
     current_settings.quality = std::clamp(current_settings.quality, 1, 100);
     settings_loaded = true;
@@ -289,6 +299,8 @@ bool begin(unsigned width, unsigned height, bool bgra) {
         fail("ffmpeg.exe not found. Put ffmpeg.exe next to TheaterMode.dll (or in a 'ffmpeg' folder there), or set its path in the Export tab.");
         return false;
     }
+    // H.264 on NVENC stops at 4096 pixels wide: wider pictures use HEVC, which AVI cannot carry, so the file becomes .mkv.
+    if (Container(s.container) == Container::Avi && Codec(s.codec) == Codec::H264Nvenc && (s.out_width > 4096 || (s.out_width <= 0 && width > 4096))) s.codec = int(Codec::HevcNvenc);
     const bool sequence = Container(s.container) != Container::Avi;
     const bool jpeg = Container(s.container) == Container::JpegSequence;
     std::filesystem::path root = s.folder.empty() ? default_folder() : std::filesystem::path(widen(s.folder));
@@ -302,7 +314,7 @@ bool begin(unsigned width, unsigned height, bool bgra) {
             out_path = dir / (jpeg ? L"frame_%06d.jpg" : L"frame_%06d.png");
             log_path = dir / L"ffmpeg_log.txt";
         } else {
-            out_path = root / widen("Theater_" + stamp() + ".avi");
+            out_path = root / widen("Theater_" + stamp() + (Codec(s.codec) == Codec::HevcNvenc ? ".mkv" : ".avi"));
             log_path = root / widen("Theater_" + stamp() + "_ffmpeg_log.txt");
         }
     } catch (const std::exception& e) {
@@ -313,7 +325,7 @@ bool begin(unsigned width, unsigned height, bool bgra) {
     std::string scale;
     if (s.out_width > 0 && s.out_height > 0) {
         const std::string w = std::to_string(s.out_width & ~1), h = std::to_string(s.out_height & ~1);
-        scale = "scale=" + w + ":" + h + ":force_original_aspect_ratio=decrease:flags=lanczos,pad=" + w + ":" + h + ":(ow-iw)/2:(oh-ih)/2:color=black";
+        scale = "scale=" + w + ":" + h + ":force_original_aspect_ratio=decrease:flags=lanczos+accurate_rnd+full_chroma_int,pad=" + w + ":" + h + ":(ow-iw)/2:(oh-ih)/2:color=black";
     } else if (!sequence) {
         scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
     }

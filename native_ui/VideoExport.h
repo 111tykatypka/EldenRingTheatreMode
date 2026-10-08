@@ -6,7 +6,7 @@
 #include <string>
 namespace video_export {
 enum class Container : int { Avi = 0, PngSequence = 1, JpegSequence = 2 };
-enum class Codec : int { H264Nvenc = 0, H264Cpu = 1, Mjpeg = 2, Ffv1 = 3 };
+enum class Codec : int { H264Nvenc = 0, H264Cpu = 1, Mjpeg = 2, Ffv1 = 3, HevcNvenc = 4 };
 struct Settings {
     int container = 0;          // Container
     int codec = 0;              // Codec (video containers only)
@@ -30,6 +30,8 @@ struct Status {
 Settings settings();
 void configure(const Settings& value);   // also saved to disk
 void load_settings();                    // once at start
+void set_game_size(unsigned width, unsigned height); // render thread: size of the game picture, for the Export tab
+bool game_size(unsigned& width, unsigned& height);
 Status status();
 void request_toggle();                   // F7 / button: start or stop at the next presented frame
 bool toggle_requested();                 // render thread: consumes the request

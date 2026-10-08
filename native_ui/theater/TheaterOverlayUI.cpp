@@ -1742,15 +1742,31 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         int container=cfg.container;
         if(combo("Output",&container,"AVI video\0" "PNG image sequence\0" "JPEG image sequence\0")){cfg.container=container;changed=true;}
         if(cfg.container==0){int codec=cfg.codec;
-            if(combo("Video codec",&codec,"H.264 (NVIDIA NVENC)\0" "H.264 (CPU, x264)\0" "Motion JPEG\0" "FFV1 (lossless)\0")){cfg.codec=codec;changed=true;}}
+            if(combo("Video codec",&codec,"H.264 (NVIDIA NVENC)\0" "H.264 (CPU, x264)\0" "Motion JPEG\0" "FFV1 (lossless)\0" "HEVC (NVIDIA NVENC, .mkv)\0")){cfg.codec=codec;changed=true;}}
         {   // Output size: the game can run at one resolution while the export is scaled to another.
-            static const int presets[][2]={{0,0},{1280,720},{1920,1080},{2560,1440},{3840,2160},{-1,-1}};
-            int sel=5;for(int i=0;i<5;++i)if(cfg.out_width==presets[i][0]&&cfg.out_height==presets[i][1])sel=i;
-            if(combo("Output resolution",&sel,"Same as the game picture\0" "1280 x 720\0" "1920 x 1080\0" "2560 x 1440\0" "3840 x 2160 (4K)\0" "Custom\0")){
-                if(sel<5){cfg.out_width=presets[sel][0];cfg.out_height=presets[sel][1];}else if(cfg.out_width<=0){cfg.out_width=1920;cfg.out_height=1080;}
+            unsigned gameW=0,gameH=0;video_export::game_size(gameW,gameH);
+            if(gameW)ImGui::TextDisabled("Game picture right now: %u x %u",gameW,gameH);
+            // 16:9 and 21:9 presets plus a custom size. "Custom" stays selected while you type (the typed numbers are applied when you leave the box).
+            static const int presets[][2]={{0,0},{1280,720},{1920,1080},{2560,1440},{3840,2160},{7680,4320},{2560,1080},{3440,1440},{3840,1600},{5120,2160},{-1,-1}};
+            constexpr int kCount=11,kCustom=10;static bool customMode=false;
+            int sel=kCustom;for(int i=0;i<kCustom;++i)if(cfg.out_width==presets[i][0]&&cfg.out_height==presets[i][1])sel=i;
+            if(customMode)sel=kCustom;
+            if(combo("Output resolution",&sel,"Same as the game picture\0" "1280 x 720 (16:9)\0" "1920 x 1080 (16:9)\0" "2560 x 1440 (16:9)\0" "3840 x 2160 (4K, 16:9)\0" "7680 x 4320 (8K, 16:9)\0" "2560 x 1080 (21:9)\0" "3440 x 1440 (21:9)\0" "3840 x 1600 (21:9)\0" "5120 x 2160 (21:9)\0" "Custom size\0")){
+                customMode=sel==kCustom;
+                if(sel<kCustom){cfg.out_width=presets[sel][0];cfg.out_height=presets[sel][1];}else if(cfg.out_width<=0){cfg.out_width=std::max(64,int(gameW?gameW:1920));cfg.out_height=std::max(64,int(gameH?gameH:1080));}
                 changed=true;}
-            if(sel==5){int wh[2]={cfg.out_width,cfg.out_height};labelAbove("Custom width / height");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::InputInt2("##export_size",wh)){cfg.out_width=std::clamp(wh[0],64,7680);cfg.out_height=std::clamp(wh[1],64,4320);changed=true;}}
+            (void)kCount;
+            if(sel==kCustom){
+                static int wh[2]={1920,1080};static bool typing=false;
+                if(!typing){wh[0]=cfg.out_width>0?cfg.out_width:wh[0];wh[1]=cfg.out_height>0?cfg.out_height:wh[1];}
+                labelAbove("Custom width / height (applied when you leave the box)");ImGui::SetNextItemWidth(-FLT_MIN);
+                ImGui::InputInt2("##export_size",wh);typing=ImGui::IsItemActive();
+                if(ImGui::IsItemDeactivatedAfterEdit()){cfg.out_width=std::clamp(wh[0],64,7680)&~1;cfg.out_height=std::clamp(wh[1],64,4320)&~1;wh[0]=cfg.out_width;wh[1]=cfg.out_height;changed=true;}
+            }
             if(cfg.out_width>0)ImGui::TextDisabled("The picture is scaled with Lanczos; a different aspect ratio gets black bars.");
+            if(cfg.out_width>0&&gameW&&double(cfg.out_width)*cfg.out_height>double(gameW)*gameH*1.05){
+                ImGui::TextColored(ImVec4(1.f,.75f,.3f,1.f),"%d x %d is larger than the game picture (%u x %u). A bigger file, but the extra pixels are interpolated, not new detail. For genuinely %d x %d pixels, set the game itself to that resolution (or use NVIDIA DSR / DLDSR to offer it) and choose 'Same as the game picture'.",cfg.out_width,cfg.out_height,gameW,gameH,cfg.out_width,cfg.out_height);
+            }
         }
         int fps=cfg.fps;labelAbove("Frame rate");if(ImGui::SliderInt("##export_fps",&fps,10,240,"%d fps")){cfg.fps=fps;changed=true;}
         ImGui::TextDisabled("Quick:");ImGui::SameLine();
