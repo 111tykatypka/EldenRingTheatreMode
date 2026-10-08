@@ -197,7 +197,15 @@ fn publish_bone_names(chr:usize){
 }
 pub fn camera_bone_sample(){
  unsafe extern "C"{fn tm_camera_bone_index()->i32;fn tm_camera_bone_publish(root:*const f32,qs:*const f32);}
- if let Some(chr)=player_chr(){publish_bone_names(chr);}
+  if let Some(chr)=player_chr(){publish_bone_names(chr);
+  unsafe extern "C"{fn tm_camera_bone_dots_wanted()->i32;fn tm_camera_bone_positions(xyz:*const f32,count:i32);}
+  if unsafe{tm_camera_bone_dots_wanted()}!=0{
+   if let (Some(root),Some(count),Some((_,model)))=(read_root(chr),crate::actors::bone_count(chr),pose_arrays(chr)){
+    let count=count.min(1024);let mut raw=vec![0u8;count*48];
+    if crate::companions::copy(model,&mut raw){let mut out=Vec::with_capacity(count*3);
+     for b in 0..count{let t:[f32;3]=std::array::from_fn(|i|f32::from_le_bytes(raw[b*48+i*4..b*48+i*4+4].try_into().unwrap()));
+      for i in 0..3{out.push(root[12+i]+(0..3).map(|j|root[j*4+i]*t[j]).sum::<f32>());}}
+     if out.iter().all(|v|v.is_finite()){unsafe{tm_camera_bone_positions(out.as_ptr(),count as i32)};}}}}}
  let index=unsafe{tm_camera_bone_index()};if index<0{return;}
  let sample=(||{let chr=player_chr()?;let count=crate::actors::bone_count(chr)?;if index as usize>=count{return None;}
   let (_,model)=pose_arrays(chr)?;let mut root=[0u8;64];let mut qs=[0u8;48];

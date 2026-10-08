@@ -64,6 +64,7 @@ std::atomic<int> selected_bone=-1;
 // the bone) and is steered with the ordinary free-camera controls, so it follows the bone while still being movable and turnable.
 cinematic::Vec bone_local_pos{0,0,-1};cinematic::Quat bone_local_rot{0,0,0,1};bool bone_local_init=false;
 std::vector<std::string> bone_name_list;
+std::vector<std::array<float,3>> bone_dot_list;std::uint64_t bone_dot_time=0;std::atomic_bool bone_dots_wanted=false;
 std::optional<cinematic::State> bone_pose;
 std::uint64_t bone_time=0;
 bool read(std::uintptr_t address,void*out,std::size_t bytes){SIZE_T n=0;return address>=0x10000&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),out,bytes,&n)&&n==bytes;}
@@ -199,6 +200,8 @@ bool update(void* output,void* source){
 }
 View view(bool include_keys){std::lock_guard lock(mutex);auto copy=state;copy.track_current=keys_replay_path==replay_path&&!track.keys().empty();copy.key_count=track.keys().size();if(include_keys){copy.keys=track.keys();copy.cuts=cut_track.cuts();}if(faulted){copy.enabled=false;copy.writing=false;copy.status="Camera backend faulted; overrides disabled until process restart";}return copy;}
 std::vector<std::string> bone_names(){std::lock_guard lock(mutex);return bone_name_list;}
+void set_bone_dots(bool wanted){bone_dots_wanted=wanted;}
+std::vector<std::array<float,3>> bone_dots(){std::lock_guard lock(mutex);if(clock_now()-bone_dot_time>500000000ULL)return {};return bone_dot_list;}
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot&slot){return decode(slot);}
 void encode_pose(const cinematic::State&pose,float*matrix){encode(pose,matrix);}
 void mode(unsigned value){std::lock_guard lock(mutex);state.mode=value%4;state.cuts_enabled=false;if(state.mode==2)state.dolly_preview=false;rotation_pending={};mouse_x=0;mouse_y=0;velocity={};fov_target=state.pose.fov_degrees;fov_wheel=0;state.writing=false;input_owned=false;free_input=false;probe_until=0;if(state.mode==0)reset=true;state.status=state.enabled?"Camera mode changed":"Camera selected; enable experimental writes to apply";}
@@ -397,3 +400,10 @@ extern "C" void tm_camera_bone_names(const char*const*names,int count){
  std::lock_guard lock(camera_runtime::mutex);camera_runtime::bone_name_list.clear();
  if(!names||count<=0||count>1024)return;
  for(int i=0;i<count;++i)camera_runtime::bone_name_list.emplace_back(names[i]?names[i]:"");}
+
+extern "C" int tm_camera_bone_dots_wanted(){return camera_runtime::bone_dots_wanted.load()?1:0;}
+extern "C" void tm_camera_bone_positions(const float*xyz,int count){
+ std::lock_guard lock(camera_runtime::mutex);camera_runtime::bone_dot_list.clear();
+ if(!xyz||count<=0||count>1024)return;
+ for(int i=0;i<count;++i)camera_runtime::bone_dot_list.push_back({xyz[i*3],xyz[i*3+1],xyz[i*3+2]});
+ camera_runtime::bone_dot_time=camera_runtime::clock_now();}

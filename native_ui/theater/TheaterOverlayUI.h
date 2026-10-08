@@ -75,6 +75,8 @@ namespace TheaterUI
         void PlayDollyPath(const OverlayFrame& f);
         void DrawDollyViewport(const OverlayFrame& f);
         bool DrawLightViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled);
+        bool DrawBoneViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled);
+        bool showBoneDots_=true,boneDotsMajorOnly_=true;
         bool DrawParticleViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled);
         void DrawGameViewport(const OverlayFrame& f);
         void DrawSequencer(const OverlayFrame& f);

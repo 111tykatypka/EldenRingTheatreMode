@@ -2,6 +2,7 @@
 #include "CameraEffects.h"
 #include "CameraTelemetry.h"
 #include "CameraCutTrack.h"
+#include <array>
 #include <string>
 namespace camera_runtime {
 struct View {
@@ -27,6 +28,9 @@ struct View {
 };
 View view(bool include_keys=true);
 std::vector<std::string> bone_names();
+// Bone dots in the viewport: the adapter publishes the world position of every player bone while this is requested.
+void set_bone_dots(bool wanted);
+std::vector<std::array<float,3>> bone_dots(); // empty when none or stale
 void mode(unsigned value);
 void enable(bool value);
 void stop();

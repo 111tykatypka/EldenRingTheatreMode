@@ -181,7 +181,9 @@ void Overlay::LoadSettings()
     while (in >> key >> value)
     {
         if (!std::isfinite(value)) continue;
-        if (key == "camera_modes_x") cameraModesX_=value;
+        if (key == "bone_dots") showBoneDots_=value!=0;
+        else if (key == "bone_dots_major") boneDotsMajorOnly_=value!=0;
+        else if (key == "camera_modes_x") cameraModesX_=value;
         else if (key == "camera_modes_y") cameraModesY_=value;
         else if (key == "camera_modes_scale") cameraModesScale_=std::clamp(value,.5f,3.f);
         else if (key == "dolly_markers") showDollyMarkers_=value!=0;
@@ -257,6 +259,7 @@ void Overlay::SaveSettings() const
     out << "high_quality_lods " << effects.high_quality_lods << "\n";
     out << "light_markers " << showLightMarkers_ << "\n";
     out << "particle_markers " << showParticleMarkers_ << "\n";
+    out << "bone_dots " << showBoneDots_ << "\nbone_dots_major " << boneDotsMajorOnly_ << "\n";
     out << "camera_modes_x " << cameraModesX_ << "\ncamera_modes_y " << cameraModesY_ << "\ncamera_modes_scale " << cameraModesScale_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
         << "dolly_visibility_key " << enableDollyVisibilityKey_ << "\n"
@@ -495,6 +498,7 @@ void Overlay::DrawCameraModes(const OverlayFrame& f)
 {
     if(ui_.visibility==UiVisibility::HiddenClean)return;
     const bool shown=ui_.visibility==UiVisibility::Shown;
+    camera_runtime::set_bone_dots(showBoneDots_&&ui_.activeTool==Tool::Bones&&shown);
     const auto pictureMin=shown?ui_.rects.gameMin:ImVec2(0,0),pictureMax=shown?ui_.rects.gameMax:ImGui::GetIO().DisplaySize;
     if(pictureMax.x<=pictureMin.x||pictureMax.y<=pictureMin.y)return;
     const float s=std::min(ui_.rects.uiScale,(pictureMax.x-pictureMin.x)/340.f)*cameraModesScale_;auto camera=camera_runtime::view(false);
@@ -614,7 +618,8 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
     auto camera=camera_runtime::view();const auto lights=light_editor::view();
     const bool hasDolly=showDollyMarkers_&&camera.track_current&&!camera.keys.empty();
     const bool hasLights=showLightMarkers_&&!lights.lights.empty();
-    if(!camera.observed||(!hasDolly&&!hasLights)){gizmoDragging_=lightGizmoDragging_=false;return;}
+    const bool hasBones=showBoneDots_&&ui_.activeTool==Tool::Bones&&ui_.visibility==UiVisibility::Shown;
+    if(!camera.observed||(!hasDolly&&!hasLights&&!hasBones)){gizmoDragging_=lightGizmoDragging_=false;return;}
     if(!hasDolly)gizmoDragging_=false;
     auto&io=ImGui::GetIO();const float s=ui_.rects.uiScale;const auto display=io.DisplaySize;
     ImGui::SetNextWindowPos(ImVec2(0,menuH_),ImGuiCond_Always);ImGui::SetNextWindowSize(ImVec2(display.x,std::max(1.f,display.y-menuH_)),ImGuiCond_Always);
@@ -633,7 +638,8 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
     auto line=[&](Vec a,Vec b,ImU32 color,float width=1.f){auto pa=projectPoint(a),pb=projectPoint(b);if(pa&&pb)draw->AddLine(ImVec2(float(pa->x),float(pa->y)),ImVec2(float(pb->x),float(pb->y)),color,width);};
     const bool lightInteraction=hasLights&&DrawLightViewport(f,camera.pose,pictureMin,pictureMax,hovered,scaled);
     const bool particleInteraction=showParticleMarkers_&&DrawParticleViewport(f,camera.pose,pictureMin,pictureMax,hovered&&!lightInteraction,scaled);
-    hovered=hovered&&!lightInteraction&&!particleInteraction;
+    const bool boneInteraction=hasBones&&DrawBoneViewport(f,camera.pose,pictureMin,pictureMax,hovered&&!lightInteraction&&!particleInteraction,scaled);
+    hovered=hovered&&!lightInteraction&&!particleInteraction&&!boneInteraction;
     if(hasDolly){
     if(curveGeneration_!=camera.project_generation){curveTrack_.replace(camera.keys,camera.track_settings);curveGeneration_=camera.project_generation;}
     if(camera.keys.size()>1){
@@ -684,6 +690,38 @@ void Overlay::DrawDollyViewport(const OverlayFrame& f)
 }
 
 // Light definitions share the camera projection and gizmo conventions; this draws editor handles,
+// Small dots on the character's bones; click one to attach the bone camera to it.
+bool Overlay::DrawBoneViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled)
+{
+    using namespace cinematic; using namespace cinematic::viewport;
+    const auto dots=camera_runtime::bone_dots();if(dots.empty())return false;
+    const auto names=camera_runtime::bone_names();const auto cam=camera_runtime::view(false);
+    auto& io=ImGui::GetIO(); const float s=ui_.rects.uiScale; const auto display=io.DisplaySize; auto* draw=ImGui::GetBackgroundDrawList();
+    auto minor=[&](const std::string& n){
+        static const char* skip[]={"twist","finger","thumb","index","middle","ring","pinky","toe","roll","helper","dummy","cloth","cape","skirt","hair","prop","scabbard","sheath"};
+        std::string l=n;for(auto&c:l)c=(char)std::tolower((unsigned char)c);
+        for(const char*k:skip)if(l.find(k)!=std::string::npos)return true;return false;};
+    int hit=-1;double nearest=Px(13,s);struct Dot{int i;ImVec2 p;};std::vector<Dot> shown;
+    for(int i=0;i<(int)dots.size();++i){
+        const std::string name=i<(int)names.size()?names[i]:std::string("bone ")+std::to_string(i);
+        if(boneDotsMajorOnly_&&minor(name)&&cam.bone_index!=i)continue;
+        auto r=project(camera,Vec{dots[i][0],dots[i][1],dots[i][2]},display.x,display.y);if(!r)continue;
+        if(scaled){r->x=min.x+r->x/display.x*(max.x-min.x);r->y=min.y+r->y/display.y*(max.y-min.y);}
+        shown.push_back({i,ImVec2(float(r->x),float(r->y))});
+        const double d=std::hypot(io.MousePos.x-r->x,io.MousePos.y-r->y);if(hovered&&d<nearest){nearest=d;hit=i;}
+    }
+    for(const auto& d:shown){
+        const bool selected=cam.bone_index==d.i,over=hit==d.i;
+        const ImU32 col=selected?Color::AccentAmber.U32():over?IM_COL32(255,255,255,255):IM_COL32(120,205,255,200);
+        draw->AddCircleFilled(d.p,Px(over||selected?5.f:3.2f,s),col);
+        if(over||selected)draw->AddCircle(d.p,Px(9,s),col,16,Px(1.2f,s));
+        if(over||selected){const std::string n=d.i<(int)names.size()?names[d.i]:std::to_string(d.i);draw->AddText(ImVec2(d.p.x+Px(11,s),d.p.y-Px(6,s)),col,n.c_str());}
+    }
+    if(hit>=0&&ImGui::IsMouseClicked(ImGuiMouseButton_Left)){
+        camera_runtime::bone(hit,cam.bone_offset);camera_runtime::mode(3);camera_runtime::enable(true);return true;}
+    return false;
+}
+
 bool Overlay::DrawParticleViewport(const OverlayFrame& f,const cinematic::State& camera,ImVec2 min,ImVec2 max,bool hovered,bool scaled)
 {
     using namespace cinematic; using namespace cinematic::viewport;
@@ -1309,6 +1347,10 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         if(ImGui::Button("Attach to selected bone",ImVec2(half,0))){if(cam.bone_index>=0||AutoSelectBone()){camera_runtime::mode(3);camera_runtime::enable(true);}}
         ImGui::SameLine();
         if(ImGui::Button("Detach (Default)",ImVec2(-FLT_MIN,0))){camera_runtime::mode(0);camera_runtime::enable(false);}
+        if(ImGui::Checkbox("Show bones on the character (click a dot to attach)",&showBoneDots_))SaveSettings();
+        ImGui::BeginDisabled(!showBoneDots_);
+        if(ImGui::Checkbox("Main bones only (hide fingers, twist and cloth bones)",&boneDotsMajorOnly_))SaveSettings();
+        ImGui::EndDisabled();
         ImGui::Separator();
         ImGui::TextUnformatted("Quick picks");
         const struct{const char*label;const char*keys[3];} quick[]={{"Head",{"Head"}},{"Neck",{"Neck"}},{"Spine",{"Spine2","Spine1","Spine"}},{"Pelvis",{"Pelvis"}},{"Left hand",{"L_Hand"}},{"Right hand",{"R_Hand"}},{"Left weapon",{"L_Weapon","L_Hand"}},{"Right weapon",{"R_Weapon","R_Hand"}},{"Left foot",{"L_Foot"}},{"Right foot",{"R_Foot"}}};
