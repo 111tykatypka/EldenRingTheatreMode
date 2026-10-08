@@ -79,3 +79,25 @@ On context loss counts/rows clear; monitor waits for return. Monitoring defaults
 Then implement one explicitly activated point light with owned handle and idempotent deferred removal, followed by spot lights and master-ReplayTime light tracks. Never directly call deleting destructors or continuously allocate per frame.
 
 Build: COMPILE_VERIFIED Release AMD64. Automated tests: NOT_RUN (not requested). Runtime/visual creation and inspector behavior: UNKNOWN, user testing required.
+
+## C21 — lighting editor correction
+
+The Lights tab is now for authoring rather than native inventory. It contains Create point/spot, a selectable light list, move-to-current-camera, position/spot rotation, radius, intensity, RGB wheel, cone/softness, shadow definitions and advanced property definitions. This is **editor-side data only**, visibly marked NOT rendered. `LightEditor` is separate from the native inspector. Native allocation is not enabled; UI creation must not be mistaken for a rendered light. Editor setups persist to `%LOCALAPPDATA%/EldenRingTheaterMode/lights.ertlights` with version 2 and version 1 loading.
+
+### New exact-target findings
+
+[STATIC_VERIFIED] Manager update `141A2B070` invokes light vtable `+10`, tests `+EC` and `+F4` for zero and removes finished lights from both collections through swap/pop and intrusive release. Point/spot virtual updates call fade advancement `141AEDF10`. This closes the **static registered-reference drain** gap from C20. It does not by itself prove native task ownership, outstanding render-job lifetimes or safe caller ABI. Evidence: `light_update_c21.json`, exact-target pseudocode/call graph and referenced update functions.
+
+[STATIC_VERIFIED] Native light property UI `141AED460` associates fields with actual labels. `light_native_properties_c21.json` records independently extracted facts, and `light_property_editor_c21.json` records instruction evidence. Important correction: `+90` is **SrcRadius**, not color. Diffuse/specular are at `+70/+80`; `Shadow` is `+AD`, `ShadowSpecLevel` `+B8`, `ShadowIntensity` `+94`. `+B4` is an integer depth-bias control, not a free float renderer write. Editor draft bias uses the evidenced integer range; it is not a native write. Shader units, HDR conversion, quality ordering and shadow allocation are still unproven.
+
+[STATIC_VERIFIED] Manager lock helper `141F0B0A0` spins on the lock bit at lock object `+8`; `141F0B0E0` clears it. It is **not recursive**. Reentering it from a hook whose caller already owns it can deadlock. Evidence: `light_manager_lock_c21.json`. No allocation hook was installed.
+
+### Sun/time control
+
+The manual day/night slider queues `WorldAreaTime::request_time(hour,minute,second)` through the exact pinned SDK. Only the existing PostPhysics callback acquires `WorldAreaTime::instance_mut()` and issues the request. No arbitrary clock/date offset writes or save patches are introduced. This does not change global timescale or ReplayTime. Clock values shown are observed `clock.hours/minutes/seconds`, independently of the requested slider value. Native transition and sun/shadow behavior require runtime validation and depend on region.
+
+This is a **native world-time edit**, not an isolated render-only sun override. Native world time may be autosaved. The manual tool does not enable the deliberately disabled replay-clock/event-flag overrides. Restore queues the original hour/minute/second on the same observed clock instance. Host loss and emergency Stop request restoration where the loaded-world callback is still valid. Loading/context loss discards old-instance ownership, so restoration is not guaranteed across loading, process termination or autosave. There is no separate sun yaw/pitch binding yet.
+
+Status: Release x64 COMPILE_VERIFIED. UI layout, day/night change and native rendering are NOT runtime/visually verified. No automated tests were requested/run.
+
+Next backend step: verify native update caller/lock ownership and x64 factory/removal arguments, establish a retained-handle lifetime contract, then connect one point-light definition to renderer creation and deferred removal. Spot matrices/cone setter, shadows and shader color/intensity mapping follow. Use the discovered property editor labels, not the previous guessed field meanings.

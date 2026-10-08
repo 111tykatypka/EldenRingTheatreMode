@@ -1,0 +1,89 @@
+{
+  "target": "EldenRing_1_17 / 2.7.0.0",
+  "sha256": "D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134",
+  "property_editor_preferred_va": "0x141aed460",
+  "classification": "STATIC_VERIFIED label association; setter ABI and render units not verified",
+  "properties": [
+    {
+      "native_label": "DiffuseColor",
+      "object_offset": "0x70",
+      "observed_control": "color"
+    },
+    {
+      "native_label": "SpecularColor",
+      "object_offset": "0x80",
+      "observed_control": "color"
+    },
+    {
+      "native_label": "SrcRadius",
+      "object_offset": "0x90",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "ShadowIntensity",
+      "object_offset": "0x94",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "Translucency Intensity",
+      "object_offset": "0x98",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "Translucency Power",
+      "object_offset": "0x9c",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "Shadow",
+      "object_offset": "0xad",
+      "observed_control": "bool"
+    },
+    {
+      "native_label": "Shadow CullFlip",
+      "object_offset": "0xb0",
+      "observed_control": "bool"
+    },
+    {
+      "native_label": "Shadow DepthBias",
+      "object_offset": "0xb4",
+      "observed_control": "integer"
+    },
+    {
+      "native_label": "ShadowSpecLevel",
+      "object_offset": "0xb8",
+      "observed_control": "integer 1..5 in native property UI"
+    },
+    {
+      "native_label": "ViewDist",
+      "object_offset": "0xbc",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "ScatteringScale",
+      "object_offset": "0xf8",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "ScatteringBlinkInfluence",
+      "object_offset": "0xfc",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "EnableOverrideScatteringG",
+      "object_offset": "0x100",
+      "observed_control": "bool"
+    },
+    {
+      "native_label": "OverrideScatteringG",
+      "object_offset": "0x104",
+      "observed_control": "float"
+    },
+    {
+      "native_label": "AntiExposureRate",
+      "object_offset": "0x108",
+      "observed_control": "float"
+    }
+  ],
+  "correction": "0x90 is SrcRadius, not RGB; quality mapping for ShadowSpecLevel is not proven"
+}

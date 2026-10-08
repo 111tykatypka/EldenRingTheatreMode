@@ -1,0 +1,116 @@
+[
+  {
+    "address": "0x141f0b0a0",
+    "bytes": "66 90",
+    "mnemonic": "nop",
+    "operands": ""
+  },
+  {
+    "address": "0x141f0b0a2",
+    "bytes": "f0 0f ba 69 08 00",
+    "mnemonic": "lock bts",
+    "operands": "dword ptr [rcx + 8], 0"
+  },
+  {
+    "address": "0x141f0b0a8",
+    "bytes": "72 f8",
+    "mnemonic": "jb",
+    "operands": "0x141f0b0a2"
+  },
+  {
+    "address": "0x141f0b0aa",
+    "bytes": "33 c0",
+    "mnemonic": "xor",
+    "operands": "eax, eax"
+  },
+  {
+    "address": "0x141f0b0ac",
+    "bytes": "c3",
+    "mnemonic": "ret",
+    "operands": ""
+  },
+  {
+    "address": "0x141f0b0ad",
+    "bytes": "4c 8d 05 9c c1 38 01",
+    "mnemonic": "lea",
+    "operands": "r8, [rip + 0x138c19c]"
+  },
+  {
+    "address": "0x141f0b0b4",
+    "bytes": "ba 3e 00 00 00",
+    "mnemonic": "mov",
+    "operands": "edx, 0x3e"
+  },
+  {
+    "address": "0x141f0b0b9",
+    "bytes": "33 c9",
+    "mnemonic": "xor",
+    "operands": "ecx, ecx"
+  },
+  {
+    "address": "0x141f0b0bb",
+    "bytes": "e9 73 74 11 00",
+    "mnemonic": "jmp",
+    "operands": "0x142022533"
+  },
+  {
+    "address": "0x141f0b0c0",
+    "bytes": "f0 0f ba 69 08 00",
+    "mnemonic": "lock bts",
+    "operands": "dword ptr [rcx + 8], 0"
+  },
+  {
+    "address": "0x141f0b0c6",
+    "bytes": "0f 92 c0",
+    "mnemonic": "setb",
+    "operands": "al"
+  },
+  {
+    "address": "0x141f0b0c9",
+    "bytes": "0f b6 c8",
+    "mnemonic": "movzx",
+    "operands": "ecx, al"
+  },
+  {
+    "address": "0x141f0b0cc",
+    "bytes": "f7 d9",
+    "mnemonic": "neg",
+    "operands": "ecx"
+  },
+  {
+    "address": "0x141f0b0ce",
+    "bytes": "1b c0",
+    "mnemonic": "sbb",
+    "operands": "eax, eax"
+  },
+  {
+    "address": "0x141f0b0d0",
+    "bytes": "83 e0 fe",
+    "mnemonic": "and",
+    "operands": "eax, 0xfffffffe"
+  },
+  {
+    "address": "0x141f0b0d3",
+    "bytes": "c3",
+    "mnemonic": "ret",
+    "operands": ""
+  },
+  {
+    "address": "0x141f0b0d4",
+    "bytes": "cc",
+    "mnemonic": "int3",
+    "operands": ""
+  },
+  {
+    "address": "0x141f0b0d5",
+    "bytes": "48 8b 45 10",
+    "mnemonic": "mov",
+    "operands": "rax, qword ptr [rbp + 0x10]"
+  },
+  {
+    "address": "0x141f0b0d9",
+    "bytes": "0f b7 40 1c",
+    "mnemonic": "movzx",
+    "operands": "eax, word ptr [rax + 0x1c]"
+  }
+]

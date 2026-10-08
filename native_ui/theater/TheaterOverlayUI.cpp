@@ -5,6 +5,7 @@
 #include "../EldenRingTimingAdapter.h"
 #include "../EldenRingWeatherAdapter.h"
 #include "../EldenRingLightAdapter.h"
+#include "../LightEditor.h"
 #include "../EldenRingHudAdapter.h"
 #include "CameraViewport.h"
 
@@ -1007,27 +1008,64 @@ void Overlay::DrawPanel(const OverlayFrame& f)
     }
     case Tool::Lights:
     {
-        section(T(Str::LightsEditor));
-        auto lights=game_lights::view();bool monitoring=lights.monitoring;
-        if(checkbox("Monitor native lights (1 Hz)",&monitoring))game_lights::monitor(monitoring);
-        if(ImGui::Button("Refresh",ImVec2(-FLT_MIN,0)))game_lights::request_scan();
-        ImGui::TextWrapped("%s",lights.diagnostic.c_str());
-        ImGui::Text("Collections A / B: %llu / %llu",(unsigned long long)lights.count[0],(unsigned long long)lights.count[1]);
-        ImGui::Text("Observed generation: %llu | scans: %llu",(unsigned long long)lights.generation,(unsigned long long)lights.scans);
-        if(lights.sampled_ms)ImGui::TextDisabled("Sample age: %.1f s",double(GetTickCount64()-lights.sampled_ms)/1000.);
-        int collection=lights.collection;
-        if(ImGui::Combo("Collection",&collection,"A\0B\0"))game_lights::page(collection,0);
-        if(ImGui::Button("Previous page")&&lights.page)game_lights::page(lights.collection,lights.page-1);
-        ImGui::SameLine();
-        if(ImGui::Button("Next page")&&(std::uint64_t(lights.page)+1)*game_lights::page_size<lights.count[lights.collection])game_lights::page(lights.collection,lights.page+1);
-        ImGui::TextDisabled("Page %u | up to %u rows",lights.page+1,game_lights::page_size);
-        for(unsigned i=0;i<lights.rows;++i){const auto& light=lights.lights[i];ImGui::PushID(i);
-            ImGui::Text("%s | ID %u",!light.readable?"Unreadable":light.type==1?"Point":light.type==2?"Spot":"Other",light.id);
-            if(light.spatial_valid)ImGui::TextDisabled("Raw: %.2f %.2f %.2f %.2f",light.spatial[0],light.spatial[1],light.spatial[2],light.spatial[3]);
-            ImGui::PopID();}
+        section("Sun / time of day");
+        auto clock=light_editor::time_view();
+        float hour=clock.requested?clock.target:clock.hour;
+        ImGui::BeginDisabled(!clock.available||!snap.connected||!snap.player_found);
+        if(slider("Day / night",&hour,0.f,23.f+59.f/60.f,"%.2f h",0,12.f))light_editor::time(hour);
+        if(ImGui::Button("Restore time",ImVec2(-FLT_MIN,0)))light_editor::restore_time();
+        ImGui::EndDisabled();
+        if(clock.available)ImGui::TextDisabled("Observed: %02d:%02d",int(clock.hour),int(clock.hour*60)%60);else ImGui::TextDisabled("Clock unavailable");
+        ImGui::TextWrapped("Changes native world time and its sun/shadows where supported by the area. World time may be autosaved.");
         ImGui::Separator();
-        ImGui::BeginDisabled();ImGui::Button("Add point light");ImGui::SameLine();ImGui::Button("Add spot light");ImGui::EndDisabled();
-        ImGui::TextWrapped("Creation pending renderer cleanup and task ownership proof. Raw spatial units are unverified. No lighting is changed.");
+        section("Custom lights");
+        auto camera=camera_runtime::view(false);
+        ImGui::BeginDisabled(!camera.observed);
+        if(ImGui::Button("Create point light",ImVec2(-FLT_MIN,0)))light_editor::create(light_editor::Type::Point,camera.pose);
+        if(ImGui::Button("Create spot light",ImVec2(-FLT_MIN,0)))light_editor::create(light_editor::Type::Spot,camera.pose);
+        ImGui::EndDisabled();
+        ImGui::TextColored(ImVec4(1,.7f,.25f,1),"Definitions only - NOT rendered yet");
+        auto editor=light_editor::view();
+        const auto selected=std::find_if(editor.lights.begin(),editor.lights.end(),[&](const auto& l){return l.id==editor.selected;});
+        const char* name=selected==editor.lights.end()?"Select light":selected->name.c_str();
+        if(ImGui::BeginCombo("Light",name)){
+            for(const auto& l:editor.lights){ImGui::PushID(int(l.id));if(ImGui::Selectable(l.name.c_str(),l.id==editor.selected))light_editor::select(l.id);ImGui::PopID();}ImGui::EndCombo();}
+        if(selected!=editor.lights.end()){
+            auto light=*selected;bool changed=false;
+            changed|=checkbox("Enabled",&light.enabled);
+            ImGui::BeginDisabled(!camera.observed);
+            if(ImGui::Button("Move to current camera",ImVec2(-FLT_MIN,0))){light.transform.position=camera.pose.position;light.transform.orientation=camera.pose.orientation;light.transform.roll_degrees=camera.pose.roll_degrees;changed=true;}
+            ImGui::EndDisabled();
+            float xyz[3];for(int i=0;i<3;++i)xyz[i]=float(light.transform.position[i]);
+            labelAbove("Position XYZ");if(ImGui::DragFloat3("##light_xyz",xyz,.05f)){for(int i=0;i<3;++i)light.transform.position[i]=xyz[i];changed=true;}
+            if(light.type==light_editor::Type::Spot){
+                auto angles=cinematic::viewport::angles(light.transform.orientation);
+                float degrees[3];for(int i=0;i<3;++i)degrees[i]=float(angles[i]*180./3.141592653589793);
+                labelAbove("Rotation pitch / yaw / roll");if(ImGui::DragFloat3("##light_rotation",degrees,.2f)){
+                    if(auto rotation=cinematic::mouse_look({0,0,0,1},degrees[1]*3.141592653589793/180,degrees[0]*3.141592653589793/180,degrees[2]*3.141592653589793/180)){light.transform.orientation=*rotation;changed=true;}}
+                changed|=slider("Cone angle",&light.cone_degrees,1,179,"%.1f deg",0,45);
+                changed|=slider("Cone softness",&light.softness,0,1,"%.2f",0,.25f);
+            }
+            changed|=slider("Radius",&light.radius,.01f,500,"%.2f",ImGuiSliderFlags_Logarithmic,5);
+            changed|=slider("Intensity",&light.intensity,0,100,"%.3f",ImGuiSliderFlags_Logarithmic,1);
+            labelAbove("Light color RGB");changed|=ImGui::ColorPicker3("##light_color",light.rgb,ImGuiColorEditFlags_PickerHueWheel|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
+            changed|=checkbox("Shadows",&light.shadows);
+            ImGui::BeginDisabled(!light.shadows);
+            int quality=int(light.shadow_level);labelAbove("Shadow quality level");if(ImGui::SliderInt("##shadow_quality",&quality,1,5)){light.shadow_level=quality;changed=true;}
+            changed|=slider("Shadow strength",&light.shadow_strength,0,1,"%.2f",0,1);
+            ImGui::EndDisabled();
+            if(ImGui::CollapsingHeader("Advanced light properties")){
+                changed|=slider("Source radius",&light.source_radius,0,500,"%.2f",ImGuiSliderFlags_Logarithmic,.1f);
+                labelAbove("Shadow depth bias");changed|=ImGui::SliderInt("##shadow_bias",&light.shadow_bias,-7,7);
+                changed|=slider("Scattering scale",&light.scattering,0,10,"%.2f",0,1);
+                labelAbove("Specular color RGB");changed|=ImGui::ColorEdit3("##specular_color",light.specular_rgb,ImGuiColorEditFlags_Float|ImGuiColorEditFlags_InputRGB);
+            }
+            if(changed)light_editor::edit(light);
+            if(ImGui::Button("Delete selected light",ImVec2(-FLT_MIN,0)))light_editor::remove(light.id);
+        }
+        if(ImGui::Button("Save light setup"))light_editor::save();ImGui::SameLine();if(ImGui::Button("Load setup"))light_editor::load();
+        if(!editor.status.empty())ImGui::TextWrapped("%s",editor.status.c_str());
+        ImGui::TextDisabled("Native light rendering: not implemented.");
         break;
     }
     case Tool::Weather:

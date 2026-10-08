@@ -25,6 +25,7 @@ mod equipment;
 mod codec;
 mod world_file;
 mod world_state;
+mod lighting_time;
 mod actors;
 mod actor_lifetime;
 mod companions;
@@ -51,7 +52,7 @@ fn lights_game_tick() {
         && unsafe { WorldChrMan::instance() }.map(|world| world.main_player.is_some()).unwrap_or(false);
     unsafe { tm_lights_tick(active as i32); }
 }
-extern "C" fn render_emergency_stop(){unsafe{tm_camera_runtime_stop();tm_weather_disable();}log_game("EMERGENCY_STOP from overlay; camera and weather overrides disabled");}
+extern "C" fn render_emergency_stop(){unsafe{tm_camera_runtime_stop();tm_weather_disable();lighting_time::tm_lighting_time_request(-1);}log_game("EMERGENCY_STOP from overlay; camera and weather overrides disabled");}
 #[link(name="GameProfile",kind="static")]unsafe extern "C"{fn tm_validate_profile(path:*const u16,image_base:usize,report:*mut TmValidationReport)->u32;}
 #[link(name="kernel32")]unsafe extern "system"{fn GetModuleFileNameW(module:*mut c_void,buffer:*mut u16,size:u32)->u32;fn GetModuleHandleW(name:*const u16)->*mut c_void;fn GetCurrentProcessId()->u32;}
 #[link(name="mincore")]unsafe extern "system"{fn QueryInterruptTimePrecise(time:*mut u64);}
@@ -186,6 +187,7 @@ pub unsafe extern "system" fn DllMain(_module:usize,reason:u32,_reserved:usize)-
                     let now=monotonic_ns();
                     let weather_active=offline_allowed()&&!arrival::loading()&&unsafe{WorldChrMan::instance()}.map(|world|world.main_player.is_some()).unwrap_or(false);
                     unsafe{tm_weather_tick(weather_active as i32);}
+                    lighting_time::tick(weather_active);
                     unsafe{tm_camera_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}
                     unsafe extern "C"{fn tm_hud_game_context(active:i32);}
                     unsafe{tm_hud_game_context((PRESENT.load(Ordering::Acquire)!=0&&offline_allowed()) as i32);}

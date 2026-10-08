@@ -107,7 +107,7 @@ namespace TheaterUI
         { "Changes event flags (save state) while a replay plays; your own flags are put back when it ends. Time of day is always replayed.",
           "Меняет флаги событий (состояние сохранения) во время воспроизведения; ваши флаги возвращаются после. Время суток воспроизводится всегда." },
         { "Weather", "Погода" }, { "Weather editor", "Редактор погоды" },
-        { "Lights", "Свет" }, { "Lights inspector", "Инспектор света" },
+        { "Lights", "Свет" }, { "Lights editor", "Редактор света" },
     };
     static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == (size_t)Str::Count, "kStrings must match Str");
 
