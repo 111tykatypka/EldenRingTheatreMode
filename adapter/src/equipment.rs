@@ -48,13 +48,12 @@ pub fn write(player:usize,e:&Equip)->bool{
  unsafe{std::ptr::write_volatile(a as *mut u32,e.arm_style);std::ptr::write_volatile(s as *mut [u32;6],e.slots);
   std::ptr::write_volatile(h as *mut [u32;SLOTS],e.handles);std::ptr::write_volatile(p as *mut [i32;SLOTS],e.params);}
  true}
-/// Weapon swap only: the recorded grip (arm style) and which of the three left / right weapon slots, arrow and bolt slots are
-/// selected. Item handles and param ids of every slot (armor, talismans, weapons) stay exactly what the live assembly holds,
-/// so no item is ever put into or taken out of the player\'s equipment by this call. A swap in the game changes the selected
-/// slot, not the handles, so this reproduces it whenever the loadout matches the recording.
+/// Weapon swap only: the recorded grip (arm style), the selected weapon / arrow / bolt slots, and the handles and param ids of the
+/// twelve weapon, arrow and bolt slots, so the weapon that was in the hand during the recording is shown even when it is not in the/// player's current loadout. Armor, talismans and everything else (slots 12 to 21) stay exactly what the live assembly holds./// The player's own assembly is put back when the replay ends.
 pub fn write_selection(player:usize,recorded:&Equip)->bool{
  if !recorded.recorded()||!recorded.plausible(){return false;}
  let Some(live)=read(player) else {return false};
- if live.arm_style==recorded.arm_style&&live.slots==recorded.slots{return true;}
- let merged=Equip{arm_style:recorded.arm_style,slots:recorded.slots,handles:live.handles,params:live.params};
+ if live.arm_style==recorded.arm_style&&live.slots==recorded.slots&&live.handles[..12]==recorded.handles[..12]&&live.params[..12]==recorded.params[..12]{return true;}
+ let mut merged=Equip{arm_style:recorded.arm_style,slots:recorded.slots,handles:live.handles,params:live.params};
+ for k in 0..12{merged.handles[k]=recorded.handles[k];merged.params[k]=recorded.params[k];}
  write(player,&merged)}
