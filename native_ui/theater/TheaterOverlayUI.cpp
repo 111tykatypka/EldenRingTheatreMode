@@ -772,6 +772,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         auto runtime=camera_runtime::view();
         ImGui::TextWrapped("Default / Free / Dolly are in the top-center camera bar. The configured Cycle Camera key works with the main overlay hidden.");
         bool pathPreview=runtime.dolly_preview;if(checkbox("Preview Dolly path at ReplayTime (off = move and author keys)",&pathPreview))camera_runtime::preview(pathPreview);
+        ImGui::TextWrapped("Space plays/pauses the replay without changing authoring mode. Keep preview off to move and press K during playback; enable it explicitly to watch the path.");
         ImGui::TextWrapped("Dolly: move with the overlay hidden and capture keys at ReplayTime. Play automatically previews a path with at least two keys. Turn preview off to keep authoring.");
         if(ImGui::Button("Advanced: use selected Bone camera")){camera_runtime::mode(3);camera_runtime::enable(true);}
         if(checkbox("Show Dolly cameras / transform handles",&showDollyMarkers_))SaveSettings();

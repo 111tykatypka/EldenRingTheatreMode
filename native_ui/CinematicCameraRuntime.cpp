@@ -45,7 +45,6 @@ std::atomic<double> fov_wheel{0};
 std::atomic_bool free_input{false};
 double fov_target=60;
 cinematic::Vec rotation_pending{};
-bool dolly_seek=false;
 cinematic::Vec velocity{};
 std::atomic<int> selected_bone=-1;
 std::optional<cinematic::State> bone_pose;
@@ -129,8 +128,9 @@ bool update(void* output,void* source){
  double dt=std::min(double(now-last_tick)/1e9,.05);last_tick=now;
  if(!probe_until){
   if(effective_mode==1||(effective_mode==2&&!state.dolly_preview&&!state.cuts_enabled)){
-   if(effective_mode==2&&!playing&&dolly_seek&&keys_replay_path==replay_path){if(auto value=cinematic::dolly_evaluate(track,time_at(now),state.dolly_smoothing_seconds)){state.pose=*value;rotation_pending={};fov_target=value->fov_degrees;velocity={};}}
-   dolly_seek=false;move(dt);
+   // Authoring keeps its own pose through replay play/pause and seeks. Only
+   // explicit path preview/cuts may evaluate the path into the active camera.
+   move(dt);
   }
   else if(effective_mode==3){
    if(!bone_pose||now<bone_time||now-bone_time>250000000ULL){release("Bone camera target unavailable or stale; native camera restored");return false;}
@@ -218,7 +218,15 @@ std::optional<cinematic::State> bone_world(const float*root,const float*qs){
  for(int i=0;i<3;++i)for(int j=0;j<3;++j)world->position[i]+=root[j*4+i]*qs[j];
  world->orientation=*cinematic::normalized(product(world->orientation,*normalized));return world;
 }
-void timeline(std::uint64_t time,std::uint64_t duration,std::uint64_t anchor,bool play,double rate,bool link,const char* path){std::lock_guard lock(mutex);if(!play&&time!=timeline_ns)dolly_seek=true;if(play&&!playing&&state.mode==2&&track.keys().size()>=2&&keys_replay_path==replay_path)state.dolly_preview=true;timeline_ns=time;duration_ns=duration;anchor_ns=anchor;playing=play;speed=rate;linked=link;auto identity=path?std::string(path,strnlen_s(path,260)):std::string{};if(identity!=replay_path){state.dolly_preview=false;dolly_seek=false;state.cuts_enabled=false;cut_track.replace({},duration);release("Replay changed; camera writes and cuts disabled");}replay_path=std::move(identity);host_heartbeat=clock_now();if(!link)release("Host disconnected; native control restored");}
+void timeline(std::uint64_t time,std::uint64_t duration,std::uint64_t anchor,bool play,double rate,bool link,const char* path){
+ std::lock_guard lock(mutex);
+ // Transport updates never switch authoring into path preview or change its
+ // camera pose. K captures that pose at the same authoritative ReplayTime.
+ timeline_ns=time;duration_ns=duration;anchor_ns=anchor;playing=play;speed=rate;linked=link;
+ auto identity=path?std::string(path,strnlen_s(path,260)):std::string{};
+ if(identity!=replay_path){state.dolly_preview=false;state.cuts_enabled=false;cut_track.replace({},duration);release("Replay changed; camera writes and cuts disabled");}
+ replay_path=std::move(identity);host_heartbeat=clock_now();if(!link)release("Host disconnected; native control restored");
+}
 bool owns_input(){return input_owned.load();}
 void overlay_visible(bool visible){ui_visible=visible;}
 void window(void* hwnd){game_window=static_cast<HWND>(hwnd);}
