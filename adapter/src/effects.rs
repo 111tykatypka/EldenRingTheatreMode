@@ -19,7 +19,7 @@ pub fn drain()->Vec<EffectEvent>{
  let mut out=Vec::new();let mut buffer=[Raw::default();256];
  loop{let n=unsafe{tm_effect_drain(buffer.as_mut_ptr(),buffer.len() as u32)} as usize;if n==0{break;}
   out.extend(buffer[..n].iter().map(|r|EffectEvent{time:r.time_ns,id:r.id,pos:r.pos}));if n<buffer.len(){break;}}
- out}
+ out.retain(|e|e.pos.iter().all(|v|v.is_finite()));out.sort_by_key(|e|e.time);out}
 /// Creates one effect now (a game task only). `pos` is in today\'s physics frame.
 pub fn spawn(id:u32,pos:[f32;3])->bool{ready()&&unsafe{tm_effect_spawn(id,pos.as_ptr())}!=0}
 pub fn stats()->(u64,u64,u64){let (mut a,mut b,mut c)=(0u64,0u64,0u64);if ready(){unsafe{tm_effect_stats(&mut a,&mut b,&mut c)}}(a,b,c)}

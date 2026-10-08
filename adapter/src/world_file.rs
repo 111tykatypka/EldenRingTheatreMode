@@ -92,7 +92,8 @@ fn decode_effects(r:&[u8],count:usize)->Option<Vec<EffectEvent>>{
  if r.len()!=count.checked_mul(EFFECT_BYTES)?{return None;}
  let out:Vec<EffectEvent>=r.chunks_exact(EFFECT_BYTES).map(|c|{let f=|i:usize|f32::from_le_bytes(c[i..i+4].try_into().unwrap());
   EffectEvent{time:u64::from_le_bytes(c[..8].try_into().unwrap()),id:u32::from_le_bytes(c[8..12].try_into().unwrap()),pos:[f(12),f(16),f(20)]}}).collect();
- (out.iter().all(|e|e.pos.iter().all(|v|v.is_finite()))&&out.windows(2).all(|w|w[1].time>=w[0].time)).then_some(out)}
+ // Order is not required here: the game calls from several threads, so capture order can differ slightly from time order.
+ (out.iter().all(|e|e.pos.iter().all(|v|v.is_finite()))).then_some(out)}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub struct ModuleSample{pub time:u64,pub data:[u8;crate::weapon_loc::BYTES]}
 fn encode_module(v:&[ModuleSample])->Vec<u8>{let mut o=Vec::new();for s in v{o.extend(s.time.to_le_bytes());o.extend(s.data);}o}
@@ -394,7 +395,7 @@ pub fn open(path:&Path)->Result<WorldFile,String>{
   }
   else if track==TRACK_EFFECTS&&kind==KIND_EFFECTS{
    let r=codec::unpack_zeros(&data[body..body+packed]).filter(|r|r.len()==raw).ok_or("invalid effect chunk")?;
-   effects.extend(decode_effects(&r,count).ok_or("invalid effect payload")?);
+   effects.extend(decode_effects(&r,count).ok_or("invalid effect payload")?);effects.sort_by_key(|e|e.time);
   }
   else if track==TRACK_PLAYER_MODULE&&kind==KIND_PLAYER_MODULE{
    let r=codec::unpack_zeros(&data[body..body+packed]).filter(|r|r.len()==raw).ok_or("invalid weapon location chunk")?;
@@ -498,7 +499,7 @@ pub fn open(path:&Path)->Result<WorldFile,String>{
   let v=vec![EffectEvent{time:5,id:8020,pos:[1.0,2.5,-3.0]},EffectEvent{time:5,id:301000,pos:[0.0,0.0,0.0]},EffectEvent{time:9,id:1,pos:[9.0,8.0,7.0]}];
   let raw=encode_effects(&v);assert_eq!(decode_effects(&raw,3),Some(v.clone()));assert_eq!(decode_effects(&raw,2),None);
   let mut nan=raw.clone();nan[12..16].copy_from_slice(&f32::NAN.to_le_bytes());assert_eq!(decode_effects(&nan,3),None);
-  let backwards=encode_effects(&[v[2],v[0]]);assert_eq!(decode_effects(&backwards,2),None);}
+  let backwards=encode_effects(&[v[2],v[0]]);assert!(decode_effects(&backwards,2).is_some());}
  #[test]fn older_weapon_location_records_still_decode(){
   let mut raw=Vec::new();raw.extend(7u64.to_le_bytes());raw.extend([0u8;21]);raw.extend(9u64.to_le_bytes());raw.extend([0u8;21]);
   let v=decode_module(&raw,2).unwrap();assert_eq!(v.len(),2);assert_eq!(v[1].time,9);assert_eq!(v[0].data,[0u8;crate::weapon_loc::BYTES]);
