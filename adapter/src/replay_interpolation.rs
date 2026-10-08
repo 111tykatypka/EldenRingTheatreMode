@@ -28,9 +28,25 @@ pub fn source_time(source:u64,anchor:u64,now:u64,playing:bool,speed:f64)->u64{
 /// (80.09 -> 80.15, one frame of running). So a world point is `physics - anchor`, and
 ///   live_physics = recorded_physics + (live_anchor - recorded_anchor).
 /// Different origin ids (or non-finite values) have no known conversion: None.
+///
+/// Two frames with different origin ids: `chunk_position` is positioned relative to the origin block (SDK
+/// doc of `ChrIns.block_origin`), so a world point is `tile_corner(origin) + physics - anchor` and the
+/// translation also carries the difference of the two tiles' corners (see `tile_corner`). UNVERIFIED in game:
+/// the tile sizes and axis directions are assumed; the recording logs FRAME_CHANGE lines to check them.
 pub fn rebase(recorded_origin:i32,recorded_anchor:[f32;4],live_origin:i32,live_anchor:[f32;4])->Option<[f32;3]>{
- if recorded_origin!=live_origin||!(0..3).all(|i|recorded_anchor[i].is_finite()&&live_anchor[i].is_finite()){return None;}
- Some(std::array::from_fn(|i|live_anchor[i]-recorded_anchor[i]))}
+ if !(0..3).all(|i|recorded_anchor[i].is_finite()&&live_anchor[i].is_finite()){return None;}
+ let delta:[f32;3]=std::array::from_fn(|i|live_anchor[i]-recorded_anchor[i]);
+ if recorded_origin==live_origin{return Some(delta);}
+ let (r,l)=(tile_corner(recorded_origin)?,tile_corner(live_origin)?);
+ Some(std::array::from_fn(|i|delta[i]+(r[i]-l[i])as f32))}
+/// World position (metres) of the corner of an overworld tile, from the packed block id
+/// (area<<24 | x<<16 | z<<8 | index). Index 0 is a 256 m tile, 1 and 2 are 2x and 4x larger tiles
+/// (m60_10_09_02 contains m60_43_37_00: 43/4 = 10, 37/4 = 9). None for non-overworld ids (areas 50..89 only)
+/// and for ids of different areas.
+pub fn tile_corner(id:i32)->Option<[f64;3]>{
+ let u=id as u32;let (area,x,z,index)=((u>>24)as u8,((u>>16)&0xFF)as f64,((u>>8)&0xFF)as f64,(u&0xFF)as u32);
+ if !(50..89).contains(&area)||index>2||id==-1{return None;}
+ let size=256.0*(1u32<<index)as f64;Some([x*size,0.0,z*size])}
 /// The player's anchor over the recording (only where it changes). Everything in a recording shares one
 /// physics frame, so enemies and NPCs are rebased with the PLAYER's anchor at their sample time (their own
 /// chunk fields are not a frame anchor: a stationary enemy kept a constant, unrelated value).
@@ -95,6 +111,16 @@ pub fn evaluate(a:&Transform,b:&Transform,t:f64)->Option<Transform> {
         let rec=Place{block:1009460480,origin:-1,global:[80.,-88.,-48.,1.]};let live=Place{block:1009460480,origin:1009460480,global:[240.,-104.,-96.,1.]};
         assert_eq!(rec.frame(),live.frame());
         assert_eq!(rebase(rec.frame(),rec.global,live.frame(),live.global),Some([160.,-16.,-48.]));}
+    #[test]fn different_tiles_carry_the_corner_difference(){
+        let small=0x3C2B2500u32 as i32; // m60_43_37_00
+        let west=0x3C2A2500u32 as i32;  // m60_42_37_00, one 256 m tile west
+        let large=0x3C0A0902u32 as i32; // m60_10_09_02 contains m60_43_37_00
+        assert_eq!(tile_corner(small),Some([43.*256.,0.,37.*256.]));
+        let a=[80.,-88.,-48.,1.];
+        assert_eq!(rebase(small,a,small,a),Some([0.,0.,0.]));
+        // The same physical spot seen from the west tile has its x anchor 256 m larger... (x_west = x_small + 256)
+        assert_eq!(rebase(small,a,west,a),Some([256.,0.,0.]));
+        assert!(tile_corner(large).is_some());assert!(rebase(small,a,0x1E000000,a).is_none());assert!(tile_corner(-1).is_none());}
     #[test]fn anchor_track_applies_the_anchor_in_force(){
         let mut tr=AnchorTrack::default();tr.push(0,-1,[-48.,-104.,-96.,1.]);tr.push(10,-1,[-48.,-104.,-96.,1.]);tr.push(20,-1,[-80.,-104.,-96.,1.]);
         assert_eq!(tr.entries.len(),2);assert_eq!(tr.translation(5,-1,[-80.,-104.,-96.,1.]),Some([-32.,0.,0.]));assert_eq!(tr.translation(25,-1,[-80.,-104.,-96.,1.]),Some([0.,0.,0.]));}

@@ -212,7 +212,7 @@ fn follow_loaded(s:&mut State,l:&Link){
    if let Some(a)=&actors{crate::log_game(&format!("BONE_REPLAY: {} recorded characters (enemies, NPCs, bosses)",a.len()));}
    // The player's anchor over the recording, for rebasing positions into the live physics frame.
    let mut anchors=crate::replay_interpolation::AnchorTrack::default();
-   for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.space(),f.place.global);}}}
+   for i in 0..n{if let Some(f)=store.get(i){if f.place.block!=-1{anchors.push(f.time,f.place.frame(),f.place.global);}}}
    crate::log_game(&format!("BONE_REPLAY: {} physics origin shifts recorded",anchors.len_changes()));
    Loaded{path:path.clone(),store,parents:Arc::new(parents),seconds,world:Arc::new(world_data),actors,anchors:Arc::new(anchors)}}).map_err(|e|(path,e));*LOADED.lock().unwrap()=Some(result);});}
 
@@ -240,7 +240,7 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
  let (a,b)=&*s.cur.insert((a,b));
  // The physics origin moves when the game re-bases the world; each recorded position is carried into the
  // live frame by the change of the anchor (see replay_interpolation::rebase, measured on real recordings).
- let translate=|p:&Place|->Option<[f32;3]>{if p.block==-1{Some([0.0;3])}else{crate::replay_interpolation::rebase(p.space(),p.global,live_place.space(),live_place.global)}};
+ let translate=|p:&Place|->Option<[f32;3]>{if p.block==-1{Some([0.0;3])}else{crate::replay_interpolation::rebase(p.frame(),p.global,live_place.frame(),live_place.global)}};
  let (Some(ta),Some(tb))=(translate(&a.place),translate(&b.place)) else {
   s.evaluated_root=None;
   crate::log_game(&format!("ROOT_SPACE_UNAVAILABLE: replay frame {} (origin {}, block {}) vs live frame {} (origin {}, block {}) differ; anchors {:?} / {:?}; no conversion is known between different frames",a.place.frame(),a.place.origin,a.place.block,live_place.frame(),live_place.origin,live_place.block,a.place.global,live_place.global));
@@ -262,7 +262,7 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
 fn saved_for_now(s:&State,chr:usize)->Option<Transform>{
  let mut t=s.saved?;
  if let Some(p)=s.saved_place{let now=arrival::place(chr);
-  if p.block!=-1&&now.block!=-1{if let Some(sh)=crate::replay_interpolation::rebase(p.space(),p.global,now.space(),now.global){for k in 0..3{t[2][k]+=sh[k];}}}}
+  if p.block!=-1&&now.block!=-1{if let Some(sh)=crate::replay_interpolation::rebase(p.frame(),p.global,now.frame(),now.global){for k in 0..3{t[2][k]+=sh[k];}}}}
  Some(t)}
 /// The player died while the replay held the body: give everything back at once (no return teleport onto a
 /// dead body) so the game's own revival menu works.
@@ -318,11 +318,11 @@ fn begin_arrival(s:&mut State,chr:usize){
  // different origin id has no known conversion.
  // Another map (or another coordinate space) has no conversion until the game has taken the player there,
  // so it is reached by grace travel first; after that the spaces match.
- let convertible=target.block==-1||crate::replay_interpolation::rebase(target.space(),target.global,here.space(),here.global).is_some();
+ let convertible=target.block==-1||crate::replay_interpolation::rebase(target.frame(),target.global,here.frame(),here.global).is_some();
  // Distance from the player to the recorded start, measured in one frame (anchor-corrected physics).
  let far_m=if convertible&&target.block!=-1{
   let tf=loaded.store.get(i).map(|f|f.transform[2]);let live=read_transform(chr).map(|t|t[2]);
-  match(tf,live,crate::replay_interpolation::rebase(target.space(),target.global,here.space(),here.global)){
+  match(tf,live,crate::replay_interpolation::rebase(target.frame(),target.global,here.frame(),here.global)){
    (Some(p),Some(l),Some(sh))=>(0..3).map(|k|(p[k]+sh[k]-l[k]).powi(2)).sum::<f32>().sqrt(),_=>0.0}}else{0.0};
  if target.block==-1{s.arrival=Arrival::Ready;crate::log_game("ARRIVAL: recording has no map data (older file); positions used as recorded");return;}
  crate::log_game(&format!("ARRIVAL: here {} {:?}, replay {} {:?}, distance {:.1} m",arrival::block_name(here.block),&here.global[..3],arrival::block_name(target.block),&target.global[..3],arrival::distance(here.global,target.global)));
@@ -459,6 +459,11 @@ pub fn tick(group:usize,now:u64){
   if let Some(r)=&mut s.recording{
    let (Some((local,model)),Some(transform))=(pose_arrays(chr),read_transform(chr)) else {return;};
    let Some(count)=crate::actors::bone_count(chr) else{return;};let bytes=count*48;
+   { // Calibration for the tile-offset model: where the frame (origin id) changes, log the continuous quantity.
+    static LAST:std::sync::atomic::AtomicI32=std::sync::atomic::AtomicI32::new(i32::MIN);
+    let p=arrival::place(chr);let f=p.frame();
+    if LAST.swap(f,std::sync::atomic::Ordering::Relaxed)!=f{crate::log_game(&format!("FRAME_CHANGE: frame {} ({}) block {} anchor {:?} physics {:?}; physics-anchor = {:?}",f,arrival::block_name(f),arrival::block_name(p.block),&p.global[..3],&transform[2][..3],std::array::from_fn::<f32,3,_>(|k|transform[2][k]-p.global[k])));}
+   }
    let frame=Frame{time:now,transform,matrix:read_matrix(matrix_address(chr)),local:pose(local,bytes).to_vec(),model:pose(model,bytes).to_vec(),place:arrival::place(chr),equip:equipment::read(chr).unwrap_or_default()};
    let definition=crate::skeleton::read(chr,0);
    if definition.is_none()||r.skeleton.as_ref().is_some_and(|d|Some(d)!=definition.as_ref()){
@@ -498,7 +503,7 @@ pub fn tick(group:usize,now:u64){
    unsafe{std::ptr::copy_nonoverlapping(s.local_out.as_ptr(),local as *mut u8,s.local_out.len());std::ptr::copy_nonoverlapping(s.model_out.as_ptr(),model as *mut u8,s.model_out.len());}
    if let Some(root)=s.evaluated_root{write_transform(chr,&root);}set_flag(proxy_flag(chr),true);set_flag(gravity_flag(chr),true);
    // Recorded enemies/NPCs/bosses at the same replay time (Phase 2.2).
-   let (t,live)=(s.last_t,(here.space(),here.global));
+   let (t,live)=(s.last_t,(here.frame(),here.global));
    let anchors=s.loaded.as_ref().map(|l|l.anchors.clone());
    if let (Some(anchors),Some(a))=(anchors,s.loaded.as_mut().and_then(|l|l.actors.as_mut())){a.set_options(s.options);a.write(t,now,live,&anchors,interpolated_pose_enabled());}}
   DRAW_GROUP=>{
