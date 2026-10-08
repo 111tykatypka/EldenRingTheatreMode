@@ -110,10 +110,10 @@ struct State{
  // Reserved root-rebase value; remains zero until cross-origin conversion is verified.
  now_offset:[f32;3],
  replay_blocked:bool,
- mount_note:u8,saved_place:Option<Place>,inv_saved:Option<bool>,
+ mount_note:u8,saved_place:Option<Place>,inv_saved:Option<bool>,eval_place:Option<Place>,
 }
 #[derive(Clone,Copy,PartialEq,Debug)]enum Arrival{Ready,Warping{target:Place,since:u64,stable:u32},Placing{tries:u32,frames:u32,good:u32}}
-static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None});
+static STATE:Mutex<State>=Mutex::new(State{recording:None,record_paused:false,last_second:0,cur:None,loaded:None,loading:Loading::None,owning:false,restore_left:0,saved:None,gravity_saved:None,written:None,evaluated_root:None,pose_alpha:0.0,local_out:Vec::new(),model_out:Vec::new(),accuracy:Accuracy{frames:0,exact_bones:0,max_drawn_cm:0.0,sum_drawn_cm:0.0},expected:[0.0;3],settle:0,last_t:0,fallback_bones:0,host:(false,1.0,0,0),arrival:Arrival::Ready,warped:false,shift:[0.0;3],expected_root:None,equip_saved:None,equip_written:None,equip_lost:0,equip_frames:0,clock_saved:None,flags_saved:None,options:0,now_offset:[0.0;3],replay_blocked:false,mount_note:0,saved_place:None,inv_saved:None,eval_place:None});
 // Background load results land here and are adopted on the next tick.
 static LOADED:Mutex<Option<Result<Loaded,(String,String)>>>=Mutex::new(None);
 
@@ -251,7 +251,7 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
  let jump=(0..3).map(|k|(rb[2][k]-ra[2][k]).powi(2)).sum::<f32>().sqrt();
  let alpha=if span==0||span>250_000_000||jump>1.5{0.0}else{t.saturating_sub(a.time)as f64/span as f64};
  s.pose_alpha=alpha.clamp(0.0,1.0);s.evaluated_root=crate::replay_interpolation::evaluate(&ra,&rb,s.pose_alpha);
- s.expected_root=s.evaluated_root.map(|r|[r[2][0],r[2][1],r[2][2]]);
+ s.expected_root=s.evaluated_root.map(|r|[r[2][0],r[2][1],r[2][2]]);s.eval_place=Some(live_place);
  // A seek or the first frames after taking the body teleport it; the draw lags one frame there.
  if t<s.last_t||t-s.last_t>200_000_000{s.settle=s.settle.max(3);}s.last_t=t;
  let (shift,w)=(s.shift,s.pose_alpha as f32);s.expected=std::array::from_fn(|k|a.matrix[12+k]+(b.matrix[12+k]-a.matrix[12+k])*w+shift[k]);
@@ -259,6 +259,16 @@ fn select(s:&mut State,now:u64,live_place:Place)->bool{
 
 /// The saved return position in today's physics frame: the physics origin may have moved since it was read
 /// (the same anchor shift that playback corrects), and writing it unchanged put the body under the map.
+/// The physics origin can be re-based by the game between the write point (where the root was evaluated against
+/// the anchor of that moment) and a later write: the same recorded point then has a different physics value
+/// (32 m in x/z, 8 m in y per measured shift). Carries `evaluated_root` into today's frame; writing it stale put
+/// the body (and everything driven with it) a whole shift away, i.e. under the ground.
+fn live_shift(s:&State,chr:usize)->[f32;3]{
+ let Some(p)=s.eval_place else {return [0.0;3]};let now=arrival::place(chr);
+ if p.block==-1||now.block==-1{return [0.0;3];}
+ crate::replay_interpolation::rebase(p.frame(),p.global,now.frame(),now.global).unwrap_or([0.0;3])}
+fn root_now(s:&State,chr:usize)->Option<Transform>{
+ let mut r=s.evaluated_root?;let sh=live_shift(s,chr);for k in 0..3{r[2][k]+=sh[k];}Some(r)}
 fn saved_for_now(s:&State,chr:usize)->Option<Transform>{
  let mut t=s.saved?;
  if let Some(p)=s.saved_place{let now=arrival::place(chr);
@@ -349,7 +359,8 @@ fn advance_arrival(s:&mut State,chr:usize,now:u64){
    else if now.saturating_sub(since)>60_000_000_000{crate::log_game("ARRIVAL_ERROR: the map did not finish loading within 60 s");status("BONE REPLAY ERROR: the replay's location did not finish loading (see log)");reject(s,chr,"warp timed out");}
    else{s.arrival=Arrival::Warping{target,since,stable};}}
   Arrival::Placing{tries,frames,good}=>{
-   let (Some(expected),Some(now_root))=(s.expected_root,read_transform(chr)) else {s.arrival=Arrival::Ready;return;};
+   let (Some(mut expected),Some(now_root))=(s.expected_root,read_transform(chr)) else {s.arrival=Arrival::Ready;return;};
+   {let sh=live_shift(s,chr);for k in 0..3{expected[k]+=sh[k];}}
    let error=(0..3).map(|k|(now_root[2][k]-expected[k]).powi(2)).sum::<f32>().sqrt();
    let good=if error<0.5{good+1}else{0};let frames=frames+1;
    if good>=5{crate::log_game(&format!("ARRIVAL: body on the recorded spot (error {:.2} m, try {})",error,tries+1));s.arrival=Arrival::Ready;}
@@ -450,7 +461,7 @@ pub fn tick(group:usize,now:u64){
   if want_omission&&!omission::engaged(){if let Err(e)=omission::engage(){static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||{crate::log_game(&format!("OMISSION_UNAVAILABLE: {e}"));status("OMISSION: update-level override unavailable (see log); distant actors may be recorded at a reduced rate");});}}
   else if !want_omission&&omission::engaged(){omission::release();}
   // After physics: put the root back where this frame's replay time says (physics may have moved it).
-  if s.owning&&!matches!(s.arrival,Arrival::Warping{..}){if let (Some(chr),Some(root))=(chr,s.evaluated_root){write_transform(chr,&root);}}
+  if s.owning&&!matches!(s.arrival,Arrival::Warping{..}){if let Some(chr)=chr{if let Some(root)=root_now(s,chr){write_transform(chr,&root);}}}
   if s.owning{if let Some(chr)=chr{advance_arrival(s,chr,now);}}
   if s.owning&&!matches!(s.arrival,Arrival::Warping{..}){apply_world(s);}
   return;}
