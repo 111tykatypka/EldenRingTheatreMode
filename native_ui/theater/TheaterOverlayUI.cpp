@@ -231,6 +231,7 @@ void Overlay::LoadSettings()
         else if (key == "sound_enabled") Sound::SetEnabled(value != 0);
         else if (key == "sound_volume") Sound::SetVolume(std::clamp(value, 0.0f, 1.0f));
         else if (key == "replay_options") gReplayOptions = (std::uint32_t)value;
+        else if (key.rfind("gfx",0)==0&&key.size()>3&&std::isdigit((unsigned char)key[3])){const int slot=std::atoi(key.c_str()+3);if(slot>=0&&slot<16)gGfx[slot]=value<=-2147483000.f?kGfxDefault:(int)value;}
     }
     // Persist only values; enabled defaults off and survives renderer resize.
     color_grading::configure(grade);
@@ -284,6 +285,7 @@ void Overlay::SaveSettings() const
         << "sound_enabled " << (Sound::Enabled() ? 1 : 0) << "\n"
         << "sound_volume " << Sound::Volume() << "\n"
         << "replay_options " << gReplayOptions.load() << "\n";
+    for(int i=0;i<16;++i)out << "gfx" << i << " " << gGfx[i].load() << "\n";
 }
 
 void Overlay::Emit(std::uint32_t command, std::uint64_t value, const char* text)
@@ -1375,6 +1377,38 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         if(checkbox("Experimental dynamic shadows",&shadows))native_lights::shadows(shadows);
         ImGui::EndDisabled();
         ImGui::TextWrapped("Custom lights only. Shadows depend on engine quality and shadow resources; may reduce FPS.");
+        if(ImGui::CollapsingHeader("Shadow and volumetric quality (all lights)")){
+            ImGui::TextWrapped("Changes the game's own graphics quality tables in memory (shadow map size, local light shadows, fog and volumetric light). The game normally applies them when a quality level is applied, so change the quality in the game's graphics menu or load an area to see them. Everything is put back when you switch this off or quit. Higher values cost FPS.");
+            bool master=gGfx[0].load()!=0;if(checkbox("Override quality tables",&master)){gGfx[0]=master?1:0;SaveSettings();}
+            ImGui::BeginDisabled(!master);
+            auto dflt=[&](int slot){return gGfx[slot].load()==kGfxDefault;};
+            // Tri-state for on/off values: engine default / off / on.
+            auto triState=[&](const char* label,int slot){
+                int sel=dflt(slot)?0:(gGfx[slot].load()?2:1);const char* names="Engine default\0Off\0On\0";
+                if(combo(label,&sel,names)){gGfx[slot]=sel==0?kGfxDefault:(sel==2?1:0);SaveSettings();}};
+            // Number with an "override" checkbox.
+            auto numeric=[&](const char* label,int slot,int lo,int hi,int fallback,const char* fmt){
+                ImGui::PushID(slot);bool on=!dflt(slot);if(ImGui::Checkbox("##set",&on)){gGfx[slot]=on?fallback:kGfxDefault;SaveSettings();}
+                ImGui::SameLine();ImGui::BeginDisabled(!on);int value=dflt(slot)?fallback:gGfx[slot].load();ImGui::SetNextItemWidth(-FLT_MIN);
+                if(ImGui::SliderInt(label,&value,lo,hi,fmt)){gGfx[slot]=value;SaveSettings();}ImGui::EndDisabled();ImGui::PopID();};
+            ImGui::SeparatorText("Shadows");
+            {int sel=0;const int sizes[]={0,512,1024,2048,4096,8192};for(int i=1;i<6;++i)if(gGfx[1].load()==sizes[i])sel=i;
+             if(combo("Shadow map size",&sel,"Engine default\0" "512\0" "1024\0" "2048\0" "4096\0" "8192\0")){gGfx[1]=sel==0?kGfxDefault:sizes[sel];SaveSettings();}}
+            numeric("Shadow filter level",2,0,8,3,"%d");
+            numeric("Shadow blur bias",3,-8,16,0,"%d");
+            triState("Local light shadows",4);
+            numeric("Local light shadow level cap",5,0,5,5,"%d");
+            numeric("Local light distance (percent)",6,25,800,100,"%d%%");
+            ImGui::SeparatorText("Fog and volumetric light");
+            triState("Fog",7);triState("Fog shadows",8);
+            numeric("Fog shadow sample bias",9,-16,16,0,"%d");
+            numeric("Fog light distance (percent)",10,25,800,100,"%d%%");
+            triState("Fog volume",11);triState("Fog volume shadows",12);triState("Force fog volume shadowing",13);
+            numeric("Fog volume resolution level",14,0,8,3,"%d");
+            numeric("Fog volume ray-march samples offset",15,-8,8,0,"%d");
+            if(ImGui::Button("Reset all to engine defaults",ImVec2(-FLT_MIN,0))){for(int i=1;i<16;++i)gGfx[i]=kGfxDefault;SaveSettings();}
+            ImGui::EndDisabled();
+        }
         editor=light_editor::view();
         const auto selected=std::find_if(editor.lights.begin(),editor.lights.end(),[&](const auto& l){return l.id==editor.selected;});
         if(selected!=editor.lights.end()){
@@ -2804,3 +2838,5 @@ void Overlay::DrawHiddenHint(const OverlayFrame& f)
     dl->AddText(font, size, ImVec2(p0.x + Px(14, s), p0.y + (p1.y - p0.y - tsz.y) * 0.5f), Color::TextPrimary.Fade(alpha).U32(), text);
 }
 }
+
+extern "C" void tm_gfx_quality(int*out){if(!out)return;for(int i=0;i<16;++i)out[i]=TheaterUI::gGfx[i].load();}

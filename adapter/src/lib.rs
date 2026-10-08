@@ -33,6 +33,7 @@ mod actors;
 mod omission;
 mod weapon_loc;
 mod camera_fade;
+mod graphics_quality;
 mod effects;
 mod item_probe;
 mod actor_lifetime;

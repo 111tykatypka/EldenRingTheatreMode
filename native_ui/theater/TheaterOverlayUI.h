@@ -26,6 +26,10 @@ namespace TheaterUI
     // Replay options set in the Settings panel and read by the game side (tm_overlay_bone_link).
     // Bit 0: restore world event flags (doors, fog walls, bosses) while a replay plays.
     inline std::atomic<std::uint32_t> gReplayOptions{0};
+    // Global shadow / volumetric quality overrides (see adapter graphics_quality.rs). Slot 0 = master switch; every other slot is
+    // kGfxDefault ("leave the engine value alone") or the chosen value. Order matches the adapter.
+    inline constexpr int kGfxDefault=(-2147483647-1);
+    inline std::array<std::atomic<int>,16> gGfx{0,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault,kGfxDefault};
     using EmitFn = void (*)(void* user, std::uint32_t command, std::uint64_t value, const char* text);
     // Not a pipe command: asks the backend to toggle F4 visibility (rail and toolbar buttons).
     inline constexpr std::uint32_t kCommandToggleUi = 0xFFFFFFFFu;

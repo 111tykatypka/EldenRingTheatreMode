@@ -75,7 +75,7 @@ const RECORD_RECORDING:u32=1;
 const RECORD_PAUSED:u32=2;
 
 #[repr(C)]struct Link{linked:u32,recording:u32,loaded:u32,playing:u32,apply_requested:u32,options:u32,timescale:f64,play_source_ns:u64,received_ns:u64,recording_path:[c_char;260],loaded_path:[c_char;260]}
-unsafe extern "C"{fn tm_render_event(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
+unsafe extern "C"{fn tm_gfx_quality(out:*mut i32);fn tm_render_event(text:*const c_char);fn tm_render_lock_game_input(locked:i32);fn tm_overlay_bone_link(out:*mut Link);}
 
 type Transform=[[f32;4];3]; // orientation, interpolated_orientation, position
 pub fn world_timing_tick(now:u64){
@@ -609,6 +609,7 @@ pub fn tick(group:usize,now:u64){
   // that are already in the world keep the values they were created with (the owner still saw fading after a late
   // override); areas loaded afterwards use the changed tables. Option bit 64 = off.
   camera_fade::tick(l.options&64==0&&l.linked!=0,now);
+  {let mut g=[i32::MIN;16];g[0]=0;unsafe{tm_gfx_quality(g.as_mut_ptr())};crate::graphics_quality::tick(&g,now);}
   // Update-LOD override (STEP A): on while recording, or while a replay with recorded actors owns the body.
   let want_omission=l.options&4==0&&(s.recording.is_some()||(s.owning&&s.loaded.as_ref().is_some_and(|l|l.actors.is_some())));
   if want_omission&&!omission::engaged(){if let Err(e)=omission::engage(){static WARN:std::sync::Once=std::sync::Once::new();WARN.call_once(||{crate::log_game(&format!("OMISSION_UNAVAILABLE: {e}"));status("OMISSION: update-level override unavailable (see log); distant actors may be recorded at a reduced rate");});}}
