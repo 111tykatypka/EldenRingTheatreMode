@@ -201,6 +201,7 @@ bool update(void* output,void* source){
 View view(bool include_keys){std::lock_guard lock(mutex);auto copy=state;copy.track_current=keys_replay_path==replay_path&&!track.keys().empty();copy.key_count=track.keys().size();if(include_keys){copy.keys=track.keys();copy.cuts=cut_track.cuts();}if(faulted){copy.enabled=false;copy.writing=false;copy.status="Camera backend faulted; overrides disabled until process restart";}return copy;}
 std::vector<std::string> bone_names(){std::lock_guard lock(mutex);return bone_name_list;}
 void set_bone_dots(bool wanted){bone_dots_wanted=wanted;}
+std::optional<std::uint64_t> replay_time(){std::lock_guard lock(mutex);if(!linked||!duration_ns)return std::nullopt;return time_at(clock_now());}
 std::vector<std::array<float,3>> bone_dots(){std::lock_guard lock(mutex);if(clock_now()-bone_dot_time>500000000ULL)return {};return bone_dot_list;}
 std::optional<cinematic::State> decode_candidate(const theater_camera::Slot&slot){return decode(slot);}
 void encode_pose(const cinematic::State&pose,float*matrix){encode(pose,matrix);}

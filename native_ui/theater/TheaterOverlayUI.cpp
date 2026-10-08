@@ -440,6 +440,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         DrawDollyViewport(f);
         DrawCameraModes(f);
         DrawCameraInfo(f);
+        if(auto t=camera_runtime::replay_time())light_editor::evaluate_animation(*t,lightGizmoDragging_?light_editor::view().selected:0);
         if(f.focused&&!io.WantTextInput&&bindingWaiting_<0&&!ImGui::IsAnyItemActive()&&ImGui::IsKeyPressed(ImGuiKey_Delete,false)){
             if(viewportLightSelected_){light_editor::remove(light_editor::view().selected);lightGizmoDragging_=false;}
             else DeleteSelectedDollyKeys();
@@ -452,7 +453,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         ImGui::PopFont();
         DrawCursor();
     }
-    else {gameViewInitialized_=false;DrawHiddenHint(f);PushFont(Font::Body);DrawDollyViewport(f);DrawCameraModes(f);DrawCameraInfo(f);ImGui::PopFont();}
+    else {gameViewInitialized_=false;DrawHiddenHint(f);PushFont(Font::Body);DrawDollyViewport(f);DrawCameraModes(f);DrawCameraInfo(f);if(auto t=camera_runtime::replay_time())light_editor::evaluate_animation(*t,lightGizmoDragging_?light_editor::view().selected:0);ImGui::PopFont();}
     if(cameraSettingsDirty_&&!ImGui::IsMouseDown(ImGuiMouseButton_Left)&&f.now-cameraSettingsChangedAt_>.4){SaveSettings();cameraSettingsDirty_=false;}
     if(!gizmoDragging_&&!curveDragging_)camera_runtime::end_edit();
     if (ui_.visibility != UiVisibility::HiddenClean) DrawRecordingPill(f);
@@ -1296,12 +1297,13 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         const auto enabledCount=std::count_if(editor.lights.begin(),editor.lights.end(),[](const auto& l){return l.enabled;});
         ImGui::TextDisabled("%zu lights | %zu enabled | %u submitted",editor.lights.size(),size_t(enabledCount),native.rendered);
         const float listHeight=ImGui::GetTextLineHeightWithSpacing()*7;
-        if(ImGui::BeginTable("##scene_lights",4,ImGuiTableFlags_ScrollY|ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerH|ImGuiTableFlags_SizingStretchProp,ImVec2(0,listHeight))){
+        if(ImGui::BeginTable("##scene_lights",5,ImGuiTableFlags_ScrollY|ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerH|ImGuiTableFlags_SizingStretchProp,ImVec2(0,listHeight))){
             ImGui::TableSetupScrollFreeze(0,1);
             ImGui::TableSetupColumn("On",ImGuiTableColumnFlags_WidthFixed,Px(28,s));
             ImGui::TableSetupColumn("Light",ImGuiTableColumnFlags_WidthStretch,2);
             ImGui::TableSetupColumn("Type",ImGuiTableColumnFlags_WidthStretch,1);
             ImGui::TableSetupColumn("State",ImGuiTableColumnFlags_WidthStretch,1);
+            ImGui::TableSetupColumn("Anim",ImGuiTableColumnFlags_WidthFixed,Px(34,s));
             ImGui::TableHeadersRow();
             for(const auto& l:editor.lights){
                 if(enabledOnly&&!l.enabled)continue;
@@ -1313,11 +1315,44 @@ void Overlay::DrawPanel(const OverlayFrame& f)
                 ImGui::TableSetColumnIndex(2);ImGui::TextUnformatted(l.type==light_editor::Type::Point?"Point":"Spot");
                 const bool submitted=std::find(native.submitted_ids.begin(),native.submitted_ids.end(),l.id)!=native.submitted_ids.end();
                 ImGui::TableSetColumnIndex(3);ImGui::TextUnformatted(!l.enabled?"Off":!native.enabled?"Defined":submitted?"Submitted":"Pending");
+                ImGui::TableSetColumnIndex(4);
+                {   // Clock toggle: enables keyframing of this light's position and rotation.
+                    const bool on=light_editor::animated(l.id);const ImVec2 at=ImGui::GetCursorScreenPos();const float r=Px(8,s);
+                    if(ImGui::InvisibleButton("##clock",ImVec2(r*2+Px(4,s),r*2+Px(2,s)))){light_editor::set_animated(l.id,!on);light_editor::select(l.id);}
+                    auto*dl=ImGui::GetWindowDrawList();const ImVec2 c(at.x+r+Px(2,s),at.y+r+Px(1,s));const ImU32 col=on?Color::AccentAmber.U32():Color::TextSecondary.U32();
+                    dl->AddCircle(c,r,col,20,Px(1.6f,s));dl->AddLine(c,ImVec2(c.x,c.y-r*.65f),col,Px(1.6f,s));dl->AddLine(c,ImVec2(c.x+r*.5f,c.y+r*.2f),col,Px(1.6f,s));
+                    if(ImGui::IsItemHovered())ImGui::SetTooltip(on?"Animation on: click to turn off":"Click to animate this light with keyframes");
+                }
                 ImGui::PopID();
             }
             ImGui::EndTable();
         }
         if(editor.lights.empty())ImGui::TextDisabled("No custom lights. Create one at the camera.");
+        {   // Keyframes of the selected light (position and rotation against ReplayTime).
+            const auto sel=editor.selected;const bool on=sel&&light_editor::animated(sel);
+            ImGui::Separator();
+            ImGui::TextUnformatted("Light animation");
+            if(!sel)ImGui::TextDisabled("Select a light, then click its clock to animate it.");
+            else{
+                if(!on)ImGui::TextDisabled("Click the clock in the list to turn animation on for the selected light.");
+                const auto now=camera_runtime::replay_time();
+                ImGui::BeginDisabled(!on||!now);
+                char label[96];snprintf(label,sizeof(label),"Add key at %.2f s",now?double(*now)/1e9:0.0);
+                if(ImGui::Button(label,ImVec2(-FLT_MIN,0))&&now)light_editor::add_light_key(sel,*now);
+                ImGui::EndDisabled();
+                if(!now)ImGui::TextDisabled("Load a replay so the lights have a timeline to follow.");
+                const auto keys=light_editor::light_keys(sel);
+                ImGui::TextDisabled("%zu keys. Move the light with its handle at a chosen time, then add a key.",keys.size());
+                for(const auto&k:keys){
+                    ImGui::PushID(int(k.time_ns/1000000));
+                    ImGui::Text("%.2f s  (%.1f, %.1f, %.1f)",double(k.time_ns)/1e9,k.transform.position[0],k.transform.position[1],k.transform.position[2]);
+                    ImGui::SameLine();if(ImGui::SmallButton("Delete"))light_editor::remove_light_key(sel,k.time_ns);
+                    ImGui::PopID();
+                }
+                if(!keys.empty()&&ImGui::Button("Clear keys",ImVec2(-FLT_MIN,0)))light_editor::clear_light_keys(sel);
+            }
+            ImGui::Separator();
+        }
         ImGui::BeginDisabled(!editor.selected);
         if(ImGui::Button("Duplicate selected",ImVec2(-FLT_MIN,0))&&light_editor::duplicate(editor.selected)){viewportLightSelected_=true;gizmoDragging_=lightGizmoDragging_=false;}
         ImGui::EndDisabled();

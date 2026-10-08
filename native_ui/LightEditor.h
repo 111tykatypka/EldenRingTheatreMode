@@ -16,6 +16,16 @@ struct Light {
  int shadow_bias=0;
  float specular_rgb[3]{1,1,1};
 };
+// Keyframe animation of a light's position and rotation against replay time (like the dolly camera). Turned on per light with the clock
+// toggle; while on, the light follows its keys whenever the timeline is loaded.
+struct LightKey {std::uint64_t time_ns=0;cinematic::State transform;};
+bool animated(std::uint64_t id);
+void set_animated(std::uint64_t id,bool on);
+std::vector<LightKey> light_keys(std::uint64_t id);
+bool add_light_key(std::uint64_t id,std::uint64_t time_ns); // stores the light's current transform at that time (replaces a key at the same time)
+void remove_light_key(std::uint64_t id,std::uint64_t time_ns);
+void clear_light_keys(std::uint64_t id);
+void evaluate_animation(std::uint64_t time_ns,std::uint64_t skip_id); // skip_id: the light being dragged by hand
 struct View {std::vector<Light> lights;std::uint64_t selected=0;std::string status;};
 View view();
 bool snapshot(View& out); // Nonblocking game-task copy; no native pointers.
