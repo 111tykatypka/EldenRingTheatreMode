@@ -8,4 +8,4 @@
 //! so this module is intentionally inert and the camera editor's "prevent asset fade" switch no longer changes the tables
 //! (the always-on switch is the "No fade-out near the camera" checkbox, option bit 64). The near-plane part of the close-up
 //! controls lives in the native camera runtime and is unaffected.
-pub fn tick(_allowed:bool){}
+pub fn tick(_allowed:bool,_now:u64){}
