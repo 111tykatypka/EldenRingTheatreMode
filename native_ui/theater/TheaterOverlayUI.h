@@ -70,6 +70,8 @@ namespace TheaterUI
         void DrawRail(const OverlayFrame& f);
         void DrawPanel(const OverlayFrame& f);
         void DrawCameraModes(const OverlayFrame& f);
+        void DrawCameraInfo(const OverlayFrame& f);
+        bool showCameraInfo_=true;
         void SelectDollyKey(std::uint64_t id, bool toggle=false, bool range=false);
         void DeleteSelectedDollyKeys();
         void PlayDollyPath(const OverlayFrame& f);

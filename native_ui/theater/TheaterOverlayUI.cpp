@@ -181,7 +181,8 @@ void Overlay::LoadSettings()
     while (in >> key >> value)
     {
         if (!std::isfinite(value)) continue;
-        if (key == "bone_dots") showBoneDots_=value!=0;
+        if (key == "camera_info") showCameraInfo_=value!=0;
+        else if (key == "bone_dots") showBoneDots_=value!=0;
         else if (key == "bone_dots_major") boneDotsMajorOnly_=value!=0;
         else if (key == "camera_modes_x") cameraModesX_=value;
         else if (key == "camera_modes_y") cameraModesY_=value;
@@ -259,6 +260,7 @@ void Overlay::SaveSettings() const
     out << "high_quality_lods " << effects.high_quality_lods << "\n";
     out << "light_markers " << showLightMarkers_ << "\n";
     out << "particle_markers " << showParticleMarkers_ << "\n";
+    out << "camera_info " << showCameraInfo_ << "\n";
     out << "bone_dots " << showBoneDots_ << "\nbone_dots_major " << boneDotsMajorOnly_ << "\n";
     out << "camera_modes_x " << cameraModesX_ << "\ncamera_modes_y " << cameraModesY_ << "\ncamera_modes_scale " << cameraModesScale_ << "\n";
     out << "dolly_markers " << showDollyMarkers_ << "\n"
@@ -437,6 +439,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         DrawGameViewport(f);
         DrawDollyViewport(f);
         DrawCameraModes(f);
+        DrawCameraInfo(f);
         if(f.focused&&!io.WantTextInput&&bindingWaiting_<0&&!ImGui::IsAnyItemActive()&&ImGui::IsKeyPressed(ImGuiKey_Delete,false)){
             if(viewportLightSelected_){light_editor::remove(light_editor::view().selected);lightGizmoDragging_=false;}
             else DeleteSelectedDollyKeys();
@@ -449,7 +452,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
         ImGui::PopFont();
         DrawCursor();
     }
-    else {gameViewInitialized_=false;DrawHiddenHint(f);PushFont(Font::Body);DrawDollyViewport(f);DrawCameraModes(f);ImGui::PopFont();}
+    else {gameViewInitialized_=false;DrawHiddenHint(f);PushFont(Font::Body);DrawDollyViewport(f);DrawCameraModes(f);DrawCameraInfo(f);ImGui::PopFont();}
     if(cameraSettingsDirty_&&!ImGui::IsMouseDown(ImGuiMouseButton_Left)&&f.now-cameraSettingsChangedAt_>.4){SaveSettings();cameraSettingsDirty_=false;}
     if(!gizmoDragging_&&!curveDragging_)camera_runtime::end_edit();
     if (ui_.visibility != UiVisibility::HiddenClean) DrawRecordingPill(f);
@@ -490,6 +493,40 @@ void Overlay::PlayDollyPath(const OverlayFrame& f)
     camera_runtime::preview(true);
     // Start inside the authored range, rather than at a clamped endpoint.
     Emit(theater_ui::seek,camera.keys.front().time_ns);Emit(theater_ui::play);
+}
+
+// Small camera readout in the lower left corner of the picture: mode, FOV, roll, speed and the keys that matter right now.
+void Overlay::DrawCameraInfo(const OverlayFrame& f)
+{
+    if(!showCameraInfo_||ui_.visibility==UiVisibility::HiddenClean)return;
+    const auto camera=camera_runtime::view(false);
+    if(camera.mode==0||!camera.enabled||!camera.observed)return;
+    const bool shown=ui_.visibility==UiVisibility::Shown;
+    const auto pictureMin=shown?ui_.rects.gameMin:ImVec2(0,0),pictureMax=shown?ui_.rects.gameMax:ImGui::GetIO().DisplaySize;
+    if(pictureMax.x<=pictureMin.x||pictureMax.y<=pictureMin.y)return;
+    const float s=std::min(ui_.rects.uiScale,(pictureMax.x-pictureMin.x)/420.f);
+    static const char* modeNames[]={"Default","Free","Dolly","Bone"};
+    const double roll=cinematic::split_roll(camera.pose.orientation).second;
+    using theater_hotkeys::Action;
+    auto K=[&](Action a){return KeyName(a);};
+    char line1[160],line2[256],line3[256];
+    snprintf(line1,sizeof(line1),"%s camera   FOV %.1f   Roll %.1f   Speed %.2g",modeNames[std::min<unsigned>(camera.mode,3)],camera.pose.fov_degrees,roll,camera.movement_speed);
+    snprintf(line2,sizeof(line2),"Move %s%s%s%s  Up/Down %s/%s   Hold %s: x5 faster   Hold %s: slow   %s/%s: speed",K(Action::Forward).c_str(),K(Action::Left).c_str(),K(Action::Backward).c_str(),K(Action::Right).c_str(),K(Action::Up).c_str(),K(Action::Down).c_str(),K(Action::Fast).c_str(),K(Action::Slow).c_str(),K(Action::SpeedUp).c_str(),K(Action::SpeedDown).c_str());
+    snprintf(line3,sizeof(line3),"Look: mouse or %s%s%s%s   Roll %s/%s (reset %s)   FOV %s/%s or wheel (reset %s)",K(Action::PitchUp).c_str(),K(Action::YawLeft).c_str(),K(Action::PitchDown).c_str(),K(Action::YawRight).c_str(),K(Action::RollLeft).c_str(),K(Action::RollRight).c_str(),K(Action::ResetRoll).c_str(),K(Action::FovUp).c_str(),K(Action::FovDown).c_str(),K(Action::ResetFov).c_str());
+    ImGui::SetNextWindowPos(ImVec2(pictureMin.x+Px(10,s),pictureMax.y-Px(10,s)),ImGuiCond_Always,ImVec2(0,1));
+    ImGui::SetNextWindowBgAlpha(.45f);
+    const ImGuiWindowFlags flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoFocusOnAppearing|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoMove;
+    if(ImGui::Begin("##camera-info",nullptr,flags)){
+        ImGui::SetWindowFontScale(.85f*std::max(.6f,s/std::max(.01f,ui_.rects.uiScale)));
+        ImGui::TextUnformatted(line1);
+        ImGui::PushStyleColor(ImGuiCol_Text,Color::TextSecondary.Vec4());
+        ImGui::TextUnformatted(line2);ImGui::TextUnformatted(line3);
+        if(camera.mode==2)ImGui::Text("Dolly: %s add key, %s play path",K(Action::AddDollyKey).c_str(),K(Action::PlayDollyPath).c_str());
+        if(camera.mode==3)ImGui::TextUnformatted("Bone camera: move and turn relative to the chosen bone");
+        ImGui::TextUnformatted(("Cycle camera: "+K(Action::CycleCamera)).c_str());
+        ImGui::PopStyleColor();
+    }
+    ImGui::End();
 }
 
 // Compact mode selector remains a read-only badge while the main overlay is hidden.
@@ -1684,6 +1721,7 @@ void Overlay::DrawPanel(const OverlayFrame& f)
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
+            if(ImGui::Checkbox("Camera info text in the viewport (lower left)",&showCameraInfo_))SaveSettings();
             // No fade-out near the camera (adapter camera_fade.rs): ON by default, bit 64 = off.
             bool noNearFade = (gReplayOptions.load() & 64) == 0;
             if (ImGui::Checkbox(T(Str::NoNearFade), &noNearFade)) { gReplayOptions = noNearFade ? (gReplayOptions & ~64u) : (gReplayOptions | 64u); SaveSettings(); }
