@@ -27,6 +27,7 @@ enum class Action : std::uint32_t {
     ToggleDollyControls,
     ToggleAllHud,
     PlayDollyPath,
+    ToggleExport,        // F7: start / stop the video or image-sequence export
     Count
 };
 
@@ -74,6 +75,7 @@ inline constexpr Binding kDefaults[] = {
     { Action::ToggleDollyControls,"toggle_dolly_controls","Show / hide Dolly viewport controls",'P',Scope::GameWindow },
     { Action::ToggleAllHud,"toggle_all_hud","Clean view: toggle game HUD and Theater UI",'O',Scope::GameWindow },
     { Action::PlayDollyPath,"play_dolly_path","Play Dolly path from first key",'J',Scope::GameWindow },
+    { Action::ToggleExport,"toggle_export","Start / stop video export",0x76 /*VK_F7*/,Scope::GameWindow },
 };
 static_assert(sizeof(kDefaults) / sizeof(kDefaults[0]) == static_cast<std::size_t>(Action::Count), "one row per action");
 
@@ -88,7 +90,7 @@ inline bool DecodeBindings(std::istream&in,std::array<std::uint32_t,static_cast<
  while(std::getline(in,line)){auto equal=line.find('=');if(equal==std::string::npos)return false;auto name=line.substr(0,equal),num=line.substr(equal+1);unsigned v=0;auto parsed=std::from_chars(num.data(),num.data()+num.size(),v);if(parsed.ec!=std::errc{}||parsed.ptr!=num.data()+num.size()||!v||v>255)return false;
   bool known=false;for(auto&b:kDefaults)if(name==b.id){auto i=static_cast<std::size_t>(b.action);if(seen[i])return false;seen[i]=true;keys[i]=v;known=true;}if(!known)return false;}
  if(!in.eof())return false;
- for(auto action:{Action::ToggleDollyControls,Action::ToggleAllHud,Action::PlayDollyPath}){
+ for(auto action:{Action::ToggleDollyControls,Action::ToggleAllHud,Action::PlayDollyPath,Action::ToggleExport}){
  const auto added=static_cast<std::size_t>(action);
  if(!seen[added]){bool conflict=false;for(std::size_t i=0;i<keys.size();++i)if(i!=added&&!retired(kDefaults[i].action)&&keys[i]==keys[added])conflict=true;
   if(conflict){for(unsigned candidate=0x7B;candidate<=0x87;++candidate){bool used=false;for(std::size_t i=0;i<keys.size();++i)if(i!=added&&!retired(kDefaults[i].action)&&keys[i]==candidate)used=true;if(!used){keys[added]=candidate;break;}}}}

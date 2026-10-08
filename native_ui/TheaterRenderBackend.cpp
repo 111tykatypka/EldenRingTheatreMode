@@ -3,6 +3,7 @@
 #include "NativeLightBackend.h"
 #include "NativeParticleBackend.h"
 #include "ColorGrading.h"
+#include "VideoExport.h"
 #include <windows.h>
 #include "EldenRingTimingAdapter.h"
 #include "EldenRingWeatherAdapter.h"
@@ -65,6 +66,30 @@ public:
  BOOL (WINAPI* set_cursor_pos)(int,int){};BOOL (WINAPI* clip_cursor)(const RECT*){};Present present{};Resize resize{};Create create{};CreateHwnd create_hwnd{};
  std::vector<void*> targets;ComPtr<IDXGISwapChain3> chain;ComPtr<ID3D12CommandQueue> queue;ComPtr<ID3D12Device> device;
  ComPtr<ID3D12DescriptorHeap> rtvs,srvs;ComPtr<ID3D12GraphicsCommandList> list;ComPtr<ID3D12Fence> fence;
+ // Video export: copies of the clean game picture (before any Theater UI), read back a few frames later.
+ struct Readback{ComPtr<ID3D12Resource> buffer;UINT64 fence=0,size=0;UINT pitch=0;bool busy=false,recorded=false;double time=0;};
+ Readback readbacks[4];UINT rb_width=0,rb_height=0;DXGI_FORMAT rb_format=DXGI_FORMAT_UNKNOWN;
+ static bool export_format(DXGI_FORMAT format,bool&bgra){
+  switch(format){case DXGI_FORMAT_R8G8B8A8_UNORM:case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:bgra=false;return true;case DXGI_FORMAT_B8G8R8A8_UNORM:case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:bgra=true;return true;default:return false;}}
+ static double qpc_seconds(){LARGE_INTEGER f,c;QueryPerformanceFrequency(&f);QueryPerformanceCounter(&c);return double(c.QuadPart)/double(f.QuadPart);}
+ // Hands finished readbacks to the exporter. Never waits for the GPU.
+ void harvest_exports(){
+  for(auto&rb:readbacks){if(!rb.busy||!rb.buffer||fence->GetCompletedValue()<rb.fence)continue;
+   void*mapped=nullptr;D3D12_RANGE range{0,static_cast<SIZE_T>(rb.size)};
+   if(SUCCEEDED(rb.buffer->Map(0,&range,&mapped))&&mapped){video_export::submit(static_cast<const std::uint8_t*>(mapped),rb.pitch,rb.time);D3D12_RANGE none{0,0};rb.buffer->Unmap(0,&none);}
+   rb.busy=false;}}
+ void drop_readbacks(){for(auto&rb:readbacks){rb.buffer.Reset();rb.busy=false;rb.recorded=false;}rb_width=rb_height=0;rb_format=DXGI_FORMAT_UNKNOWN;}
+ // A free readback buffer sized for the current picture, or null (the exporter then repeats the previous frame).
+ Readback*prepare_readback(const D3D12_RESOURCE_DESC&desc){
+  if(desc.Width!=rb_width||desc.Height!=rb_height||desc.Format!=rb_format){
+   for(auto&rb:readbacks)if(rb.busy&&fence->GetCompletedValue()<rb.fence){video_export::fail("the game picture changed size or format during the export");return nullptr;}
+   drop_readbacks();
+   D3D12_PLACED_SUBRESOURCE_FOOTPRINT foot{};UINT rows=0;UINT64 rowSize=0,total=0;device->GetCopyableFootprints(&desc,0,1,0,&foot,&rows,&rowSize,&total);
+   D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_READBACK;D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=total;bd.Height=1;bd.DepthOrArraySize=1;bd.MipLevels=1;bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+   for(auto&rb:readbacks){if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&rb.buffer)))){drop_readbacks();video_export::fail("could not allocate the export readback buffers");return nullptr;}rb.size=total;rb.pitch=foot.Footprint.RowPitch;}
+   rb_width=static_cast<UINT>(desc.Width);rb_height=desc.Height;rb_format=desc.Format;}
+  for(auto&rb:readbacks)if(!rb.busy&&!rb.recorded)return&rb;
+  return nullptr;}
  std::vector<Frame> frames;UINT64 fence_value{};HANDLE fence_event{};HWND hwnd{};WNDPROC previous_proc{};
  ImGuiContext* context{};bool win32_ready{},dx12_ready{},failed{};std::vector<bool> descriptors;
  std::deque<Input> inputs;std::deque<theater_ui::Request> commands;theater_ui::Snapshot snapshot;
@@ -157,7 +182,7 @@ public:
  bool wait_gpu(){if(!fence||!queue)return true;if(FAILED(queue->Signal(fence.Get(),++fence_value)))return false;
   if(fence->GetCompletedValue()>=fence_value)return true;
   return SUCCEEDED(fence->SetEventOnCompletion(fence_value,fence_event))&&WaitForSingleObject(fence_event,2000)==WAIT_OBJECT_0;}
- void release_resources(){ui_ready=false;if(context){ImGui::SetCurrentContext(context);if(dx12_ready)ImGui_ImplDX12_Shutdown();if(win32_ready)ImGui_ImplWin32_Shutdown();ImGui::DestroyContext(context);}
+ void release_resources(){drop_readbacks();ui_ready=false;if(context){ImGui::SetCurrentContext(context);if(dx12_ready)ImGui_ImplDX12_Shutdown();if(win32_ready)ImGui_ImplWin32_Shutdown();ImGui::DestroyContext(context);}
   grading_output_checked=0;grading_pass.reset();color_grading::report(false,"Renderer resources released");
   context=nullptr;diagnostic_frames=0;dx12_ready=win32_ready=false;frames.clear();list.Reset();rtvs.Reset();srvs.Reset();fence.Reset();device.Reset();descriptors.clear();if(fence_event){CloseHandle(fence_event);fence_event=nullptr;}}
  bool initialize_resources(){DXGI_SWAP_CHAIN_DESC desc{};if(!chain||!queue||FAILED(chain->GetDesc(&desc))||FAILED(chain->GetDevice(IID_PPV_ARGS(&device)))||!desc.BufferCount)return false;
@@ -172,7 +197,7 @@ public:
   fence_value=0;fence_event=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!fence_event)return false;
   context=ImGui::CreateContext();ImGui::SetCurrentContext(context);auto&io=ImGui::GetIO();io.IniFilename=nullptr;
   // The v3 theme scales from the swap-chain size (TheaterLayout.h), not from window DPI.
-  overlay.Init(io);
+  overlay.Init(io);video_export::load_settings();
   win32_ready=ImGui_ImplWin32_Init(hwnd);if(!win32_ready)return false;
   ImGui_ImplDX12_InitInfo info;info.Device=device.Get();info.CommandQueue=queue.Get();info.NumFramesInFlight=static_cast<int>(desc.BufferCount);info.RTVFormat=desc.BufferDesc.Format;info.SrvDescriptorHeap=srvs.Get();info.UserData=this;
   info.SrvDescriptorAllocFn=[](ImGui_ImplDX12_InitInfo*i,D3D12_CPU_DESCRIPTOR_HANDLE*c,D3D12_GPU_DESCRIPTOR_HANDLE*g){auto*b=static_cast<TheaterRenderBackend*>(i->UserData);auto stride=b->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);for(UINT n=0;n<b->descriptors.size();++n)if(!b->descriptors[n]){b->descriptors[n]=true;c->ptr=b->srvs->GetCPUDescriptorHandleForHeapStart().ptr+n*stride;g->ptr=b->srvs->GetGPUDescriptorHandleForHeapStart().ptr+n*stride;return;}*c={};*g={};b->failed=true;};
@@ -211,8 +236,9 @@ public:
   // Draw only when something is visible: the UI, the REC pill (not in Shift+F4 clean mode), or the F4 hint.
   const auto vis=TheaterUI::UiVisibility(visibility.load());
   const bool hint=vis==TheaterUI::UiVisibility::Hidden; // permanent "F4 Show UI" hint
-  const bool needed=vis==TheaterUI::UiVisibility::Shown||hint||(vis!=TheaterUI::UiVisibility::HiddenClean&&recording_now());
-  if(!needed&&!color_grading::settings().enabled&&!context)return;
+  const bool needed=vis==TheaterUI::UiVisibility::Shown||hint||(vis!=TheaterUI::UiVisibility::HiddenClean&&recording_now())||video_export::active()||video_export::banner_visible();
+  const bool exporting=video_export::active()||video_export::toggle_pending();
+  if(!needed&&!exporting&&!video_export::banner_visible()&&!color_grading::settings().enabled&&!context)return;
   const bool trace=diagnostic_frames<3;auto stage=[&](const char*s){if(trace)log(s);};stage("FRAME_BEGIN");
   if(!context&&!initialize_resources()){log("DX12_RESOURCE_INIT_FAILED; overlay disabled; replay integration unchanged");release_resources();failed=true;return;}
   ImGui::SetCurrentContext(context);std::deque<Input> pending;
@@ -234,6 +260,12 @@ public:
    else ImGui_ImplWin32_WndProcHandler(m.hwnd,m.msg,m.w,m.l);
   }
   const auto index=chain->GetCurrentBackBufferIndex();if(index>=frames.size())return;auto&f=frames[index];if(f.fence&&fence->GetCompletedValue()<f.fence)return; // Do not stall game Present.
+  harvest_exports();
+  if(video_export::toggle_requested()){
+   if(video_export::active()){video_export::end();}
+   else{bool bgra=true;const auto d=f.buffer->GetDesc();
+    if(!export_format(d.Format,bgra))video_export::fail("the game output format (HDR or 10-bit) is not supported by the exporter; use an SDR display mode");
+    else video_export::begin(static_cast<unsigned>(d.Width),d.Height,bgra);}}
   const bool composite=vis==TheaterUI::UiVisibility::Shown&&prepare_scene(f);
   stage("FRAME_DX12_NEWFRAME");ImGui_ImplDX12_NewFrame();stage("FRAME_WIN32_NEWFRAME");ImGui_ImplWin32_NewFrame();const bool active=focused();game_hud::focused(active);TheaterUI::Sound::SetFocused(active);
   if(!active){std::lock_guard lock(input_mutex);inputs.clear();mouse_dx=0;mouse_dy=0;mouse_buttons=0;applied_buttons=0;virtual_mouse={-1,-1};ImGui::GetIO().ClearEventsQueue();ImGui::GetIO().ClearInputKeys();ImGui::GetIO().ClearInputMouse();ImGui::GetIO().AddFocusEvent(false);}
@@ -275,8 +307,21 @@ public:
     list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);
    }
   }
+  Readback*capture=nullptr;
+  if(video_export::active()){
+   if(auto*rb=prepare_readback(bufferDesc)){
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT foot{};UINT rows=0;UINT64 rowSize=0,total=0;device->GetCopyableFootprints(&bufferDesc,0,1,0,&foot,&rows,&rowSize,&total);
+    D3D12_RESOURCE_BARRIER toCopy{};toCopy.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;toCopy.Transition={f.buffer.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};
+    list->ResourceBarrier(1,&toCopy);
+    D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=rb->buffer.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=foot;
+    D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=f.buffer.Get();src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;src.SubresourceIndex=0;
+    list->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
+    std::swap(toCopy.Transition.StateBefore,toCopy.Transition.StateAfter);list->ResourceBarrier(1,&toCopy);
+    list->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);
+    rb->recorded=true;rb->time=qpc_seconds();capture=rb;}}
   stage("FRAME_RENDER_DRAW_DATA");ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),list.Get());std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
-  if(FAILED(list->Close())){failed=true;return;}ID3D12CommandList*cmd=list.Get();stage("FRAME_EXECUTE");queue->ExecuteCommandLists(1,&cmd);f.fence=++fence_value;if(FAILED(queue->Signal(fence.Get(),f.fence))){failed=true;log("DX12_QUEUE_SIGNAL_FAILED; rendering disabled");}stage("FRAME_SUBMITTED");++diagnostic_frames;
+  if(FAILED(list->Close())){failed=true;return;}ID3D12CommandList*cmd=list.Get();stage("FRAME_EXECUTE");queue->ExecuteCommandLists(1,&cmd);f.fence=++fence_value;if(FAILED(queue->Signal(fence.Get(),f.fence))){failed=true;log("DX12_QUEUE_SIGNAL_FAILED; rendering disabled");}
+  if(capture){capture->fence=f.fence;capture->busy=true;capture->recorded=false;}stage("FRAME_SUBMITTED");++diagnostic_frames;
  }
  static LRESULT CALLBACK wndproc(HWND,UINT,WPARAM,LPARAM);
 };
@@ -306,6 +351,7 @@ LRESULT CALLBACK TheaterRenderBackend::wndproc(HWND h,UINT m,WPARAM w,LPARAM l){
   if(m==WM_SYSKEYDOWN&&!(l&(1LL<<30))){if(GetKeyState(VK_SHIFT)&0x8000)camera_runtime::redo();else camera_runtime::undo();}return 0;
  }
  if((m==WM_KEYDOWN||m==WM_KEYUP)&&!b.text_input.load()&&!theater_hotkeys::rebinding){
+  if(m==WM_KEYDOWN&&!(l&(1LL<<30))&&w==Key(Action::ToggleExport)){video_export::request_toggle();return 0;}
   for(auto action:{Action::CycleCamera,Action::AddDollyKey,Action::ClearDollyKeys,Action::ToggleDollyControls,Action::PlayDollyPath})if(w==Key(action)){
    if(m==WM_KEYDOWN&&!(l&(1LL<<30))){
     {std::lock_guard lock(camera_mutex);if(camera_actions.size()<32)camera_actions.push_back(action);}

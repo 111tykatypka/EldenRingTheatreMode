@@ -8,6 +8,7 @@
 #include "../WindController.h"
 #include "../EldenRingLightAdapter.h"
 #include "../LightEditor.h"
+#include "../VideoExport.h"
 #include "../ParticleEditor.h"
 #include "../ParticleCatalog.h"
 #include "../ColorGrading.h"
@@ -459,6 +460,7 @@ const LayoutRects& Overlay::Draw(const OverlayFrame& f, EmitFn emit, void* user)
     if(cameraSettingsDirty_&&!ImGui::IsMouseDown(ImGuiMouseButton_Left)&&f.now-cameraSettingsChangedAt_>.4){SaveSettings();cameraSettingsDirty_=false;}
     if(!gizmoDragging_&&!curveDragging_)camera_runtime::end_edit();
     if (ui_.visibility != UiVisibility::HiddenClean) DrawRecordingPill(f);
+    DrawExportBanner(f); // always visible while exporting, in every visibility mode; never part of the exported picture
     return ui_.rects;
 }
 
@@ -496,6 +498,28 @@ void Overlay::PlayDollyPath(const OverlayFrame& f)
     camera_runtime::preview(true);
     // Start inside the authored range, rather than at a clamped endpoint.
     Emit(theater_ui::seek,camera.keys.front().time_ns);Emit(theater_ui::play);
+}
+
+// Export status at the top of the screen. Drawn after the export copy was taken, so it is never in the exported video or images.
+void Overlay::DrawExportBanner(const OverlayFrame& f)
+{
+    if(!video_export::banner_visible())return;
+    const auto st=video_export::status();if(st.text.empty())return;
+    auto&io=ImGui::GetIO();const float s=std::max(.6f,ui_.rects.uiScale);
+    const bool shown=ui_.visibility==UiVisibility::Shown;
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x*.5f,(shown?menuH_:0.f)+Px(6,s)),ImGuiCond_Always,ImVec2(.5f,0));
+    ImGui::SetNextWindowBgAlpha(.72f);
+    const ImGuiWindowFlags flags=ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_NoFocusOnAppearing|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoMove;
+    if(ImGui::Begin("##export-banner",nullptr,flags)){
+        const bool failed=!st.active&&!st.error.empty();
+        const ImU32 dot=st.active?(std::fmod(f.now,1.0)<.6?IM_COL32(235,50,50,255):IM_COL32(120,25,25,255)):failed?IM_COL32(255,170,60,255):IM_COL32(90,200,110,255);
+        const ImVec2 p=ImGui::GetCursorScreenPos();const float r=Px(6,s);
+        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x+r,p.y+ImGui::GetTextLineHeight()*.5f),r,dot);
+        ImGui::Dummy(ImVec2(r*2+Px(6,s),0));ImGui::SameLine();
+        ImGui::TextUnformatted(st.text.c_str());
+        if(st.active)ImGui::TextDisabled("%s to stop", KeyName(theater_hotkeys::Action::ToggleExport).c_str());
+    }
+    ImGui::End();
 }
 
 // Small camera readout in the lower left corner of the picture: mode, FOV, roll, speed and the keys that matter right now.
@@ -1708,7 +1732,44 @@ void Overlay::DrawPanel(const OverlayFrame& f)
         }
         break;
     }
-    case Tool::Export: section(T(Str::NotYetAvailable)); note(Str::ExportNotes); break;
+    case Tool::Export:
+    {
+        section("Video / image export");
+        auto st=video_export::status();auto cfg=video_export::settings();bool changed=false;
+        ImGui::TextWrapped("Records the game picture as it is shown, with your Look effects and without any Theater UI or export banner. Play your replay at the speed you want in the video.");
+        if(st.ffmpeg_found)ImGui::TextDisabled("ffmpeg: %s",st.ffmpeg_path.c_str());
+        else ImGui::TextColored(ImVec4(1.f,.65f,.25f,1.f),"ffmpeg.exe not found. Put it next to TheaterMode.dll (or in a folder named ffmpeg there), or set its path below.");
+        int container=cfg.container;
+        if(combo("Output",&container,"AVI video\0" "PNG image sequence\0" "JPEG image sequence\0")){cfg.container=container;changed=true;}
+        if(cfg.container==0){int codec=cfg.codec;
+            if(combo("Video codec",&codec,"H.264 (NVIDIA NVENC)\0" "H.264 (CPU, x264)\0" "Motion JPEG\0" "FFV1 (lossless)\0")){cfg.codec=codec;changed=true;}}
+        int fps=cfg.fps;labelAbove("Frame rate");if(ImGui::SliderInt("##export_fps",&fps,10,120,"%d fps")){cfg.fps=fps;changed=true;}
+        const bool lossless=cfg.container==1||(cfg.container==0&&cfg.codec==3);
+        ImGui::BeginDisabled(lossless);
+        int quality=cfg.quality;labelAbove("Quality");if(ImGui::SliderInt("##export_quality",&quality,1,100,"%d")){cfg.quality=quality;changed=true;}
+        ImGui::EndDisabled();
+        static char folderBuffer[512]{},ffmpegBuffer[512]{};static bool synced=false;
+        if(!synced){snprintf(folderBuffer,sizeof(folderBuffer),"%s",cfg.folder.c_str());snprintf(ffmpegBuffer,sizeof(ffmpegBuffer),"%s",cfg.ffmpeg.c_str());synced=true;}
+        labelAbove("Output folder (empty = Videos\\EldenRingTheaterMode)");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::InputText("##export_folder",folderBuffer,sizeof(folderBuffer))){cfg.folder=folderBuffer;changed=true;}
+        labelAbove("ffmpeg.exe path (empty = automatic)");ImGui::SetNextItemWidth(-FLT_MIN);if(ImGui::InputText("##export_ffmpeg",ffmpegBuffer,sizeof(ffmpegBuffer))){cfg.ffmpeg=ffmpegBuffer;changed=true;}
+        if(changed)video_export::configure(cfg);
+        ImGui::Separator();
+        const std::string key=KeyName(theater_hotkeys::Action::ToggleExport);
+        const std::string label=(st.active?"Stop export  [":"Start export  [")+key+"]";
+        if(ImGui::Button(label.c_str(),ImVec2(-FLT_MIN,0)))video_export::request_toggle();
+        if(!st.text.empty())ImGui::TextWrapped("%s",st.text.c_str());
+        if(!st.error.empty())ImGui::TextColored(ImVec4(1.f,.55f,.3f,1.f),"%s",st.error.c_str());
+        if(!st.output.empty()){
+            ImGui::TextWrapped("Last export: %s",st.output.c_str());
+            if(ImGui::Button("Open folder",ImVec2(-FLT_MIN,0))){
+                int wn=MultiByteToWideChar(CP_UTF8,0,st.output.c_str(),-1,nullptr,0);std::wstring wide(wn?wn-1:0,L'\0');if(wn)MultiByteToWideChar(CP_UTF8,0,st.output.c_str(),-1,wide.data(),wn);std::filesystem::path p=wide;if(p.has_extension())p=p.parent_path();
+                std::wstring command=L"explorer.exe \""+p.wstring()+L"\"";std::vector<wchar_t> mutableCommand(command.begin(),command.end());mutableCommand.push_back(0);
+                STARTUPINFOW si{};si.cb=sizeof(si);PROCESS_INFORMATION pi{};if(CreateProcessW(nullptr,mutableCommand.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&si,&pi)){CloseHandle(pi.hThread);CloseHandle(pi.hProcess);}
+            }
+        }
+        ImGui::TextDisabled("Tip: the hotkey is %s and can be changed in Settings > Keybinds. NVENC needs an NVIDIA graphics card.",key.c_str());
+        break;
+    }
     case Tool::Replays:
         DrawLibrary(f);
         break;
